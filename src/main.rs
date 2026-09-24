@@ -11,6 +11,9 @@
 //! - `cast`: sends commands to the speaker and reports its state
 //!   ([`player::spawn`]).
 //! - `http`: serves the music files to the speaker ([`server::spawn`]).
+//!
+//! `kids-deck simulator` runs something else: [`simulator`], a web page that
+//! stands in for the Stream Deck, so the player can run without the hardware.
 
 mod config;
 mod deck;
@@ -18,6 +21,7 @@ mod icons;
 mod library;
 mod player;
 mod server;
+mod simulator;
 mod ui;
 
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
@@ -26,20 +30,35 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use hidapi::HidApi;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
 use crate::deck::Deck;
+use crate::simulator::Model;
 use crate::ui::Ui;
 
 const USAGE: &str = "\
-usage: kids-deck [CONFIG] [--check | --preview FILE.png]
+usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
+                 [--check | --preview FILE.png]
+       kids-deck simulator [--model NAME] [--port PORT]
 
   CONFIG              path to config.toml (default: ./config.toml)
+  --simulator URL     use the deck simulator at URL, e.g. http://localhost:8090,
+                      instead of a USB Stream Deck
+  --advertise-host HOST
+                      the address the speaker uses to reach this program;
+                      overrides advertise_host in the config
   --check             list albums, Stream Decks and speaker status, then exit
   --preview FILE.png  draw the 15-key layout into a picture, then exit
+
+  simulator           run the web Stream Deck simulator
+  --model NAME        mk2 (default), mini, neo, xl or plus
+  --port PORT         port of the simulator page and API (default: 8090)
 ";
+
+const DEFAULT_SIMULATOR_PORT: u16 = 8090;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -48,13 +67,29 @@ fn main() -> Result<()> {
         )
         .init();
 
+    let mut args = std::env::args().skip(1).peekable();
+    if args.next_if(|arg| arg == "simulator").is_some() {
+        return run_simulator(args);
+    }
+
     let mut config_path = PathBuf::from("config.toml");
     let mut check = false;
     let mut preview: Option<PathBuf> = None;
-    let mut args = std::env::args().skip(1);
+    let mut simulator_url: Option<String> = None;
+    let mut advertise_host: Option<String> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--check" => check = true,
+            "--simulator" => {
+                simulator_url = Some(args.next().context("--simulator needs a URL")?);
+            }
+            "--advertise-host" => {
+                let host = args.next().context("--advertise-host needs a host")?;
+                if host.is_empty() {
+                    bail!("--advertise-host is empty; in Docker, start with `just sim`");
+                }
+                advertise_host = Some(host);
+            }
             "--preview" => {
                 preview = Some(args.next().context("--preview needs a file name")?.into());
             }
@@ -67,7 +102,10 @@ fn main() -> Result<()> {
         }
     }
 
-    let cfg = Config::load(&config_path)?;
+    let mut cfg = Config::load(&config_path)?;
+    if advertise_host.is_some() {
+        cfg.advertise_host = advertise_host;
+    }
     let albums = library::scan(&cfg.music_dir)?;
     info!(
         "found {} albums in {}",
@@ -91,7 +129,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if check {
-        return run_check(&cfg, &albums, &base_url);
+        return run_check(&cfg, &albums, &base_url, simulator_url.as_deref());
     }
 
     server::spawn(cfg.music_dir.clone(), cfg.http_port)?;
@@ -102,27 +140,81 @@ fn main() -> Result<()> {
     let mut ui = Ui::new(&cfg, albums, base_url, player, event_rx);
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
-    let mut hid = elgato_streamdeck::new_hidapi()?;
+    let mut source = match simulator_url {
+        Some(url) => DeckSource::Simulator(url),
+        None => DeckSource::Usb(elgato_streamdeck::new_hidapi()?),
+    };
     let mut waiting_logged = false;
     loop {
-        match Deck::open(&mut hid) {
+        match source.open() {
             Ok(Some(mut deck)) => {
-                info!("Stream Deck connected: {:?}", deck.kind());
+                info!("deck connected: {}", deck.name());
                 waiting_logged = false;
                 if let Err(err) = ui.run(&mut deck, cfg.brightness) {
-                    warn!("Stream Deck disconnected: {err:#}");
+                    warn!("deck disconnected: {err:#}");
                 }
             }
             Ok(None) if !waiting_logged => {
-                info!("waiting for a Stream Deck to be plugged in…");
+                info!("{}", source.waiting_message());
                 waiting_logged = true;
             }
             Ok(None) => {}
-            Err(err) => warn!("cannot open Stream Deck: {err:#}"),
+            Err(err) => warn!("cannot open the deck: {err:#}"),
         }
         ui.handle_events();
         std::thread::sleep(Duration::from_secs(2));
     }
+}
+
+enum DeckSource {
+    Usb(HidApi),
+    Simulator(String),
+}
+
+impl DeckSource {
+    fn open(&mut self) -> Result<Option<Deck>> {
+        match self {
+            DeckSource::Usb(hid) => Deck::open_usb(hid),
+            DeckSource::Simulator(url) => Deck::open_simulator(url),
+        }
+    }
+
+    fn waiting_message(&self) -> String {
+        match self {
+            DeckSource::Usb(_) => "waiting for a Stream Deck to be plugged in…".into(),
+            DeckSource::Simulator(url) => format!("waiting for the deck simulator at {url}…"),
+        }
+    }
+}
+
+fn run_simulator(mut args: impl Iterator<Item = String>) -> Result<()> {
+    let mut model = Model::Mk2;
+    let mut port = DEFAULT_SIMULATOR_PORT;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--model" => {
+                let name = args.next().context("--model needs a name")?;
+                model = Model::parse(&name).with_context(|| {
+                    format!(
+                        "unknown model {name}; use one of: {}",
+                        Model::NAMES.join(", ")
+                    )
+                })?;
+            }
+            "--port" => {
+                let value = args.next().context("--port needs a number")?;
+                port = value
+                    .parse()
+                    .with_context(|| format!("--port needs a number, not {value}"))?;
+            }
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(());
+            }
+            s => bail!("unknown simulator option {s}\n\n{USAGE}"),
+        }
+    }
+    simulator::run(port, model)
 }
 
 /// The local address this machine uses to reach the speaker. No packets are
@@ -133,7 +225,12 @@ fn local_ip_towards(host: &str, port: u16) -> Result<String> {
     Ok(socket.local_addr()?.ip().to_string())
 }
 
-fn run_check(cfg: &Config, albums: &[library::Album], base_url: &str) -> Result<()> {
+fn run_check(
+    cfg: &Config,
+    albums: &[library::Album],
+    base_url: &str,
+    simulator_url: Option<&str>,
+) -> Result<()> {
     println!("Albums in {}:", cfg.music_dir.display());
     for album in albums {
         let cover = if album.cover.is_some() {
@@ -154,19 +251,18 @@ fn run_check(cfg: &Config, albums: &[library::Album], base_url: &str) -> Result<
         );
     }
 
-    println!("\nStream Decks:");
-    let hid = elgato_streamdeck::new_hidapi()?;
-    let decks = elgato_streamdeck::list_devices(&hid);
-    if decks.is_empty() {
-        println!("  none found (on macOS, quit the Elgato Stream Deck app first)");
-    }
-    for (kind, serial) in decks {
-        println!(
-            "  {kind:?} ({} keys, {}x{}), serial {serial}",
-            kind.key_count(),
-            kind.row_count(),
-            kind.column_count()
-        );
+    if let Some(url) = simulator_url {
+        println!("\nDeck simulator {url}:");
+        match Deck::simulator_info(url) {
+            Ok(Some(info)) => println!(
+                "  reachable ✓  {}x{} keys of {} px",
+                info.rows, info.cols, info.key_size
+            ),
+            Ok(None) => println!("  NOT reachable (start it with `kids-deck simulator`)"),
+            Err(err) => println!("  NOT usable: {err:#}"),
+        }
+    } else {
+        print_usb_decks()?;
     }
 
     println!("\nSpeaker {}:{}:", cfg.speaker_host, cfg.speaker_port);
@@ -199,6 +295,24 @@ fn run_check(cfg: &Config, albums: &[library::Album], base_url: &str) -> Result<
             }
         }
         Err(err) => println!("  NOT reachable: {err:#}"),
+    }
+    Ok(())
+}
+
+fn print_usb_decks() -> Result<()> {
+    println!("\nStream Decks:");
+    let hid = elgato_streamdeck::new_hidapi()?;
+    let decks = elgato_streamdeck::list_devices(&hid);
+    if decks.is_empty() {
+        println!("  none found (on macOS, quit the Elgato Stream Deck app first)");
+    }
+    for (kind, serial) in decks {
+        println!(
+            "  {kind:?} ({} keys, {}x{}), serial {serial}",
+            kind.key_count(),
+            kind.row_count(),
+            kind.column_count()
+        );
     }
     Ok(())
 }

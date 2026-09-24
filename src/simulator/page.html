@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Stream Deck simulator</title>
+<style>
+  :root {
+    --bg: #141518;
+    --text: #e9e9ec;
+    --muted: #9b9ea6;
+    --deck-top: #2a2b30;
+    --deck-bottom: #1c1d21;
+    --deck-edge: #3a3c42;
+    --key: #09090b;
+    --focus: #7cb3ff;
+    --ok: #5fd08a;
+    --wait: #e2b24c;
+    --down: #ef6a5f;
+    --gap: 14px;
+    --rows: 3;
+    --cols: 5;
+    --key-px: 72;
+    /* Twice the real key size, shrunk to fit the window (an XL is 8 keys wide). */
+    --key-size: max(
+      44px,
+      min(
+        calc(var(--key-px) * 2px),
+        calc((100vw - 7rem - (var(--cols) - 1) * var(--gap)) / var(--cols)),
+        calc((100vh - 13rem - (var(--rows) - 1) * var(--gap)) / var(--rows))
+      )
+    );
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  header { text-align: center; }
+  h1 { margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.01em; }
+  #summary { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.85rem; }
+
+  .deck {
+    padding: 22px;
+    border-radius: 26px;
+    background: linear-gradient(var(--deck-top), var(--deck-bottom));
+    box-shadow:
+      inset 0 1px 0 var(--deck-edge),
+      0 20px 44px rgb(0 0 0 / 0.55);
+  }
+
+  #grid {
+    --brightness: 1;
+    display: grid;
+    grid-template-columns: repeat(var(--cols), var(--key-size));
+    grid-auto-rows: var(--key-size);
+    gap: var(--gap);
+  }
+
+  .key {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 14%;
+    overflow: hidden;
+    background: var(--key);
+    box-shadow: 0 2px 0 #000, inset 0 0 0 1px rgb(255 255 255 / 0.05);
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 90ms ease-out, filter 90ms ease-out;
+  }
+
+  .key img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    filter: brightness(var(--brightness));
+  }
+
+  .key img[hidden] { display: none; }
+
+  .key.pressed {
+    transform: scale(0.93);
+    filter: brightness(0.7);
+  }
+
+  .key:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+  }
+
+  .status {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted);
+  }
+
+  .status::before {
+    content: "";
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--wait);
+  }
+
+  .status[data-state="connected"] { color: var(--text); }
+  .status[data-state="connected"]::before { background: var(--ok); }
+  .status[data-state="offline"]::before { background: var(--down); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .key { transition: none; }
+    .key.pressed { transform: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Stream Deck simulator</h1>
+  <p id="summary"></p>
+</header>
+<main class="deck">
+  <div id="grid" role="group" aria-label="Keys"></div>
+</main>
+<p id="status" class="status" role="status" data-state="waiting">Waiting for the player…</p>
+<script>
+"use strict";
+
+const POLL_MS = 200;
+const PRESS_EFFECT_MS = 140;
+// The real deck can go darker, but the page must stay readable.
+const MIN_BRIGHTNESS = 0.15;
+const STATUS_TEXT = {
+  connected: "Player connected",
+  waiting: "Waiting for the player…",
+  offline: "Simulator not reachable",
+};
+
+const grid = document.getElementById("grid");
+const summary = document.getElementById("summary");
+const statusLine = document.getElementById("status");
+let shape = "";
+let keys = [];
+
+function setStatus(state) {
+  if (statusLine.dataset.state === state) return;
+  statusLine.dataset.state = state;
+  statusLine.textContent = STATUS_TEXT[state];
+}
+
+function build(info) {
+  const root = document.documentElement.style;
+  root.setProperty("--rows", info.rows);
+  root.setProperty("--cols", info.cols);
+  root.setProperty("--key-px", info.key_size);
+  summary.textContent = `${info.rows} × ${info.cols} keys, ${info.key_size} px each`;
+  keys = Array.from({ length: info.rows * info.cols }, (_, n) => makeKey(n));
+  grid.replaceChildren(...keys.map((key) => key.button));
+}
+
+function makeKey(n) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "key";
+  button.setAttribute("aria-label", `Key ${n + 1}`);
+
+  const img = document.createElement("img");
+  img.alt = "";
+  img.draggable = false;
+  img.hidden = true;
+  img.addEventListener("load", () => { img.hidden = false; });
+  img.addEventListener("error", () => { img.hidden = true; });
+  button.append(img);
+
+  let effect;
+  const press = () => {
+    button.classList.add("pressed");
+    clearTimeout(effect);
+    effect = setTimeout(() => button.classList.remove("pressed"), PRESS_EFFECT_MS);
+    fetch(`/api/press/${n}`, { method: "POST" }).catch(() => setStatus("offline"));
+  };
+  button.addEventListener("pointerdown", (event) => {
+    if (event.button === 0) press();
+  });
+  // A click with detail 0 comes from the keyboard (Enter, Space) or a screen
+  // reader; mouse and touch clicks were already pressed on pointerdown.
+  button.addEventListener("click", (event) => {
+    if (event.detail === 0) press();
+  });
+
+  return { n, button, img, version: 0 };
+}
+
+function show(key, version) {
+  if (key.version === version) return;
+  key.version = version;
+  if (version === 0) {
+    key.img.hidden = true;
+    key.img.removeAttribute("src");
+  } else {
+    key.img.src = `/api/keys/${key.n}?v=${version}`;
+  }
+}
+
+function render(state) {
+  const { info } = state;
+  const next = `${info.rows}x${info.cols}x${info.key_size}`;
+  if (next !== shape) {
+    shape = next;
+    build(info);
+  }
+  state.versions.forEach((version, n) => {
+    if (keys[n]) show(keys[n], version);
+  });
+  const brightness = Math.max(MIN_BRIGHTNESS, state.brightness / 100);
+  grid.style.setProperty("--brightness", brightness);
+  setStatus(state.connected ? "connected" : "waiting");
+}
+
+async function poll() {
+  try {
+    const reply = await fetch("/api/state", { cache: "no-store" });
+    if (!reply.ok) throw new Error(`HTTP ${reply.status}`);
+    render(await reply.json());
+  } catch {
+    setStatus("offline");
+  } finally {
+    setTimeout(poll, POLL_MS);
+  }
+}
+
+poll();
+</script>
+</body>
+</html>

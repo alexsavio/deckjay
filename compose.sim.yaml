@@ -1,0 +1,32 @@
+# The player plus the web Stream Deck simulator, all on this computer. Start it
+# with `just sim`, then open http://localhost:8090.
+#
+# The speaker downloads the music from this computer, so HOST_IP must be the
+# computer's LAN address (`just sim` finds it) and port 8765 must match
+# `http_port` in config.toml.
+services:
+  deck-sim:
+    image: kids-deck
+    pull_policy: never
+    command: ["simulator", "--model", "${DECK_MODEL:-mk2}"]
+    ports:
+      - "8090:8090"
+
+  kids-deck:
+    image: kids-deck
+    build: .
+    command:
+      - /app/config.toml
+      - --simulator
+      - http://deck-sim:8090
+      - --advertise-host
+      - ${HOST_IP:-}
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./music:/app/music:ro
+    environment:
+      - RUST_LOG=info
+    depends_on:
+      - deck-sim

@@ -78,6 +78,22 @@ ci: fmt-check clippy
     cargo test
     @just doc
 
+# Run the player and a web Stream Deck simulator in Docker (models: mk2 mini neo xl plus)
+sim MODEL="mk2":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${HOST_IP:-}" ]; then
+        # The speaker needs this computer's LAN address, not the container's.
+        iface=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}' || true)
+        HOST_IP=$( { [ -n "$iface" ] && ipconfig getifaddr "$iface"; } || hostname -I | awk '{print $1}')
+    fi
+    echo "Simulator: http://localhost:8090   Music for the speaker: http://$HOST_IP:8765"
+    HOST_IP="$HOST_IP" DECK_MODEL="{{MODEL}}" docker compose -f compose.sim.yaml up --build
+
+# Stop and remove the simulator containers
+sim-down:
+    docker compose -f compose.sim.yaml down
+
 # Build the Raspberry Pi image (linux/arm64)
 image:
     docker buildx build --platform linux/arm64 -t kids-deck --load .

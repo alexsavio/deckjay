@@ -61,10 +61,28 @@ Run `just` to list every recipe. The ones you need most:
 | `just ci` | Format check, clippy, tests and docs: run before a commit |
 | `just test-match NAME` | Run only the tests whose name contains `NAME` |
 | `just doc --open` | Build and open the API docs |
+| `just sim [MODEL]` | Run the player with a web Stream Deck simulator |
 | `just deploy` | Build the Pi image and start it on the Pi |
 
 The code targets Rust 1.98 (edition 2024). `cargo clippy` uses the
 pedantic lint group; the lint settings are in `Cargo.toml`.
+
+## Test without a Stream Deck
+
+`kids-deck simulator` is a web page that acts as a Stream Deck: it shows the
+key images, and a click on a key is a key press. The player uses it in place
+of the USB deck when you start it with `--simulator URL`.
+
+- **All in Docker:** `just sim`, then open <http://localhost:8090>. The
+  player and the simulator run in two containers. Pick another deck with
+  `just sim xl` (models: `mk2` 3×5, `mini` 2×3, `neo` 2×4, `xl` 4×8,
+  `plus` 2×4). Stop with Ctrl-C and `just sim-down`.
+- **Without Docker:** `cargo run -- simulator` in one terminal and
+  `just run --simulator http://localhost:8090` in another.
+
+Playback still needs the real speaker. It downloads the music from this
+computer, so `just sim` passes the computer's LAN address to the player
+(set `HOST_IP` to override it) and publishes port 8765.
 
 ## Deploy to the Raspberry Pi 3
 
@@ -106,11 +124,12 @@ install `99-streamdeck.rules` so it doesn't need root.
 
 | File | What it does |
 |---|---|
-| `main.rs` | Startup, `--check` / `--preview`, reconnecting to the deck |
+| `main.rs` | Startup, command-line options, reconnecting to the deck |
 | `config.rs` | `config.toml` loading and validation |
 | `library.rs` | Scans album folders, finds covers, builds URLs |
 | `ui.rs` | Key layout, what each key shows and does |
 | `icons.rs` | Draws control icons and album tiles (no image files needed) |
-| `deck.rs` | Stream Deck access, image caching, key presses |
+| `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
+| `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
 | `player.rs` | Chromecast control on its own thread |
 | `server.rs` | HTTP server the speaker downloads the music from |
