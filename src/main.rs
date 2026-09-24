@@ -34,7 +34,7 @@ use hidapi::HidApi;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use crate::config::Config;
+use crate::config::{Config, SpeakerType};
 use crate::deck::Deck;
 use crate::simulator::Model;
 use crate::ui::Ui;
@@ -136,7 +136,12 @@ fn main() -> Result<()> {
     info!("serving music at {base_url}/");
 
     let (event_tx, event_rx) = mpsc::channel();
-    let player = player::spawn(cfg.speaker_host.clone(), cfg.speaker_port, event_tx);
+    let player = player::spawn(
+        cfg.speaker_type,
+        cfg.speaker_host.clone(),
+        cfg.speaker_port,
+        event_tx,
+    );
     let mut ui = Ui::new(&cfg, albums, base_url, player, event_rx);
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
@@ -265,7 +270,18 @@ fn run_check(
         print_usb_decks()?;
     }
 
-    println!("\nSpeaker {}:{}:", cfg.speaker_host, cfg.speaker_port);
+    println!(
+        "\nSpeaker {}:{} ({:?}):",
+        cfg.speaker_host, cfg.speaker_port, cfg.speaker_type
+    );
+    match cfg.speaker_type {
+        SpeakerType::Cast => print_cast_speaker(cfg),
+        SpeakerType::Heos => print_heos_players(cfg),
+    }
+    Ok(())
+}
+
+fn print_cast_speaker(cfg: &Config) {
     let reachable = (cfg.speaker_host.as_str(), cfg.speaker_port)
         .to_socket_addrs()
         .map_err(anyhow::Error::from)
@@ -273,7 +289,7 @@ fn run_check(
         .and_then(|addr| Ok(TcpStream::connect_timeout(&addr, Duration::from_secs(3))?));
     if let Err(err) = reachable {
         println!("  NOT reachable: {err:#}");
-        return Ok(());
+        return;
     }
     match rust_cast::CastDevice::connect_without_host_verification(
         cfg.speaker_host.clone(),
@@ -296,7 +312,20 @@ fn run_check(
         }
         Err(err) => println!("  NOT reachable: {err:#}"),
     }
-    Ok(())
+}
+
+fn print_heos_players(cfg: &Config) {
+    match player::heos::players(&cfg.speaker_host, cfg.speaker_port) {
+        Ok(players) if players.is_empty() => println!("  reachable ✓  but it knows no players"),
+        Ok(players) => {
+            println!("  reachable ✓");
+            for p in players {
+                let ip = p.ip.as_deref().unwrap_or("?");
+                println!("  player {} ({}), ip {ip}, pid {}", p.name, p.model, p.pid);
+            }
+        }
+        Err(err) => println!("  NOT reachable: {err:#}"),
+    }
 }
 
 fn print_usb_decks() -> Result<()> {

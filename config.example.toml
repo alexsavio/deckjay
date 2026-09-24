@@ -6,9 +6,16 @@
 # "01 " control the order of albums and tracks.
 music_dir = "music"
 
-# IP address of the JBL speaker. Find it in the JBL One app or your router.
+# IP address of the speaker. Find it in the speaker's app or your router.
 # Tip: give it a fixed IP (DHCP reservation) in your router.
 speaker_host = "192.168.1.50"
+
+# "cast" for Chromecast built-in speakers (such as the JBL Authentics), or
+# "heos" for Denon / Marantz HEOS receivers and speakers.
+# speaker_type = "cast"
+
+# Control port of the speaker. The default depends on speaker_type:
+# 8009 for cast, 1255 for heos.
 # speaker_port = 8009
 
 # Port of the built-in web server the speaker downloads the music from.

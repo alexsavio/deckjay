@@ -13,9 +13,15 @@ pub struct Config {
     /// against the folder the config file lives in.
     pub music_dir: PathBuf,
 
-    /// IP address (or host name) of the Chromecast speaker.
+    /// IP address (or host name) of the speaker.
     pub speaker_host: String,
-    #[serde(default = "default_speaker_port")]
+    #[serde(default)]
+    pub speaker_type: SpeakerType,
+    /// Port of the speaker's control protocol; `None` means the default for
+    /// `speaker_type`, which `speaker_port` then holds.
+    #[serde(default, rename = "speaker_port")]
+    speaker_port_setting: Option<u16>,
+    #[serde(skip)]
     pub speaker_port: u16,
 
     /// Port of the built-in web server the speaker downloads music from.
@@ -42,8 +48,24 @@ pub struct Config {
     pub brightness: u8,
 }
 
-fn default_speaker_port() -> u16 {
-    8009
+/// How the player talks to the speaker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeakerType {
+    /// Chromecast built-in (Google Cast).
+    #[default]
+    Cast,
+    /// Denon / Marantz HEOS.
+    Heos,
+}
+
+impl SpeakerType {
+    pub fn default_port(self) -> u16 {
+        match self {
+            SpeakerType::Cast => 8009,
+            SpeakerType::Heos => 1255,
+        }
+    }
 }
 fn default_http_port() -> u16 {
     8765
@@ -74,6 +96,9 @@ impl Config {
     fn parse(text: &str, base: &Path) -> Result<Self> {
         let mut cfg: Config = toml::from_str(text)?;
 
+        cfg.speaker_port = cfg
+            .speaker_port_setting
+            .unwrap_or(cfg.speaker_type.default_port());
         if cfg.music_dir.is_relative() {
             cfg.music_dir = base.join(&cfg.music_dir);
         }
@@ -103,12 +128,30 @@ mod tests {
     #[test]
     fn fills_in_defaults() {
         let cfg = parse("").unwrap();
+        assert_eq!(cfg.speaker_type, SpeakerType::Cast);
         assert_eq!(cfg.speaker_port, 8009);
         assert_eq!(cfg.http_port, 8765);
         assert_eq!(cfg.advertise_host, None);
         assert!((cfg.max_volume - 0.4).abs() < f32::EPSILON);
         assert!((cfg.start_volume - 0.2).abs() < f32::EPSILON);
         assert_eq!(cfg.brightness, 60);
+    }
+
+    #[test]
+    fn a_heos_speaker_defaults_to_the_heos_port() {
+        let cfg = parse("speaker_type = \"heos\"\n").unwrap();
+        assert_eq!(cfg.speaker_type, SpeakerType::Heos);
+        assert_eq!(cfg.speaker_port, 1255);
+    }
+
+    #[test]
+    fn an_explicit_speaker_port_wins() {
+        assert_eq!(parse("speaker_port = 9000\n").unwrap().speaker_port, 9000);
+    }
+
+    #[test]
+    fn rejects_an_unknown_speaker_type() {
+        assert!(parse("speaker_type = \"airplay\"\n").is_err());
     }
 
     #[test]

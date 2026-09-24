@@ -27,6 +27,6 @@ services:
       - ./config.toml:/app/config.toml:ro
       - ./music:/app/music:ro
     environment:
-      - RUST_LOG=info
+      - RUST_LOG=${RUST_LOG:-info}
     depends_on:
       - deck-sim

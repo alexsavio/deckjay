@@ -1,4 +1,4 @@
-//! Talks to the Chromecast speaker on its own thread.
+//! Chromecast speakers.
 //!
 //! Every command opens a short-lived connection, does its job and disconnects.
 //! The speaker keeps playing on its own, so there is no long-lived connection
@@ -7,8 +7,6 @@
 //! notice when the album has finished.
 
 use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
@@ -18,7 +16,9 @@ use rust_cast::channels::media::{
     QueueItem, QueueType, StatusEntry, StreamType,
 };
 use rust_cast::channels::receiver::{Application, CastDeviceApp};
-use tracing::{debug, info, warn};
+use tracing::info;
+
+use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
 
 /// App id of Chromecast's built-in Default Media Receiver.
 const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
@@ -28,16 +28,6 @@ const POLL_INTERVAL: Duration = Duration::from_secs(4);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// "Previous" restarts the current track if it has played longer than this.
 const RESTART_THRESHOLD_SECS: f32 = 5.0;
-
-#[derive(Debug, Clone)]
-pub struct TrackInfo {
-    /// Where the speaker downloads the track from.
-    pub url: String,
-    pub content_type: String,
-    pub title: String,
-    pub album: String,
-    pub cover_url: Option<String>,
-}
 
 impl TrackInfo {
     fn to_media(&self) -> Media {
@@ -65,64 +55,15 @@ impl TrackInfo {
     }
 }
 
-#[derive(Debug)]
-pub enum PlayerCmd {
-    /// `album` is an id chosen by the caller; it is echoed back in events.
-    PlayAlbum {
-        album: usize,
-        tracks: Vec<TrackInfo>,
-        volume: f32,
-    },
-    /// Pauses if playing, resumes if paused, restarts the album if nothing is loaded.
-    TogglePause,
-    /// Does nothing on the last track.
-    Next,
-    /// Restarts the current track once past `RESTART_THRESHOLD_SECS`, otherwise goes to the
-    /// previous track.
-    Prev,
-    /// 0.0 to 1.0.
-    SetVolume(f32),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlayerEvent {
-    /// The album with this id is playing.
-    Playing(usize),
-    Paused(usize),
-    /// Nothing playing any more (album finished, stopped elsewhere, or failed).
-    Stopped,
-}
-
-pub fn spawn(host: String, port: u16, events: Sender<PlayerEvent>) -> Sender<PlayerCmd> {
-    let (tx, rx) = mpsc::channel();
-    let player = CastPlayer {
-        host,
-        port,
-        events,
-        album: 0,
-        tracks: Vec::new(),
-        active: false,
-        last: None,
-    };
-    thread::Builder::new()
-        .name("cast".into())
-        .spawn(move || player.run(&rx))
-        .expect("failed to start cast thread");
-    tx
-}
-
-struct CastPlayer {
+pub(super) struct CastPlayer {
     host: String,
     port: u16,
-    events: Sender<PlayerEvent>,
     /// Id of the album we started last.
     album: usize,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     /// True while we believe our album is loaded on the speaker.
     active: bool,
-    /// Last event emitted, so `emit` can skip duplicates.
-    last: Option<PlayerEvent>,
 }
 
 /// An open connection plus the running media app, if any.
@@ -132,40 +73,19 @@ struct Session {
 }
 
 impl CastPlayer {
-    fn run(mut self, rx: &Receiver<PlayerCmd>) {
-        loop {
-            let timeout = if self.active {
-                POLL_INTERVAL
-            } else {
-                Duration::from_secs(3600)
-            };
-            match rx.recv_timeout(timeout) {
-                Ok(first) => {
-                    let pending: Vec<PlayerCmd> =
-                        std::iter::once(first).chain(rx.try_iter()).collect();
-                    // The UI already guessed the outcome of these commands, so
-                    // the next event must reach it even if it repeats the last.
-                    self.last = None;
-                    for cmd in coalesce(pending) {
-                        debug!(?cmd, "cast command");
-                        if let Err(err) = self.handle(cmd) {
-                            warn!("speaker command failed: {err:#}");
-                            self.emit(PlayerEvent::Stopped);
-                            self.active = false;
-                        }
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    if let Err(err) = self.poll() {
-                        debug!("status poll failed: {err:#}");
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => return,
-            }
+    pub(super) fn new(host: String, port: u16) -> CastPlayer {
+        CastPlayer {
+            host,
+            port,
+            album: 0,
+            tracks: Vec::new(),
+            active: false,
         }
     }
+}
 
-    fn handle(&mut self, cmd: PlayerCmd) -> Result<()> {
+impl Speaker for CastPlayer {
+    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
         match cmd {
             PlayerCmd::PlayAlbum {
                 album,
@@ -176,7 +96,7 @@ impl CastPlayer {
                 self.tracks = tracks;
                 let s = self.open()?;
                 s.device.receiver.set_volume(volume)?;
-                self.load(s, 0)
+                self.load(s, 0, events)
             }
             PlayerCmd::SetVolume(volume) => {
                 let s = self.open()?;
@@ -193,14 +113,14 @@ impl CastPlayer {
                         ) =>
                     {
                         s.device.media.pause(tid, e.media_session_id)?;
-                        self.emit(PlayerEvent::Paused(self.album));
+                        events.emit(PlayerEvent::Paused(self.album));
                     }
                     Some((tid, e)) if matches!(e.player_state, PlayerState::Paused) => {
                         s.device.media.play(tid, e.media_session_id)?;
-                        self.emit(PlayerEvent::Playing(self.album));
+                        events.emit(PlayerEvent::Playing(self.album));
                     }
                     // Finished or nothing loaded: start our album again from the top.
-                    _ if !self.tracks.is_empty() => self.load(s, 0)?,
+                    _ if !self.tracks.is_empty() => self.load(s, 0, events)?,
                     _ => {}
                 }
                 Ok(())
@@ -224,13 +144,41 @@ impl CastPlayer {
                 } else {
                     current.saturating_sub(1)
                 };
-                self.load(s, target)
+                self.load(s, target, events)
             }
         }
     }
 
+    fn poll(&mut self, events: &mut Emitter) -> Result<()> {
+        let s = self.open()?;
+        let entry = media_status(&s)?.map(|(_, e)| e);
+        let ours = entry.as_ref().and_then(|e| self.current_index(e)).is_some();
+        let event = match entry.map(|e| e.player_state) {
+            Some(PlayerState::Playing | PlayerState::Buffering) if ours => {
+                PlayerEvent::Playing(self.album)
+            }
+            Some(PlayerState::Paused) if ours => PlayerEvent::Paused(self.album),
+            _ => PlayerEvent::Stopped,
+        };
+        if event == PlayerEvent::Stopped {
+            self.active = false;
+        }
+        events.emit(event);
+        Ok(())
+    }
+
+    fn poll_interval(&self) -> Option<Duration> {
+        self.active.then_some(POLL_INTERVAL)
+    }
+
+    fn reset(&mut self) {
+        self.active = false;
+    }
+}
+
+impl CastPlayer {
     /// Loads our album as a queue on the speaker, starting at `start`.
-    fn load(&mut self, s: Session, start: usize) -> Result<()> {
+    fn load(&mut self, s: Session, start: usize, events: &mut Emitter) -> Result<()> {
         let track = self
             .tracks
             .get(start)
@@ -264,28 +212,7 @@ impl CastPlayer {
         )?;
         info!(album = %track.album, track = %track.title, "playing");
         self.active = true;
-        self.emit(PlayerEvent::Playing(self.album));
-        Ok(())
-    }
-
-    fn poll(&mut self) -> Result<()> {
-        if !self.active {
-            return Ok(());
-        }
-        let s = self.open()?;
-        let entry = media_status(&s)?.map(|(_, e)| e);
-        let ours = entry.as_ref().and_then(|e| self.current_index(e)).is_some();
-        let event = match entry.map(|e| e.player_state) {
-            Some(PlayerState::Playing | PlayerState::Buffering) if ours => {
-                PlayerEvent::Playing(self.album)
-            }
-            Some(PlayerState::Paused) if ours => PlayerEvent::Paused(self.album),
-            _ => PlayerEvent::Stopped,
-        };
-        if event == PlayerEvent::Stopped {
-            self.active = false;
-        }
-        self.emit(event);
+        events.emit(PlayerEvent::Playing(self.album));
         Ok(())
     }
 
@@ -313,13 +240,6 @@ impl CastPlayer {
         let id = &entry.media.as_ref()?.content_id;
         self.tracks.iter().position(|t| &t.url == id)
     }
-
-    fn emit(&mut self, event: PlayerEvent) {
-        if self.last != Some(event) {
-            self.last = Some(event);
-            let _ = self.events.send(event);
-        }
-    }
 }
 
 /// Returns the transport id and first media status entry of the running media app.
@@ -332,81 +252,4 @@ fn media_status(s: &Session) -> Result<Option<(String, StatusEntry)>> {
         .into_iter()
         .next()
         .map(|e| (app.transport_id.clone(), e)))
-}
-
-/// Drops commands made pointless by later ones (e.g. a kid mashing buttons
-/// while the speaker was slow to answer).
-fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
-    let last_play = cmds
-        .iter()
-        .rposition(|c| matches!(c, PlayerCmd::PlayAlbum { .. }));
-    let last_volume = cmds
-        .iter()
-        .rposition(|c| matches!(c, PlayerCmd::SetVolume(_)));
-    cmds.into_iter()
-        .enumerate()
-        .filter(|(i, c)| {
-            let after_play = last_play.is_none_or(|p| *i >= p);
-            let volume_ok = !matches!(c, PlayerCmd::SetVolume(_)) || Some(*i) == last_volume;
-            // Volume changes still matter even if they came before the last album press.
-            (after_play || matches!(c, PlayerCmd::SetVolume(_))) && volume_ok
-        })
-        .map(|(_, c)| c)
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_failed_command_reports_stopped() {
-        // Nothing listens on this port, so every command fails at once.
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let (tx, events) = mpsc::channel();
-        let player = spawn("127.0.0.1".into(), port, tx);
-
-        for _ in 0..2 {
-            player.send(PlayerCmd::TogglePause).unwrap();
-            assert_eq!(
-                events.recv_timeout(Duration::from_secs(5)),
-                Ok(PlayerEvent::Stopped)
-            );
-        }
-    }
-
-    fn album() -> PlayerCmd {
-        PlayerCmd::PlayAlbum {
-            album: 0,
-            tracks: vec![],
-            volume: 0.2,
-        }
-    }
-
-    #[test]
-    fn keeps_only_last_album_and_volume() {
-        let out = coalesce(vec![
-            PlayerCmd::SetVolume(0.1),
-            album(),
-            PlayerCmd::Next,
-            PlayerCmd::SetVolume(0.2),
-            album(),
-            PlayerCmd::Next,
-        ]);
-        let kinds: Vec<String> = out
-            .iter()
-            .map(|c| {
-                format!("{c:?}")
-                    .split(['(', ' '])
-                    .next()
-                    .unwrap()
-                    .to_string()
-            })
-            .collect();
-        assert_eq!(kinds, ["SetVolume", "PlayAlbum", "Next"]);
-    }
 }

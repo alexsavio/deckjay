@@ -1,7 +1,9 @@
 # kids-deck
 
 A music player for kids: album covers on an Elgato Stream Deck, music on a
-Chromecast-enabled speaker (built for a JBL Authentics 300). Written in Rust.
+network speaker. Written in Rust. It works with Chromecast built-in speakers
+(built for a JBL Authentics 300) and with Denon / Marantz HEOS receivers and
+speakers.
 
 ```text
  [A][A][A][A][A]     A = album cover, press to play (press again to pause)
@@ -9,9 +11,14 @@ Chromecast-enabled speaker (built for a JBL Authentics 300). Written in Rust.
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume
 ```
 
-The program serves your music folder over HTTP and tells the speaker to play
-an album as a queue. The speaker streams the files itself, so playback keeps
-going even if the computer is busy.
+The program serves your music folder over HTTP and tells the speaker which
+file to play. The speaker downloads the files itself, so playback keeps going
+even if the computer is busy. A Chromecast gets the whole album as a queue. A
+HEOS device plays one file at a time, so the program starts the next track
+when one ends (with a gap of about a second).
+
+Set `speaker_type = "heos"` in `config.toml` for a HEOS device; the default is
+`"cast"`.
 
 ## Develop on macOS
 
@@ -114,11 +121,19 @@ install `99-streamdeck.rules` so it doesn't need root.
   least two rows: MK.2, Scissor Keys, XL, Mini, Neo, Plus and the modules.
   The layout adapts to the number of keys.
 - **Volume cap** only applies to the deck's keys. The speaker's own buttons,
-  the JBL One app and voice assistants can still go louder.
+  its app (JBL One, HEOS) and voice assistants can still go louder.
+- **HEOS:** `just doctor` lists the HEOS players the device knows. The
+  program uses the player whose IP is `speaker_host`, else the first one. It
+  cannot tell a track that ended from a track stopped in the HEOS app: both
+  start the next track. Tested on a Denon AVR-X1600H. Turn on "Network
+  Control: Always On" on the receiver, or it cannot be reached in standby.
+- **"No route to host" on macOS** while `ping` works: macOS blocks the
+  program's local network access. Allow Local Network access for your
+  terminal app, or run with `just sim` in Docker.
 - **Speaker IP:** give the speaker a fixed address (DHCP reservation in your
   router), otherwise the config breaks when the IP changes.
-- **Formats:** mp3, m4a/aac, flac, ogg/opus, wav — what the Chromecast
-  default receiver plays.
+- **Formats:** mp3, m4a/aac, flac, ogg/opus, wav. The speaker must be able
+  to play the format: check your model's list for ogg/opus and flac.
 
 ## Code map
 
@@ -131,5 +146,5 @@ install `99-streamdeck.rules` so it doesn't need root.
 | `icons.rs` | Draws control icons and album tiles (no image files needed) |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
 | `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
-| `player.rs` | Chromecast control on its own thread |
+| `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`) |
 | `server.rs` | HTTP server the speaker downloads the music from |

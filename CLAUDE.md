@@ -6,7 +6,8 @@ code in this repository.
 ## What this is
 
 `kids-deck`, a Rust binary: album covers on an Elgato Stream Deck; pressing
-one plays the album on a Chromecast speaker (built for a JBL Authentics 300).
+one plays the album on a network speaker: Chromecast built-in (built for a JBL
+Authentics 300) or Denon / Marantz HEOS (`speaker_type` in `config.toml`).
 Develop natively on macOS (Docker Desktop cannot pass USB through), or run
 everything in Docker with the web Stream Deck simulator (`just sim`). Docker
 also builds the Raspberry Pi 3 (`linux/arm64`) image. `README.md` has setup,
@@ -30,7 +31,11 @@ deploy steps and the per-file code map.
   the container address, which the speaker cannot reach. Without Docker:
   `cargo run -- simulator` plus `just run --simulator http://localhost:8090`.
 - `just debug`: runs with `RUST_LOG=debug,tower_http=debug` (shows each file
-  the speaker fetches).
+  the speaker fetches). In Docker: `RUST_LOG=info,tower_http=debug just sim`.
+- macOS: a native `kids-deck` gets "No route to host" to LAN speakers while
+  `ping` and `nc` work: that is Local Network privacy blocking the binary
+  (Apple binaries are exempt). Grant the terminal Local Network access, or
+  test in Docker (`just sim`).
 - `just image`, `just deploy`, `just pi-logs`: Pi image build and deploy
   (`PI_HOST` / `PI_DIR` in `.env`). `deploy` never deletes music on the Pi;
   `just pi-music-prune` does (`rsync --delete`, asks first).
@@ -53,12 +58,32 @@ servers:
 - **main** (`main.rs` → `ui.rs`, `deck/`): `DeckSource::open` retries every
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
-- **cast** (`player.rs`): consumes `PlayerCmd`, emits deduplicated
-  `PlayerEvent`s. Connectionless: every command opens a fresh `rust_cast`
-  connection (after a TCP connect-timeout probe, because `rust_cast` has no
-  timeout) and drops it. Polls speaker status every 4 s only while an album
-  is active. `coalesce` drops commands made stale by later ones (button
-  mashing).
+- **player** (`player/`, thread `cast` or `heos`): `mod.rs` owns the command
+  loop for both speaker types: it coalesces commands (button mashing), calls
+  the private `Speaker` trait, emits `Stopped` when a command fails, and polls
+  while `poll_interval()` is `Some`. `Emitter` drops repeats of the last
+  event, except for the first event after each command batch.
+  - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
+    connection (after a TCP connect-timeout probe, because `rust_cast` has no
+    timeout) and drops it. Polls every 4 s while an album is active.
+  - `heos.rs`: one persistent HEOS CLI connection (TCP 1255, JSON lines),
+    reconnects after errors. `play_stream` plays one URL and HEOS has no
+    queue for URLs, so it polls `get_play_state` every second and starts the
+    next track when the state goes from `play` to `stop`. Facts from a real
+    Denon AVR-X1600H, each covered by a test in `heos/tests.rs`:
+    - `play_stream` puts the URL in a hidden queue that `get_queue` does not
+      list. Without `clear_queue` before each `play_stream`, the receiver
+      plays earlier streams after ours and never reports `stop`.
+    - `clear_queue` answers "command under process" first, and fails with
+      eid 4 when the queue is empty; both are fine.
+    - The play state can be `unknown` (before a stream starts, after it
+      ends); it counts as `stop`.
+    - After the last track it keeps retrying the stream until told to stop,
+      so ending an album sends `set_play_state stop`.
+    - Progress events may say `duration=0` (seen with an m4a whose index
+      is at the end), so track length is not a reliable end signal.
+    - Its CLI can hang for about 2 minutes after abrupt reconnects (ping
+      still works); the player then reports `Stopped` and reconnects later.
 - **http** (`server.rs`): single-thread tokio runtime, axum `ServeDir` under
   `/music`. The port is bound on the main thread so "port in use" fails at
   startup.
@@ -70,16 +95,20 @@ Playback flow:
    (per-segment percent-encoding) on `base_url`:
    `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
    `main::local_ip_towards(speaker)`.
-3. `PlayerCmd::PlayAlbum` reaches `CastPlayer::load`, which launches the
+3. `PlayerCmd::PlayAlbum` reaches the speaker backend. Cast launches the
    Default Media Receiver (`CC1AD845`) and loads the whole album as a
-   `MediaQueue`.
+   `MediaQueue`. HEOS sets the volume and sends `browse/play_stream` for one
+   track; the `url` parameter goes last and unencoded, all other values
+   encode `&`, `=`, `%`.
 4. The speaker pulls the files itself; this program never streams audio.
 
 State:
 
-- The speaker is the source of truth. The player treats an album as "ours"
-  only when the media `content_id` equals one of our track URLs; anything
-  else becomes `Stopped`. Changing URL building changes this match.
+- The speaker is the source of truth. Cast treats an album as "ours" only
+  when the media `content_id` equals one of our track URLs; anything else
+  becomes `Stopped`. Changing URL building changes this match. HEOS has no
+  such check: while an album is active it trusts the play state, so a stop
+  in the HEOS app looks like the end of a track.
 - The UI is optimistic: a key press sets `current` / `playing` at once, and
   later events correct it. Album ids in commands and events are indexes into
   `Ui::albums`.
@@ -128,13 +157,14 @@ and default fn in `config.rs` and an entry in `config.example.toml`.
   broken intra-doc links.
 - Tests are unit tests in `#[cfg(test)]` modules; filesystem tests use
   `tempfile`. `deck/remote.rs` tests run the real simulator server and the
-  real `Deck` in one process. The USB deck (`deck/hid.rs`) and the speaker
-  (`player.rs`, except `coalesce` and failed commands against a closed port)
-  have no automated tests: say so when a change touches them, and verify
-  with `just doctor`, `just sim` or real hardware.
+  real `Deck` in one process. `player/heos.rs` is tested against a fake HEOS
+  server, not a real receiver. The USB deck (`deck/hid.rs`) and Chromecast
+  (`player/cast.rs`) have no automated tests beyond `coalesce` and failed
+  commands against a closed port. Say so when a change touches them, and
+  verify with `just doctor`, `just sim` or real hardware.
 - The UI guesses the result of a key press before the speaker answers, so
   the player must deliver the next event after every command, even when it
-  repeats the last one (`CastPlayer::run` resets `last`).
+  repeats the last one (`player::run` resets `Emitter::last`).
 - Keep `Cargo.lock` in git: the Docker build uses `--locked`.
 - On macOS, quit the Elgato Stream Deck app before running: it holds the HID
   device.
