@@ -143,6 +143,9 @@ impl CastPlayer {
                 Ok(first) => {
                     let pending: Vec<PlayerCmd> =
                         std::iter::once(first).chain(rx.try_iter()).collect();
+                    // The UI already guessed the outcome of these commands, so
+                    // the next event must reach it even if it repeats the last.
+                    self.last = None;
                     for cmd in coalesce(pending) {
                         debug!(?cmd, "cast command");
                         if let Err(err) = self.handle(cmd) {
@@ -355,6 +358,26 @@ fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_failed_command_reports_stopped() {
+        // Nothing listens on this port, so every command fails at once.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let (tx, events) = mpsc::channel();
+        let player = spawn("127.0.0.1".into(), port, tx);
+
+        for _ in 0..2 {
+            player.send(PlayerCmd::TogglePause).unwrap();
+            assert_eq!(
+                events.recv_timeout(Duration::from_secs(5)),
+                Ok(PlayerEvent::Stopped)
+            );
+        }
+    }
 
     fn album() -> PlayerCmd {
         PlayerCmd::PlayAlbum {
