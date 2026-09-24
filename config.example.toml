@@ -8,11 +8,19 @@ music_dir = "music"
 
 # IP address of the speaker. Find it in the speaker's app or your router.
 # Tip: give it a fixed IP (DHCP reservation) in your router.
+# Not used when speaker_type = "local".
 speaker_host = "192.168.1.50"
 
-# "cast" for Chromecast built-in speakers (such as the JBL Authentics), or
-# "heos" for Denon / Marantz HEOS receivers and speakers.
+# "cast" for Chromecast built-in speakers (such as the JBL Authentics),
+# "heos" for Denon / Marantz HEOS receivers and speakers, or
+# "local" for this computer's own sound output (the Pi's headphone jack,
+# HDMI or a USB sound card).
 # speaker_type = "cast"
+
+# For "local": part of the sound output's name. `just doctor` lists them.
+# On a Raspberry Pi: "Headphones" (the jack) or "HDMI". Default: the system's
+# default output.
+# audio_device = "Headphones"
 
 # Control port of the speaker. The default depends on speaker_type:
 # 8009 for cast, 1255 for heos.

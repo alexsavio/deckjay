@@ -17,6 +17,7 @@ fn tracks() -> Vec<TrackInfo> {
     (0..3)
         .map(|i| TrackInfo {
             url: url(i),
+            path: format!("Album/{i:02}.mp3").into(),
             content_type: "audio/mpeg".into(),
             title: format!("Song {i}"),
             album: "Album".into(),

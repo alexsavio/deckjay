@@ -293,6 +293,7 @@ impl Ui {
             .iter()
             .map(|t| TrackInfo {
                 url: library::url_for(&self.base_url, &t.rel_path),
+                path: t.path.clone(),
                 content_type: t.content_type.to_string(),
                 title: t.title.clone(),
                 album: album.name.clone(),

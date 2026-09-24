@@ -21,6 +21,8 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
 #[derive(Debug, Clone)]
 pub struct Track {
+    /// The file as found in the music folder, for local playback.
+    pub path: PathBuf,
     /// Path relative to the music folder.
     pub rel_path: PathBuf,
     /// File name without the extension.
@@ -72,6 +74,7 @@ pub fn scan(music_dir: &Path) -> Result<Vec<Album>> {
             .filter_map(|f| {
                 let content_type = content_type(f)?;
                 Some(Track {
+                    path: f.clone(),
                     rel_path: f.strip_prefix(music_dir).ok()?.to_path_buf(),
                     title: f.file_stem()?.to_string_lossy().into_owned(),
                     content_type,

@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use super::*;
-use crate::config::SpeakerType;
 
 const ONE_PLAYER: &str = r#"[{"name": "Kitchen", "pid": 7, "model": "HEOS 1", "version": "1.583.147", "network": "wifi", "ip": "10.0.0.9"}]"#;
 /// String pids; the second player's ip is the host the tests connect to.
@@ -158,6 +157,7 @@ fn tracks(n: usize) -> Vec<TrackInfo> {
     (0..n)
         .map(|i| TrackInfo {
             url: track_url(i),
+            path: format!("High Tones/{i:02}.m4a").into(),
             content_type: "audio/mp4".into(),
             title: format!("Tone {i}"),
             album: "High Tones".into(),
@@ -387,7 +387,11 @@ fn the_player_loop_reports_stopped_when_a_command_fails() {
     let fake = FakeHeos::start(ONE_PLAYER);
     fake.script().fail = Some("browse/play_stream");
     let (tx, events) = mpsc::channel();
-    let player = super::super::spawn(SpeakerType::Heos, "127.0.0.1".into(), fake.port, tx);
+    let output = super::super::Output::Heos {
+        host: "127.0.0.1".into(),
+        port: fake.port,
+    };
+    let player = super::super::spawn(output, tx);
     player.send(play_album(3)).unwrap();
     assert_eq!(events.recv_timeout(IO_TIMEOUT), Ok(Stopped));
 }

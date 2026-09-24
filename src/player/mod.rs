@@ -5,8 +5,10 @@
 
 mod cast;
 pub mod heos;
+pub mod local;
 
 use std::net::{TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
@@ -14,12 +16,12 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use tracing::{debug, warn};
 
-use crate::config::SpeakerType;
-
 #[derive(Debug)]
 pub struct TrackInfo {
     /// Where the speaker downloads the track from.
     pub url: String,
+    /// The file itself, for local playback.
+    pub path: PathBuf,
     pub content_type: String,
     pub title: String,
     pub album: String,
@@ -59,16 +61,29 @@ pub enum PlayerEvent {
 const MAX_FAILED_POLLS: u32 = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub fn spawn(
-    speaker_type: SpeakerType,
-    host: String,
-    port: u16,
-    events: Sender<PlayerEvent>,
-) -> Sender<PlayerCmd> {
+/// Where the album plays, and what the player needs to reach it.
+#[derive(Debug, Clone)]
+pub enum Output {
+    Cast {
+        host: String,
+        port: u16,
+    },
+    Heos {
+        host: String,
+        port: u16,
+    },
+    /// This computer's sound output; `device` is part of its name.
+    Local {
+        device: Option<String>,
+    },
+}
+
+pub fn spawn(output: Output, events: Sender<PlayerEvent>) -> Sender<PlayerCmd> {
     let (tx, rx) = mpsc::channel();
-    let (name, speaker): (&str, Box<dyn Speaker + Send>) = match speaker_type {
-        SpeakerType::Cast => ("cast", Box::new(cast::CastPlayer::new(host, port))),
-        SpeakerType::Heos => ("heos", Box::new(heos::HeosPlayer::new(host, port))),
+    let name = match &output {
+        Output::Cast { .. } => "cast",
+        Output::Heos { .. } => "heos",
+        Output::Local { .. } => "local",
     };
     let emitter = Emitter {
         tx: events,
@@ -76,7 +91,16 @@ pub fn spawn(
     };
     thread::Builder::new()
         .name(name.into())
-        .spawn(move || run(speaker, &rx, emitter))
+        // Built on the player thread: a sound card stream cannot move between
+        // threads on every platform.
+        .spawn(move || {
+            let speaker: Box<dyn Speaker> = match output {
+                Output::Cast { host, port } => Box::new(cast::CastPlayer::new(host, port)),
+                Output::Heos { host, port } => Box::new(heos::HeosPlayer::new(host, port)),
+                Output::Local { device } => Box::new(local::LocalPlayer::new(device)),
+            };
+            run(speaker, &rx, emitter);
+        })
         .expect("failed to start the player thread");
     tx
 }
@@ -92,7 +116,7 @@ trait Speaker {
     fn reset(&mut self);
 }
 
-fn run(mut speaker: Box<dyn Speaker + Send>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
+fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
     let mut failed_polls = 0;
     loop {
         let next = match speaker.poll_interval() {
@@ -201,22 +225,29 @@ mod tests {
 
     #[test]
     fn every_failed_command_reports_stopped() {
-        for speaker_type in [SpeakerType::Cast, SpeakerType::Heos] {
-            // Nothing listens on this port, so every command fails at once.
-            let port = std::net::TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port();
+        // Nothing listens on this port, so every command fails at once.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let host = String::from("127.0.0.1");
+        for output in [
+            Output::Cast {
+                host: host.clone(),
+                port,
+            },
+            Output::Heos { host, port },
+        ] {
             let (tx, events) = mpsc::channel();
-            let player = spawn(speaker_type, "127.0.0.1".into(), port, tx);
+            let player = spawn(output.clone(), tx);
 
             for _ in 0..2 {
                 player.send(PlayerCmd::TogglePause).unwrap();
                 assert_eq!(
                     events.recv_timeout(Duration::from_secs(5)),
                     Ok(PlayerEvent::Stopped),
-                    "{speaker_type:?}"
+                    "{output:?}"
                 );
             }
         }

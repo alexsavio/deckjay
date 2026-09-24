@@ -9,13 +9,16 @@ publish = false
 [dependencies]
 anyhow = "1"
 axum = "0.8"
+cpal = "0.18"
 elgato-streamdeck = "0.13"
 hidapi = "2.6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 percent-encoding = "2"
+rtrb = "0.4"
 rust_cast = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+symphonia = { version = "0.6", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 tokio = { version = "1", features = ["rt", "net", "sync", "time"] }
 toml = "1"
 tower-http = { version = "0.7", features = ["fs", "trace"] }

@@ -8,7 +8,7 @@
 # Keep the Rust version in step with rust-toolchain.toml.
 FROM rust:1.98-trixie AS build
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libudev-dev pkg-config \
+ && apt-get install -y --no-install-recommends libudev-dev libasound2-dev pkg-config \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 
@@ -23,7 +23,7 @@ RUN touch src/main.rs && cargo build --release --locked
 
 FROM debian:trixie-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libudev1 ca-certificates \
+ && apt-get install -y --no-install-recommends libudev1 libasound2t64 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/kids-deck /usr/local/bin/kids-deck
 WORKDIR /app

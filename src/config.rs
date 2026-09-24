@@ -13,7 +13,8 @@ pub struct Config {
     /// against the folder the config file lives in.
     pub music_dir: PathBuf,
 
-    /// IP address (or host name) of the speaker.
+    /// IP address (or host name) of the speaker; not used by `local`.
+    #[serde(default)]
     pub speaker_host: String,
     #[serde(default)]
     pub speaker_type: SpeakerType,
@@ -43,6 +44,11 @@ pub struct Config {
     /// Stream Deck screen brightness in percent.
     #[serde(default = "default_brightness")]
     pub brightness: u8,
+
+    /// For `local`: part of the sound output's name (e.g. "Headphones" or
+    /// "HDMI" on a Raspberry Pi). `None` uses the system's default output.
+    #[serde(default)]
+    pub audio_device: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -53,6 +59,8 @@ pub enum SpeakerType {
     Cast,
     /// Denon / Marantz HEOS.
     Heos,
+    /// This computer's own sound output.
+    Local,
 }
 
 impl SpeakerType {
@@ -60,6 +68,7 @@ impl SpeakerType {
         match self {
             SpeakerType::Cast => 8009,
             SpeakerType::Heos => 1255,
+            SpeakerType::Local => 0,
         }
     }
 }
@@ -96,8 +105,8 @@ impl Config {
             cfg.music_dir = base.join(&cfg.music_dir);
         }
 
-        if cfg.speaker_host.trim().is_empty() {
-            bail!("speaker_host is empty");
+        if cfg.speaker_type != SpeakerType::Local && cfg.speaker_host.trim().is_empty() {
+            bail!("speaker_host is empty; it is needed for speaker_type cast and heos");
         }
         if cfg.http_port == 0 {
             bail!("http_port must not be 0: the speaker needs a fixed port in the music URLs");
@@ -170,6 +179,17 @@ mod tests {
     #[test]
     fn an_explicit_speaker_port_wins() {
         assert_eq!(parse("speaker_port = 9000\n").unwrap().speaker_port(), 9000);
+    }
+
+    #[test]
+    fn a_local_speaker_needs_no_host() {
+        let cfg = Config::parse(
+            "music_dir = \"m\"\nspeaker_type = \"local\"\naudio_device = \"Headphones\"\n",
+            Path::new("."),
+        )
+        .unwrap();
+        assert_eq!(cfg.speaker_type, SpeakerType::Local);
+        assert_eq!(cfg.audio_device.as_deref(), Some("Headphones"));
     }
 
     #[test]

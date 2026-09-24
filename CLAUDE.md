@@ -6,8 +6,9 @@ code in this repository.
 ## What this is
 
 `kids-deck`, a Rust binary: album covers on an Elgato Stream Deck; pressing
-one plays the album on a network speaker: Chromecast built-in (built for a JBL
-Authentics 300) or Denon / Marantz HEOS (`speaker_type` in `config.toml`).
+one plays the album on a network speaker, Chromecast built-in (built for a JBL
+Authentics 300) or Denon / Marantz HEOS, or on the computer's own sound output
+(`speaker_type` = `cast`, `heos` or `local` in `config.toml`).
 Develop natively on macOS (Docker Desktop cannot pass USB through), or run
 everything in Docker with the web Stream Deck simulator (`just sim`). Docker
 also builds the Raspberry Pi 3 (`linux/arm64`) image. `README.md` has setup,
@@ -58,15 +59,18 @@ servers:
 - **main** (`main.rs` → `ui.rs`, `deck/`): `DeckSource::open` retries every
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
-- **player** (`player/`, thread `cast` or `heos`): `mod.rs` owns the command
-  loop for both speaker types: it coalesces commands (button mashing; a
-  `SetVolume` before the last `PlayAlbum` is dropped, since `PlayAlbum`
-  carries the volume), calls the private `Speaker` trait, and polls while
-  `poll_interval()` is `Some`. A failed command emits `Stopped` and drops the
-  rest of its batch; 3 failed polls in a row end the album the same way.
+- **player** (`player/`, thread `cast`, `heos` or `local`): `main::output` turns
+  the config into a `player::Output` (`Cast`/`Heos` carry host and port, `Local`
+  only the device name), and `spawn` builds the speaker on the player thread,
+  because a sound-card stream cannot move between threads on every platform.
+  `mod.rs` owns the command loop for all speaker types: it coalesces commands
+  (button mashing; a `SetVolume` before the last `PlayAlbum` is dropped, since
+  `PlayAlbum` carries the volume), calls the private `Speaker` trait, and polls
+  while `poll_interval()` is `Some`. A failed command emits `Stopped` and drops
+  the rest of its batch; 3 failed polls in a row end the album the same way.
   `Emitter` drops repeats of the last event, except for the first event after
-  each command batch. `connect` (every resolved address, 3 s timeout) and
-  `clamp_volume` are shared by both backends.
+  each command batch. The network backends share `connect` (every resolved
+  address, 3 s timeout); all three share `clamp_volume`.
   - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
     connection (after a TCP connect-timeout probe, because `rust_cast` has no
     timeout) and drops it. Polls every 4 s while an album is active.
@@ -78,6 +82,11 @@ servers:
     a hidden queue of earlier streams and never reports `stop`) and
     `set_play_state stop` when an album ends. These and its other quirks
     are in `docs/heos.md`, each covered by a test in `heos/tests.rs`.
+  - `local`: decodes the files itself (`symphonia` 0.6) and plays them with
+    `cpal` 0.18 on the output whose name contains `audio_device` (else the
+    default). No music server and no speaker address are needed for it.
+    Docker Desktop on a Mac has no sound card: test local audio natively.
+    Details: `docs/local-audio.md`.
   - Protocol references: `docs/heos.md` and `docs/chromecast.md` (commands,
     sequences, quirks, test-by-hand snippets). Cast was tested on a Lenovo
     smart display (Chromecast built-in); the JBL itself is not tested yet.

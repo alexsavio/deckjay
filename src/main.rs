@@ -63,7 +63,8 @@ const DEFAULT_SIMULATOR_PORT: u16 = 8090;
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,symphonia=error")),
         )
         .init();
 
@@ -125,20 +126,17 @@ fn main() -> Result<()> {
     }
     let base_url = base_url?;
 
-    server::spawn(
-        cfg.music_dir.clone(),
-        cfg.http_port,
-        library::served_files(&albums),
-    )?;
-    info!("serving music at {base_url}/");
+    if cfg.speaker_type != SpeakerType::Local {
+        server::spawn(
+            cfg.music_dir.clone(),
+            cfg.http_port,
+            library::served_files(&albums),
+        )?;
+        info!("serving music at {base_url}/");
+    }
 
     let (event_tx, event_rx) = mpsc::channel();
-    let player = player::spawn(
-        cfg.speaker_type,
-        cfg.speaker_host.clone(),
-        cfg.speaker_port(),
-        event_tx,
-    );
+    let player = player::spawn(output(&cfg), event_tx);
     let mut ui = Ui::new(&cfg, albums, base_url, player, event_rx);
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
@@ -235,7 +233,22 @@ fn write_preview(
     Ok(())
 }
 
+fn output(cfg: &Config) -> player::Output {
+    let (host, port) = (cfg.speaker_host.clone(), cfg.speaker_port());
+    match cfg.speaker_type {
+        SpeakerType::Cast => player::Output::Cast { host, port },
+        SpeakerType::Heos => player::Output::Heos { host, port },
+        SpeakerType::Local => player::Output::Local {
+            device: cfg.audio_device.clone(),
+        },
+    }
+}
+
 fn advertise_address(cfg: &Config) -> Result<String> {
+    if cfg.speaker_type == SpeakerType::Local {
+        // Nothing downloads from us: the music URLs are never used.
+        return Ok("127.0.0.1".into());
+    }
     match &cfg.advertise_host {
         Some(host) => Ok(host.clone()),
         None => local_ip_towards(&cfg.speaker_host, cfg.speaker_port()).with_context(|| {
@@ -301,6 +314,10 @@ fn run_check(
         print_usb_decks()?;
     }
 
+    if cfg.speaker_type == SpeakerType::Local {
+        print_audio_outputs(cfg);
+        return Ok(());
+    }
     println!(
         "\nSpeaker {}:{} ({:?}):",
         cfg.speaker_host,
@@ -310,8 +327,19 @@ fn run_check(
     match cfg.speaker_type {
         SpeakerType::Cast => print_cast_speaker(cfg),
         SpeakerType::Heos => print_heos_players(cfg),
+        SpeakerType::Local => unreachable!("handled above"),
     }
     Ok(())
+}
+
+fn print_audio_outputs(cfg: &Config) {
+    let wanted = cfg.audio_device.as_deref().unwrap_or("the default");
+    println!("\nAudio out (local), using {wanted}:");
+    match player::local::output_devices() {
+        Ok(names) if names.is_empty() => println!("  no sound output found"),
+        Ok(names) => names.iter().for_each(|name| println!("  {name}")),
+        Err(err) => println!("  cannot list sound outputs: {err:#}"),
+    }
 }
 
 fn print_cast_speaker(cfg: &Config) {

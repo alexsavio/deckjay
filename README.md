@@ -1,9 +1,10 @@
 # kids-deck
 
 A music player for kids: album covers on an Elgato Stream Deck, music on a
-network speaker. Written in Rust. It works with Chromecast built-in speakers
-(built for a JBL Authentics 300) and with Denon / Marantz HEOS receivers and
-speakers.
+network speaker or on the computer's own sound output. Written in Rust. It
+works with Chromecast built-in speakers (built for a JBL Authentics 300),
+with Denon / Marantz HEOS receivers and speakers, and with the headphone
+jack, HDMI or USB sound card of the Raspberry Pi.
 
 ```text
  [A][A][A][A][A]     A = album cover, press to play (press again to pause)
@@ -17,8 +18,11 @@ even if the computer is busy. A Chromecast gets the whole album as a queue. A
 HEOS device plays one file at a time, so the program starts the next track
 when one ends (with a gap of about a second).
 
-Set `speaker_type = "heos"` in `config.toml` for a HEOS device; the default is
-`"cast"`.
+With `speaker_type = "local"` the program decodes and plays the files
+itself, on the sound output that `audio_device` names.
+
+Set `speaker_type = "heos"` for a HEOS device or `"local"` for the computer's
+own sound output in `config.toml`; the default is `"cast"`.
 
 ## Develop on macOS
 
@@ -133,14 +137,16 @@ install `99-streamdeck.rules` so it doesn't need root.
 - **Speaker IP:** give the speaker a fixed address (DHCP reservation in your
   router), otherwise the config breaks when the IP changes.
 - **Formats:** mp3, m4a/aac, flac, ogg/opus, wav. The speaker must be able
-  to play the format: check your model's list for ogg/opus and flac.
+  to play the format: check your model's list for ogg/opus and flac. Local
+  playback cannot decode Opus; it skips those tracks.
 
 ## Speaker protocols
 
 [`docs/heos.md`](docs/heos.md) and [`docs/chromecast.md`](docs/chromecast.md)
 describe the HEOS CLI and the Google Cast protocol as kids-deck uses them:
 the commands it sends, the order, the quirks of real devices, and how to test
-by hand.
+by hand. [`docs/local-audio.md`](docs/local-audio.md) describes local
+playback: decoding, sound outputs and the Raspberry Pi's audio devices.
 
 ## Code map
 
@@ -153,5 +159,5 @@ by hand.
 | `icons.rs` | Draws control icons and album tiles (no image files needed) |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
 | `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
-| `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`) |
+| `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`), local sound output (`local`) |
 | `server.rs` | HTTP server the speaker downloads the music from |
