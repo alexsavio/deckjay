@@ -135,6 +135,13 @@ install `99-streamdeck.rules` so it doesn't need root.
 - **Formats:** mp3, m4a/aac, flac, ogg/opus, wav. The speaker must be able
   to play the format: check your model's list for ogg/opus and flac.
 
+## Speaker protocols
+
+[`docs/heos.md`](docs/heos.md) and [`docs/chromecast.md`](docs/chromecast.md)
+describe the HEOS CLI and the Google Cast protocol as kids-deck uses them:
+the commands it sends, the order, the quirks of real devices, and how to test
+by hand.
+
 ## Code map
 
 | File | What it does |
