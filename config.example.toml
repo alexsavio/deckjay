@@ -1,0 +1,29 @@
+# Copy to config.toml and adjust.
+
+# Folder with one sub-folder per album (relative to this file, or absolute).
+# Each album folder holds audio files (mp3, m4a, flac, ogg, wav) and a cover
+# image (cover.jpg / folder.jpg / any jpg or png). Number prefixes like
+# "01 " control the order of albums and tracks.
+music_dir = "music"
+
+# IP address of the JBL speaker. Find it in the JBL One app or your router.
+# Tip: give it a fixed IP (DHCP reservation) in your router.
+speaker_host = "192.168.1.50"
+# speaker_port = 8009
+
+# Port of the built-in web server the speaker downloads the music from.
+# http_port = 8765
+
+# The address the speaker uses to reach this computer. Detected automatically;
+# set it only if detection picks the wrong network interface.
+# advertise_host = "192.168.1.20"
+
+# Volume is 0.0–1.0 of the speaker's range. max_volume is a hard ceiling for
+# the deck's volume keys. (It can't stop someone using the speaker's own
+# buttons, the JBL app or a voice assistant.)
+max_volume = 0.4
+start_volume = 0.2
+volume_step = 0.05
+
+# Stream Deck brightness in percent.
+brightness = 60

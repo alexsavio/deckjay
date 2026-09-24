@@ -1,0 +1,39 @@
+[package]
+name = "kids-deck"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "A kids' music player: album covers on a Stream Deck, music on a Chromecast speaker"
+publish = false
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+elgato-streamdeck = "0.13"
+hidapi = "2.6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+percent-encoding = "2"
+rust_cast = "0.21"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "net"] }
+toml = "1"
+tower-http = { version = "0.7", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Pixel and volume math on small, bounded numbers: these casts are intended.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+
+[profile.release]
+strip = true
+lto = "thin"

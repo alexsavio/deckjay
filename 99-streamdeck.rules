@@ -1,0 +1,7 @@
+# Lets non-root users in the plugdev group use Elgato Stream Decks.
+# Only needed when running the binary directly on Linux (not needed on macOS,
+# and not needed with the privileged Docker container).
+#   sudo cp 99-streamdeck.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", MODE="0660", GROUP="plugdev"
+KERNEL=="hidraw*", ATTRS{idVendor}=="0fd9", MODE="0660", GROUP="plugdev"

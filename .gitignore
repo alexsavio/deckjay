@@ -1,0 +1,9 @@
+target/
+config.toml
+music/
+*.png
+
+# Local tooling: absolute symlinks into claude-files, and per-machine settings.
+.claude/
+.config/wt.toml
+.env
