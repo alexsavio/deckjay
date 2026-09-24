@@ -79,8 +79,8 @@ servers:
     `set_play_state stop` when an album ends. These and its other quirks
     are in `docs/heos.md`, each covered by a test in `heos/tests.rs`.
   - Protocol references: `docs/heos.md` and `docs/chromecast.md` (commands,
-    sequences, quirks, test-by-hand snippets). The Cast path is untested on
-    real hardware.
+    sequences, quirks, test-by-hand snippets). Cast was tested on a Lenovo
+    smart display (Chromecast built-in); the JBL itself is not tested yet.
 - **http** (`server.rs`): single-thread tokio runtime, axum `ServeDir` under
   `/music`, behind a middleware that answers 404 for every path not in
   `library::served_files` (the scanned tracks and covers): no dotfiles, stray
@@ -163,7 +163,8 @@ and default fn in `config.rs` and an entry in `config.example.toml`.
   server, not a real receiver. Chromecast's decisions (`poll_event`,
   `skip_target` over `StatusEntry`) are unit-tested in `cast/tests.rs`, but
   its network path and the USB deck (`deck/hid.rs`) have no automated tests
-  and Cast was never run on real hardware. Say so when a change touches
+  (Cast was checked by hand on a Lenovo smart display, see
+  `docs/chromecast.md`). Say so when a change touches
   them, and verify with `just doctor`, `just sim` or real hardware.
 - The UI guesses the result of a key press before the speaker answers, so
   the player must deliver the next event after every command, even when it

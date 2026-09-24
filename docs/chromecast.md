@@ -1,11 +1,10 @@
 # Google Cast (Chromecast)
 
-**Not tested on real hardware.** The target is a JBL Authentics 300
-(Chromecast built-in); no Cast playback has been verified in this project.
-The facts below come from the code, the rust_cast 0.21.0 source, a dump of
-the bytes rust_cast writes for kids-deck's calls, and Google's docs. The
-only runs so far are `just doctor` against a local port that is not a Cast
-device, and the dump.
+**Tested on one device:** a Lenovo smart display (model CD-4N341Y,
+Chromecast built-in), see [Seen on real hardware](#seen-on-real-hardware).
+The target speaker, a JBL Authentics 300, is not tested yet. The other facts
+below come from the code, the rust_cast 0.21.0 source, a dump of the bytes
+rust_cast writes for kids-deck's calls, and Google's docs.
 
 Cast is the default `speaker_type`. The code:
 
@@ -176,6 +175,29 @@ Every command opens its own connection and drops it at the end, without a
    timeout. A failed poll is logged at debug level; three in a row
    (`MAX_FAILED_POLLS`) end the album the same way, about 20 s after the
    speaker went away. A poll or command that works restarts the count.
+
+## Seen on real hardware
+
+Lenovo smart display CD-4N341Y, 2026-09-24, through
+`just sim` (kids-deck in Docker, the web deck simulator for the keys), with
+the two-track test album (a 15 s MP3, then a 15 s m4a with its index at the
+start):
+
+1. **Load.** The first album press took 3 s from the key to the loaded
+   queue: the device launched the Default Media Receiver (`CC1AD845`).
+   With the app already running, a load took about 1 s.
+2. **Queue.** The device fetched each file when its track started: the MP3,
+   then the m4a 15 s later. kids-deck sent nothing in between; the Cast
+   queue moves on by itself.
+3. **Keys.** Play/pause paused and resumed. Next went to track 2. Previous,
+   pressed 4 s into track 2 (under the 5 s rule), went back to track 1.
+4. **Volume.** One volume-up press from `start_volume = 0.2` sent 0.25;
+   `just doctor` then showed `volume 25%` and
+   `running app: Default Media Receiver (CC1AD845)`.
+5. **Track change and end.** The deck kept the album framed through the
+   track change, and showed it stopped within one poll (4 s) after the last
+   track ended.
+6. **Formats.** `audio/mpeg` (MP3) and `audio/mp4` (m4a) both played.
 
 ## Quirks and limits
 
