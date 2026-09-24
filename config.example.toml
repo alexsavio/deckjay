@@ -22,12 +22,14 @@ speaker_host = "192.168.1.50"
 # http_port = 8765
 
 # The address the speaker uses to reach this computer. Detected automatically;
-# set it only if detection picks the wrong network interface.
+# set it only if detection picks the wrong network interface. An IPv4 address
+# or a host name, without "http://" or a port.
 # advertise_host = "192.168.1.20"
 
 # Volume is 0.0–1.0 of the speaker's range. max_volume is a hard ceiling for
 # the deck's volume keys. (It can't stop someone using the speaker's own
-# buttons, the JBL app or a voice assistant.)
+# buttons, its app or a voice assistant.) volume_step is how much one press
+# changes the volume, from 0.01 to 0.5.
 max_volume = 0.4
 start_volume = 0.2
 volume_step = 0.05

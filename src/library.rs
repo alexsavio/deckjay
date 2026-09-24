@@ -12,6 +12,8 @@
 //!
 //! Albums and tracks are sorted by name, so number prefixes control the order.
 
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -46,15 +48,22 @@ pub fn scan(music_dir: &Path) -> Result<Vec<Album>> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(music_dir)
         .with_context(|| format!("cannot read music folder {}", music_dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_dir() && !is_hidden(p))
+        .filter(|p| p.is_dir() && !is_hidden(p) && has_utf8_name(p))
         .collect();
     dirs.sort();
 
     let mut albums = Vec::new();
     for dir in dirs {
-        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)?
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                tracing::warn!("skipping {}: {err}", dir.display());
+                continue;
+            }
+        };
+        let mut files: Vec<PathBuf> = entries
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.is_file() && !is_hidden(p))
+            .filter(|p| p.is_file() && !is_hidden(p) && has_utf8_name(p))
             .collect();
         files.sort();
 
@@ -90,6 +99,29 @@ pub fn scan(music_dir: &Path) -> Result<Vec<Album>> {
         });
     }
     Ok(albums)
+}
+
+/// Paths relative to the music folder: the only files the speaker may download.
+pub fn served_files(albums: &[Album]) -> HashSet<PathBuf> {
+    albums
+        .iter()
+        .flat_map(|a| {
+            a.tracks
+                .iter()
+                .map(|t| t.rel_path.clone())
+                .chain(a.cover_rel.clone())
+        })
+        .collect()
+}
+
+/// The file server only opens UTF-8 paths, so a track with any other name
+/// could never play.
+fn has_utf8_name(p: &Path) -> bool {
+    let utf8 = p.file_name().and_then(OsStr::to_str).is_some();
+    if !utf8 {
+        tracing::warn!("skipping {}: the name is not UTF-8", p.display());
+    }
+    utf8
 }
 
 /// Dot files, such as macOS `._` resource forks and `.DS_Store`.
@@ -248,6 +280,53 @@ mod tests {
             album.cover_rel.as_deref(),
             Some(Path::new("Album/scan.jpeg"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_an_unreadable_album_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Songs/01 Song.mp3"));
+        let locked = root.join("lost+found");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let albums = scan(root);
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let names: Vec<String> = albums.unwrap().into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["Songs"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_utf8_names_are_usable() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let latin1 = Path::new(OsStr::from_bytes(b"/music/Chansons d'\xe9t\xe9"));
+        assert!(!has_utf8_name(latin1));
+        assert!(has_utf8_name(Path::new("/music/Chansons d'été")));
+    }
+
+    #[test]
+    fn served_files_are_the_tracks_and_covers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Album/01.mp3"));
+        touch(&root.join("Album/cover.jpg"));
+        touch(&root.join("Album/notes.txt"));
+        touch(&root.join("Album/.hidden.mp3"));
+
+        let files = served_files(&scan(root).unwrap());
+
+        let expected: HashSet<PathBuf> = [
+            PathBuf::from("Album/01.mp3"),
+            PathBuf::from("Album/cover.jpg"),
+        ]
+        .into();
+        assert_eq!(files, expected);
     }
 
     #[test]

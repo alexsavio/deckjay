@@ -6,10 +6,9 @@
 //! polled every few seconds so the deck can show play/pause correctly and
 //! notice when the album has finished.
 
-use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use rust_cast::CastDevice;
 use rust_cast::channels::media::{
     Image, LoadOptions, Media, MediaQueue, Metadata, MusicTrackMediaMetadata, PlayerState,
@@ -25,7 +24,6 @@ const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
 /// Destination id of the platform receiver, for status, volume and app launch.
 const RECEIVER: &str = "receiver-0";
 const POLL_INTERVAL: Duration = Duration::from_secs(4);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// "Previous" restarts the current track if it has played longer than this.
 const RESTART_THRESHOLD_SECS: f32 = 5.0;
 
@@ -95,17 +93,19 @@ impl Speaker for CastPlayer {
                 self.album = album;
                 self.tracks = tracks;
                 let s = self.open()?;
-                s.device.receiver.set_volume(volume)?;
+                s.device.receiver.set_volume(super::clamp_volume(volume))?;
                 self.load(s, 0, events)
             }
             PlayerCmd::SetVolume(volume) => {
                 let s = self.open()?;
-                s.device.receiver.set_volume(volume)?;
+                s.device.receiver.set_volume(super::clamp_volume(volume))?;
                 Ok(())
             }
             PlayerCmd::TogglePause => {
                 let s = self.open()?;
                 match media_status(&s)? {
+                    // Keep the track that is about to start, as HEOS does.
+                    Some((_, e)) if loading(&e) => events.emit(PlayerEvent::Playing(self.album)),
                     Some((tid, e))
                         if matches!(
                             e.player_state,
@@ -121,30 +121,19 @@ impl Speaker for CastPlayer {
                     }
                     // Finished or nothing loaded: start our album again from the top.
                     _ if !self.tracks.is_empty() => self.load(s, 0, events)?,
-                    _ => {}
+                    _ => events.emit(PlayerEvent::Stopped),
                 }
                 Ok(())
             }
             PlayerCmd::Next | PlayerCmd::Prev => {
-                let forward = matches!(cmd, PlayerCmd::Next);
                 let s = self.open()?;
                 let Some((_, entry)) = media_status(&s)? else {
                     return Ok(());
                 };
-                let Some(current) = self.current_index(&entry) else {
-                    return Ok(());
-                };
-                let target = if forward {
-                    if current + 1 >= self.tracks.len() {
-                        return Ok(()); // already on the last track
-                    }
-                    current + 1
-                } else if entry.current_time.unwrap_or(0.0) > RESTART_THRESHOLD_SECS {
-                    current
-                } else {
-                    current.saturating_sub(1)
-                };
-                self.load(s, target, events)
+                match skip_target(&entry, &self.tracks, matches!(cmd, PlayerCmd::Next)) {
+                    Some(target) => self.load(s, target, events),
+                    None => Ok(()),
+                }
             }
         }
     }
@@ -152,13 +141,8 @@ impl Speaker for CastPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         let s = self.open()?;
         let entry = media_status(&s)?.map(|(_, e)| e);
-        let ours = entry.as_ref().and_then(|e| self.current_index(e)).is_some();
-        let event = match entry.map(|e| e.player_state) {
-            Some(PlayerState::Playing | PlayerState::Buffering) if ours => {
-                PlayerEvent::Playing(self.album)
-            }
-            Some(PlayerState::Paused) if ours => PlayerEvent::Paused(self.album),
-            _ => PlayerEvent::Stopped,
+        let Some(event) = poll_event(entry.as_ref(), &self.tracks, self.album) else {
+            return Ok(());
         };
         if event == PlayerEvent::Stopped {
             self.active = false;
@@ -218,12 +202,7 @@ impl CastPlayer {
 
     fn open(&self) -> Result<Session> {
         // Fail fast if the speaker is unreachable (rust_cast has no connect timeout).
-        let addr = (self.host.as_str(), self.port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| anyhow!("cannot resolve {}", self.host))?;
-        TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-            .with_context(|| format!("speaker {addr} not reachable"))?;
+        super::connect(&self.host, self.port)?;
 
         let device = CastDevice::connect_without_host_verification(self.host.clone(), self.port)?;
         device.connection.connect(RECEIVER)?;
@@ -234,11 +213,51 @@ impl CastPlayer {
             .find(|a| a.app_id == DEFAULT_MEDIA_RECEIVER);
         Ok(Session { device, app })
     }
+}
 
-    /// Position of the currently playing track in our tracklist, or `None` if it isn't ours.
-    fn current_index(&self, entry: &StatusEntry) -> Option<usize> {
-        let id = &entry.media.as_ref()?.content_id;
-        self.tracks.iter().position(|t| &t.url == id)
+/// Idle, but loading the next queue item: the receiver reports this between
+/// tracks, and the media it names may be missing or the previous one.
+fn loading(entry: &StatusEntry) -> bool {
+    matches!(entry.player_state, PlayerState::Idle)
+        && (entry.loading_item_id.is_some() || entry.extended_status.is_some())
+}
+
+/// Position of the entry's track in `tracks`, or `None` if it isn't ours.
+fn track_index(entry: &StatusEntry, tracks: &[TrackInfo]) -> Option<usize> {
+    let id = &entry.media.as_ref()?.content_id;
+    tracks.iter().position(|t| &t.url == id)
+}
+
+/// What a status poll reports; `None` keeps the last event.
+fn poll_event(
+    entry: Option<&StatusEntry>,
+    tracks: &[TrackInfo],
+    album: usize,
+) -> Option<PlayerEvent> {
+    let Some(entry) = entry else {
+        return Some(PlayerEvent::Stopped);
+    };
+    if loading(entry) {
+        return None;
+    }
+    let ours = track_index(entry, tracks).is_some();
+    Some(match entry.player_state {
+        PlayerState::Playing | PlayerState::Buffering if ours => PlayerEvent::Playing(album),
+        PlayerState::Paused if ours => PlayerEvent::Paused(album),
+        _ => PlayerEvent::Stopped,
+    })
+}
+
+/// The track that Next (`forward`) or Prev loads; `None` when the media is
+/// not ours, or on Next from the last track.
+fn skip_target(entry: &StatusEntry, tracks: &[TrackInfo], forward: bool) -> Option<usize> {
+    let current = track_index(entry, tracks)?;
+    if forward {
+        (current + 1 < tracks.len()).then_some(current + 1)
+    } else if entry.current_time.unwrap_or(0.0) > RESTART_THRESHOLD_SECS {
+        Some(current)
+    } else {
+        Some(current.saturating_sub(1))
     }
 }
 
@@ -253,3 +272,6 @@ fn media_status(s: &Session) -> Result<Option<(String, StatusEntry)>> {
         .next()
         .map(|e| (app.transport_id.clone(), e)))
 }
+
+#[cfg(test)]
+mod tests;

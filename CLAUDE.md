@@ -59,34 +59,34 @@ servers:
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
 - **player** (`player/`, thread `cast` or `heos`): `mod.rs` owns the command
-  loop for both speaker types: it coalesces commands (button mashing), calls
-  the private `Speaker` trait, emits `Stopped` when a command fails, and polls
-  while `poll_interval()` is `Some`. `Emitter` drops repeats of the last
-  event, except for the first event after each command batch.
+  loop for both speaker types: it coalesces commands (button mashing; a
+  `SetVolume` before the last `PlayAlbum` is dropped, since `PlayAlbum`
+  carries the volume), calls the private `Speaker` trait, and polls while
+  `poll_interval()` is `Some`. A failed command emits `Stopped` and drops the
+  rest of its batch; 3 failed polls in a row end the album the same way.
+  `Emitter` drops repeats of the last event, except for the first event after
+  each command batch. `connect` (every resolved address, 3 s timeout) and
+  `clamp_volume` are shared by both backends.
   - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
     connection (after a TCP connect-timeout probe, because `rust_cast` has no
     timeout) and drops it. Polls every 4 s while an album is active.
   - `heos.rs`: one persistent HEOS CLI connection (TCP 1255, JSON lines),
     reconnects after errors. `play_stream` plays one URL and HEOS has no
     queue for URLs, so it polls `get_play_state` every second and starts the
-    next track when the state goes from `play` to `stop`. Facts from a real
-    Denon AVR-X1600H, each covered by a test in `heos/tests.rs`:
-    - `play_stream` puts the URL in a hidden queue that `get_queue` does not
-      list. Without `clear_queue` before each `play_stream`, the receiver
-      plays earlier streams after ours and never reports `stop`.
-    - `clear_queue` answers "command under process" first, and fails with
-      eid 4 when the queue is empty; both are fine.
-    - The play state can be `unknown` (before a stream starts, after it
-      ends); it counts as `stop`.
-    - After the last track it keeps retrying the stream until told to stop,
-      so ending an album sends `set_play_state stop`.
-    - Progress events may say `duration=0` (seen with an m4a whose index
-      is at the end), so track length is not a reliable end signal.
-    - Its CLI can hang for about 2 minutes after abrupt reconnects (ping
-      still works); the player then reports `Stopped` and reconnects later.
+    next track when the state goes from `play` to `stop`. A real Denon
+    AVR-X1600H needs `clear_queue` before each `play_stream` (else it plays
+    a hidden queue of earlier streams and never reports `stop`) and
+    `set_play_state stop` when an album ends. These and its other quirks
+    are in `docs/heos.md`, each covered by a test in `heos/tests.rs`.
+  - Protocol references: `docs/heos.md` and `docs/chromecast.md` (commands,
+    sequences, quirks, test-by-hand snippets). The Cast path is untested on
+    real hardware.
 - **http** (`server.rs`): single-thread tokio runtime, axum `ServeDir` under
-  `/music`. The port is bound on the main thread so "port in use" fails at
-  startup.
+  `/music`, behind a middleware that answers 404 for every path not in
+  `library::served_files` (the scanned tracks and covers): no dotfiles, stray
+  files or symlink escapes reach the LAN. The port, the runtime and the
+  listener are set up on the calling thread, so start-up failures are
+  errors, not a dead server thread.
 
 Playback flow:
 
@@ -118,8 +118,10 @@ key shows; the private `Backend` trait does device IO. `hid.rs` is the USB
 deck (`convert_image` encoding). `remote.rs` is the simulator client:
 blocking `ureq`, PNG encoding, `pressed_keys` is a long-poll
 (`GET /api/presses?wait_ms=`). A backend returning `Ok(None)` from open means
-"not there yet, keep waiting"; for the simulator that is any transport error,
-while an HTTP error status is a real error (wrong URL).
+"not there yet, keep waiting"; for the simulator that is a transport error
+such as "connection refused" or "host not found". An HTTP error status or a
+URL ureq cannot use (no `http://`, `https://`) is a real error. A simulator
+grid is checked too: at least 2 rows, at most 64 keys, keys of 16 to 512 px.
 
 Simulator (`simulator/`): `kids-deck simulator` runs an axum server on its
 own single-thread tokio runtime with the page (`page.html`) and the
@@ -158,10 +160,11 @@ and default fn in `config.rs` and an entry in `config.example.toml`.
 - Tests are unit tests in `#[cfg(test)]` modules; filesystem tests use
   `tempfile`. `deck/remote.rs` tests run the real simulator server and the
   real `Deck` in one process. `player/heos.rs` is tested against a fake HEOS
-  server, not a real receiver. The USB deck (`deck/hid.rs`) and Chromecast
-  (`player/cast.rs`) have no automated tests beyond `coalesce` and failed
-  commands against a closed port. Say so when a change touches them, and
-  verify with `just doctor`, `just sim` or real hardware.
+  server, not a real receiver. Chromecast's decisions (`poll_event`,
+  `skip_target` over `StatusEntry`) are unit-tested in `cast/tests.rs`, but
+  its network path and the USB deck (`deck/hid.rs`) have no automated tests
+  and Cast was never run on real hardware. Say so when a change touches
+  them, and verify with `just doctor`, `just sim` or real hardware.
 - The UI guesses the result of a key press before the speaker answers, so
   the player must deliver the next event after every command, even when it
   repeats the last one (`player::run` resets `Emitter::last`).

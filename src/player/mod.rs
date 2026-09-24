@@ -6,16 +6,17 @@
 mod cast;
 pub mod heos;
 
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use tracing::{debug, warn};
 
 use crate::config::SpeakerType;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TrackInfo {
     /// Where the speaker downloads the track from.
     pub url: String,
@@ -31,6 +32,7 @@ pub enum PlayerCmd {
     PlayAlbum {
         album: usize,
         tracks: Vec<TrackInfo>,
+        /// The current volume: it replaces any `SetVolume` sent before.
         volume: f32,
     },
     /// Pauses if playing, resumes if paused, restarts the album if nothing is loaded.
@@ -53,8 +55,9 @@ pub enum PlayerEvent {
     Stopped,
 }
 
-/// How long the player thread sleeps between commands while no album plays.
-const IDLE_WAIT: Duration = Duration::from_secs(3600);
+/// A speaker that fails this many status polls in a row is taken to be gone.
+const MAX_FAILED_POLLS: u32 = 3;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn spawn(
     speaker_type: SpeakerType,
@@ -90,9 +93,13 @@ trait Speaker {
 }
 
 fn run(mut speaker: Box<dyn Speaker + Send>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
+    let mut failed_polls = 0;
     loop {
-        let timeout = speaker.poll_interval().unwrap_or(IDLE_WAIT);
-        match rx.recv_timeout(timeout) {
+        let next = match speaker.poll_interval() {
+            Some(interval) => rx.recv_timeout(interval),
+            None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        match next {
             Ok(first) => {
                 let pending: Vec<PlayerCmd> = std::iter::once(first).chain(rx.try_iter()).collect();
                 // The UI already guessed the outcome of these commands, so
@@ -104,22 +111,53 @@ fn run(mut speaker: Box<dyn Speaker + Send>, rx: &Receiver<PlayerCmd>, mut event
                         warn!("speaker command failed: {err:#}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
+                        // The rest were guesses from a state the UI no longer
+                        // shows, and each would wait out its own timeout.
+                        break;
+                    }
+                    failed_polls = 0;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => match speaker.poll(&mut events) {
+                Ok(()) => failed_polls = 0,
+                Err(err) => {
+                    debug!("status poll failed: {err:#}");
+                    failed_polls += 1;
+                    if failed_polls >= MAX_FAILED_POLLS {
+                        warn!("the speaker stopped answering: {err:#}");
+                        speaker.reset();
+                        events.emit(PlayerEvent::Stopped);
+                        failed_polls = 0;
                     }
                 }
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                if speaker.poll_interval().is_some()
-                    && let Err(err) = speaker.poll(&mut events)
-                {
-                    debug!("status poll failed: {err:#}");
-                }
-            }
+            },
             Err(RecvTimeoutError::Disconnected) => return,
         }
     }
 }
 
-/// Sends events to the UI, skipping repeats of the last one.
+/// Both speaker protocols take 0.0 to 1.0.
+fn clamp_volume(volume: f32) -> f32 {
+    volume.clamp(0.0, 1.0)
+}
+
+/// Like `TcpStream::connect`, with a timeout for each address `host` resolves to.
+fn connect(host: &str, port: u16) -> Result<TcpStream> {
+    let mut last_err = anyhow!("cannot resolve {host}");
+    for addr in (host, port)
+        .to_socket_addrs()
+        .with_context(|| format!("cannot resolve {host}"))?
+    {
+        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+            Ok(stream) => return Ok(stream),
+            Err(err) => {
+                last_err = anyhow::Error::new(err).context(format!("speaker {addr} not reachable"));
+            }
+        }
+    }
+    Err(last_err)
+}
+
 struct Emitter {
     tx: Sender<PlayerEvent>,
     last: Option<PlayerEvent>,
@@ -147,9 +185,7 @@ fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
         .enumerate()
         .filter(|(i, c)| {
             let after_play = last_play.is_none_or(|p| *i >= p);
-            let volume_ok = !matches!(c, PlayerCmd::SetVolume(_)) || Some(*i) == last_volume;
-            // Volume changes still matter even if they came before the last album press.
-            (after_play || matches!(c, PlayerCmd::SetVolume(_))) && volume_ok
+            after_play && (!matches!(c, PlayerCmd::SetVolume(_)) || Some(*i) == last_volume)
         })
         .map(|(_, c)| c)
         .collect()
@@ -157,6 +193,10 @@ fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     #[test]
@@ -182,6 +222,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn connect_tries_every_address() {
+        // `localhost` resolves to ::1 first on macOS, and only IPv4 listens here.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        connect("localhost", port).unwrap();
+    }
+
+    #[test]
+    fn volumes_are_clamped_to_the_speaker_range() {
+        for (volume, expected) in [(-0.1, 0.0), (0.35, 0.35), (1.5, 1.0)] {
+            assert!(
+                (clamp_volume(volume) - expected).abs() < f32::EPSILON,
+                "{volume}"
+            );
+        }
+    }
+
     fn album() -> PlayerCmd {
         PlayerCmd::PlayAlbum {
             album: 0,
@@ -191,25 +249,159 @@ mod tests {
     }
 
     #[test]
-    fn keeps_only_last_album_and_volume() {
+    fn keeps_the_last_album_and_only_the_last_volume_after_it() {
+        use PlayerCmd::{Next, PlayAlbum, SetVolume, TogglePause};
         let out = coalesce(vec![
-            PlayerCmd::SetVolume(0.1),
+            SetVolume(0.1),
             album(),
-            PlayerCmd::Next,
-            PlayerCmd::SetVolume(0.2),
+            Next,
+            SetVolume(0.2),
             album(),
-            PlayerCmd::Next,
+            Next,
         ]);
-        let kinds: Vec<String> = out
-            .iter()
-            .map(|c| {
-                format!("{c:?}")
-                    .split(['(', ' '])
-                    .next()
-                    .unwrap()
-                    .to_string()
-            })
-            .collect();
-        assert_eq!(kinds, ["SetVolume", "PlayAlbum", "Next"]);
+        assert!(
+            matches!(out.as_slice(), [PlayAlbum { .. }, Next]),
+            "{out:?}"
+        );
+
+        let out = coalesce(vec![album(), SetVolume(0.3), SetVolume(0.4)]);
+        assert!(
+            matches!(out.as_slice(), [PlayAlbum { .. }, SetVolume(v)] if (v - 0.4).abs() < f32::EPSILON),
+            "{out:?}"
+        );
+
+        let out = coalesce(vec![SetVolume(0.1), TogglePause, SetVolume(0.2)]);
+        assert!(
+            matches!(out.as_slice(), [TogglePause, SetVolume(v)] if (v - 0.2).abs() < f32::EPSILON),
+            "{out:?}"
+        );
+    }
+
+    enum Poll {
+        Answer,
+        Fail,
+        /// Fails, then has no album left to poll, so `run` waits for a command.
+        FailAndIdle,
+    }
+
+    /// A speaker that follows a script, to drive `run` without a network.
+    struct Scripted {
+        polls: VecDeque<Poll>,
+        active: bool,
+        fail_commands: bool,
+        handled: Arc<AtomicUsize>,
+        polled: Arc<AtomicUsize>,
+        /// Gets a message each time the script goes idle.
+        idle: Sender<()>,
+    }
+
+    impl Scripted {
+        fn new(polls: Vec<Poll>) -> (Scripted, Receiver<()>) {
+            let (idle, idle_rx) = mpsc::channel();
+            let speaker = Scripted {
+                polls: polls.into(),
+                active: true,
+                fail_commands: false,
+                handled: Arc::default(),
+                polled: Arc::default(),
+                idle,
+            };
+            (speaker, idle_rx)
+        }
+    }
+
+    impl Speaker for Scripted {
+        fn handle(&mut self, _: PlayerCmd, _: &mut Emitter) -> Result<()> {
+            self.handled.fetch_add(1, Ordering::SeqCst);
+            anyhow::ensure!(!self.fail_commands, "the speaker is off");
+            self.active = true;
+            Ok(())
+        }
+
+        fn poll(&mut self, _: &mut Emitter) -> Result<()> {
+            self.polled.fetch_add(1, Ordering::SeqCst);
+            match self.polls.pop_front() {
+                Some(Poll::Answer) => Ok(()),
+                Some(Poll::Fail) => anyhow::bail!("no answer"),
+                Some(Poll::FailAndIdle) | None => {
+                    self.active = false;
+                    self.idle.send(()).unwrap();
+                    anyhow::bail!("no answer")
+                }
+            }
+        }
+
+        fn poll_interval(&self) -> Option<Duration> {
+            self.active.then_some(Duration::from_millis(1))
+        }
+
+        fn reset(&mut self) {
+            self.active = false;
+        }
+    }
+
+    fn run_on_a_thread(
+        speaker: Scripted,
+    ) -> (
+        Sender<PlayerCmd>,
+        Receiver<PlayerEvent>,
+        thread::JoinHandle<()>,
+    ) {
+        let (cmds, rx) = mpsc::channel();
+        let (tx, events) = mpsc::channel();
+        let thread = thread::spawn(move || run(Box::new(speaker), &rx, Emitter { tx, last: None }));
+        (cmds, events, thread)
+    }
+
+    #[test]
+    fn three_failed_polls_in_a_row_stop_the_album() {
+        use Poll::{Answer, Fail};
+        let (speaker, _idle) = Scripted::new(vec![Fail, Fail, Answer, Fail, Fail, Fail]);
+        let polled = Arc::clone(&speaker.polled);
+        let (cmds, events, thread) = run_on_a_thread(speaker);
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(2)),
+            Ok(PlayerEvent::Stopped)
+        );
+        drop(cmds);
+        thread.join().unwrap();
+        assert_eq!(
+            polled.load(Ordering::SeqCst),
+            6,
+            "a poll that works restarts the count, and polling ends with the album"
+        );
+    }
+
+    #[test]
+    fn a_command_that_works_restarts_the_failed_poll_count() {
+        use Poll::{Fail, FailAndIdle};
+        let (speaker, idle) = Scripted::new(vec![Fail, FailAndIdle, Fail, FailAndIdle]);
+        let (cmds, events, thread) = run_on_a_thread(speaker);
+        idle.recv_timeout(Duration::from_secs(2)).unwrap();
+        cmds.send(PlayerCmd::Next).unwrap();
+        idle.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(cmds);
+        thread.join().unwrap();
+        assert_eq!(events.try_iter().collect::<Vec<_>>(), []);
+    }
+
+    #[test]
+    fn a_failed_command_drops_the_rest_of_its_batch() {
+        let (mut speaker, _idle) = Scripted::new(vec![]);
+        speaker.active = false;
+        speaker.fail_commands = true;
+        let handled = Arc::clone(&speaker.handled);
+        let (cmds, rx) = mpsc::channel();
+        for _ in 0..3 {
+            cmds.send(PlayerCmd::TogglePause).unwrap();
+        }
+        drop(cmds);
+        let (tx, events) = mpsc::channel();
+        run(Box::new(speaker), &rx, Emitter { tx, last: None });
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            events.try_iter().collect::<Vec<_>>(),
+            [PlayerEvent::Stopped]
+        );
     }
 }

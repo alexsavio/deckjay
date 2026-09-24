@@ -3,7 +3,7 @@ name = "kids-deck"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "A kids' music player: album covers on a Stream Deck, music on a Chromecast speaker"
+description = "A kids' music player: album covers on a Stream Deck, music on a Chromecast or HEOS network speaker"
 publish = false
 
 [dependencies]

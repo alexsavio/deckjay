@@ -1,14 +1,14 @@
 //! kids-deck: a music player for kids.
 //!
 //! Album covers are shown on an Elgato Stream Deck. Pressing a cover plays
-//! the album on a Chromecast speaker. The program serves the music folder
-//! over HTTP and tells the speaker to fetch the tracks from it.
+//! the album on a network speaker (Chromecast or HEOS). The program serves the
+//! music folder over HTTP and tells the speaker to fetch the tracks from it.
 //!
 //! Three threads work together:
 //!
 //! - main: finds the deck, draws the keys and reacts to key presses
 //!   ([`ui::Ui`], [`deck::Deck`]).
-//! - `cast`: sends commands to the speaker and reports its state
+//! - `cast` or `heos`: sends commands to the speaker and reports its state
 //!   ([`player::spawn`]).
 //! - `http`: serves the music files to the speaker ([`server::spawn`]).
 //!
@@ -25,7 +25,7 @@ mod simulator;
 mod ui;
 
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -88,6 +88,7 @@ fn main() -> Result<()> {
                 if host.is_empty() {
                     bail!("--advertise-host is empty; in Docker, start with `just sim`");
                 }
+                config::check_advertise_host(&host).context("invalid --advertise-host")?;
                 advertise_host = Some(host);
             }
             "--preview" => {
@@ -113,33 +114,29 @@ fn main() -> Result<()> {
         cfg.music_dir.display()
     );
 
-    let advertise = match &cfg.advertise_host {
-        Some(host) => host.clone(),
-        None => local_ip_towards(&cfg.speaker_host, cfg.speaker_port)
-            .context("cannot detect this machine's IP address; set advertise_host in the config")?,
-    };
-    let base_url = format!("http://{advertise}:{}/music", cfg.http_port);
+    let base_url =
+        advertise_address(&cfg).map(|host| format!("http://{host}:{}/music", cfg.http_port));
 
     if let Some(path) = preview {
-        let (tx, _) = mpsc::channel();
-        let (_, rx) = mpsc::channel();
-        let mut ui = Ui::new(&cfg, albums, base_url, tx, rx);
-        ui.preview(3, 5, 144, true).save(&path)?;
-        info!("wrote {}", path.display());
-        return Ok(());
+        return write_preview(&cfg, albums, base_url?, &path);
     }
     if check {
-        return run_check(&cfg, &albums, &base_url, simulator_url.as_deref());
+        return run_check(&cfg, &albums, base_url.as_deref(), simulator_url.as_deref());
     }
+    let base_url = base_url?;
 
-    server::spawn(cfg.music_dir.clone(), cfg.http_port)?;
+    server::spawn(
+        cfg.music_dir.clone(),
+        cfg.http_port,
+        library::served_files(&albums),
+    )?;
     info!("serving music at {base_url}/");
 
     let (event_tx, event_rx) = mpsc::channel();
     let player = player::spawn(
         cfg.speaker_type,
         cfg.speaker_host.clone(),
-        cfg.speaker_port,
+        cfg.speaker_port(),
         event_tx,
     );
     let mut ui = Ui::new(&cfg, albums, base_url, player, event_rx);
@@ -222,6 +219,35 @@ fn run_simulator(mut args: impl Iterator<Item = String>) -> Result<()> {
     simulator::run(port, model)
 }
 
+fn write_preview(
+    cfg: &Config,
+    albums: Vec<library::Album>,
+    base_url: String,
+    path: &Path,
+) -> Result<()> {
+    let (tx, _) = mpsc::channel();
+    let (_, rx) = mpsc::channel();
+    let mut ui = Ui::new(cfg, albums, base_url, tx, rx);
+    ui.preview(3, 5, 144, true)
+        .save(path)
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    info!("wrote {}", path.display());
+    Ok(())
+}
+
+fn advertise_address(cfg: &Config) -> Result<String> {
+    match &cfg.advertise_host {
+        Some(host) => Ok(host.clone()),
+        None => local_ip_towards(&cfg.speaker_host, cfg.speaker_port()).with_context(|| {
+            format!(
+                "cannot find a route to speaker_host {} (port {}); check it, or set advertise_host",
+                cfg.speaker_host,
+                cfg.speaker_port()
+            )
+        }),
+    }
+}
+
 /// The local address this machine uses to reach the speaker. No packets are
 /// sent: connecting a UDP socket only picks the route.
 fn local_ip_towards(host: &str, port: u16) -> Result<String> {
@@ -233,7 +259,7 @@ fn local_ip_towards(host: &str, port: u16) -> Result<String> {
 fn run_check(
     cfg: &Config,
     albums: &[library::Album],
-    base_url: &str,
+    base_url: Result<&str, &anyhow::Error>,
     simulator_url: Option<&str>,
 ) -> Result<()> {
     println!("Albums in {}:", cfg.music_dir.display());
@@ -249,11 +275,16 @@ fn run_check(
             album.tracks.len()
         );
     }
-    if let Some(track) = albums.first().and_then(|a| a.tracks.first()) {
-        println!(
-            "\nExample URL the speaker will fetch:\n  {}",
-            library::url_for(base_url, &track.rel_path)
-        );
+    match base_url {
+        Ok(base_url) => {
+            if let Some(track) = albums.first().and_then(|a| a.tracks.first()) {
+                println!(
+                    "\nExample URL the speaker will fetch:\n  {}",
+                    library::url_for(base_url, &track.rel_path)
+                );
+            }
+        }
+        Err(err) => println!("\nThe speaker cannot fetch music:\n  {err:#}"),
     }
 
     if let Some(url) = simulator_url {
@@ -272,7 +303,9 @@ fn run_check(
 
     println!(
         "\nSpeaker {}:{} ({:?}):",
-        cfg.speaker_host, cfg.speaker_port, cfg.speaker_type
+        cfg.speaker_host,
+        cfg.speaker_port(),
+        cfg.speaker_type
     );
     match cfg.speaker_type {
         SpeakerType::Cast => print_cast_speaker(cfg),
@@ -282,7 +315,7 @@ fn run_check(
 }
 
 fn print_cast_speaker(cfg: &Config) {
-    let reachable = (cfg.speaker_host.as_str(), cfg.speaker_port)
+    let reachable = (cfg.speaker_host.as_str(), cfg.speaker_port())
         .to_socket_addrs()
         .map_err(anyhow::Error::from)
         .and_then(|mut addrs| addrs.next().context("cannot resolve speaker address"))
@@ -293,7 +326,7 @@ fn print_cast_speaker(cfg: &Config) {
     }
     match rust_cast::CastDevice::connect_without_host_verification(
         cfg.speaker_host.clone(),
-        cfg.speaker_port,
+        cfg.speaker_port(),
     )
     .map_err(anyhow::Error::from)
     .and_then(|device| {
@@ -315,7 +348,7 @@ fn print_cast_speaker(cfg: &Config) {
 }
 
 fn print_heos_players(cfg: &Config) {
-    match player::heos::players(&cfg.speaker_host, cfg.speaker_port) {
+    match player::heos::players(&cfg.speaker_host, cfg.speaker_port()) {
         Ok(players) if players.is_empty() => println!("  reachable ✓  but it knows no players"),
         Ok(players) => {
             println!("  reachable ✓");
@@ -344,4 +377,29 @@ fn print_usb_decks() -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(extra: &str) -> Config {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, format!("music_dir = \"music\"\n{extra}")).unwrap();
+        Config::load(&path).unwrap()
+    }
+
+    #[test]
+    fn no_route_to_the_speaker_names_speaker_host() {
+        // An IPv4 socket cannot connect to an IPv6 address: fails without DNS or network.
+        let err = advertise_address(&config("speaker_host = \"::1\"\n")).unwrap_err();
+        assert!(err.to_string().contains("speaker_host ::1"), "{err:#}");
+    }
+
+    #[test]
+    fn advertise_host_skips_detection() {
+        let cfg = config("speaker_host = \"::1\"\nadvertise_host = \"10.0.0.2\"\n");
+        assert_eq!(advertise_address(&cfg).unwrap(), "10.0.0.2");
+    }
 }

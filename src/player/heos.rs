@@ -1,8 +1,9 @@
 //! Denon / Marantz HEOS speakers, through the HEOS CLI on TCP port 1255.
 //!
-//! One connection stays open, as the CLI spec asks, and is reopened on the
-//! next call after any I/O error; it drives the player whose `ip` is the
-//! speaker host, else the first one `get_players` lists. `browse/play_stream`
+//! One connection stays open, as the CLI spec asks. A command that finds it
+//! closed or reset is sent again on a new one; after a timeout, the next call
+//! reconnects. It drives the player whose `ip` is the speaker host, else the
+//! first one `get_players` lists. `browse/play_stream`
 //! plays a single URL and there is no queue for plain URLs, so this player
 //! walks the album itself: while an album is active it polls the play state
 //! every second, and a `stop` after the track was seen playing starts the
@@ -11,8 +12,8 @@
 //! track that ended from a stop pressed in the HEOS app: both move to the
 //! next track.
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io::{self, BufRead, BufReader, ErrorKind, Write};
+use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
@@ -25,7 +26,6 @@ use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// How long a new track may report `stop` before we give up on it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// For each read and write, and for the whole wait for one reply.
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -40,6 +40,7 @@ pub(super) struct HeosPlayer {
     /// `None` while no album is active.
     current: Option<Current>,
     load_timeout: Duration,
+    io_timeout: Duration,
 }
 
 /// The track of our album the speaker was told to play.
@@ -72,6 +73,7 @@ impl HeosPlayer {
             tracks: Vec::new(),
             current: None,
             load_timeout: LOAD_TIMEOUT,
+            io_timeout: IO_TIMEOUT,
         }
     }
 }
@@ -177,19 +179,24 @@ impl HeosPlayer {
     }
 
     fn play_track(&mut self, index: usize, events: &mut Emitter) -> Result<()> {
-        let track = self
+        let url = self
             .tracks
             .get(index)
             .ok_or_else(|| anyhow!("the album has no track {index}"))?
+            .url
             .clone();
         // A Denon AVR-X1600H keeps earlier streams in a hidden queue that
         // `get_queue` does not list: without this, it plays them after our
         // track and never reports `stop`. It fails (eid 4) when the queue is
-        // already empty, which is fine.
-        if let Err(err) = self.call("player/clear_queue", &[]) {
-            debug!("clear_queue: {err:#}");
+        // already empty, which is fine; that `fail` reply keeps the connection,
+        // an I/O error does not.
+        match self.call("player/clear_queue", &[]) {
+            Ok(_) => {}
+            Err(err) if self.conn.is_some() => debug!("clear_queue: {err:#}"),
+            Err(err) => return Err(err),
         }
-        self.call("browse/play_stream", &[("url", &track.url)])?;
+        self.call("browse/play_stream", &[("url", &url)])?;
+        let track = &self.tracks[index];
         info!(album = %track.album, track = %track.title, "playing");
         self.current = Some(Current {
             track: index,
@@ -210,7 +217,7 @@ impl HeosPlayer {
     }
 
     fn set_volume(&mut self, volume: f32) -> Result<()> {
-        let level = (volume.clamp(0.0, 1.0) * 100.0).round() as u8;
+        let level = (super::clamp_volume(volume) * 100.0).round() as u8;
         self.call("player/set_volume", &[("level", &level.to_string())])?;
         Ok(())
     }
@@ -234,9 +241,23 @@ impl HeosPlayer {
 
     /// Sends `command` for our player (`pid` is added) and returns the reply's message.
     fn call(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Message> {
+        let reused = self.conn.is_some();
+        match self.call_once(command, args) {
+            // The CLI resets idle connections when it recovers from a hang, and
+            // a restarted receiver has none: the old socket fails at once, not
+            // with a timeout. Every command sent here can safely go twice.
+            Err(err) if reused && connection_lost(&err) => {
+                debug!("HEOS connection lost, reconnecting: {err:#}");
+                self.call_once(command, args)
+            }
+            result => result,
+        }
+    }
+
+    fn call_once(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Message> {
         let mut conn = match self.conn.take() {
             Some(conn) => conn,
-            None => Connection::open(&self.host, self.port)?,
+            None => Connection::open(&self.host, self.port, self.io_timeout)?,
         };
         let pid = conn.pid.to_string();
         let args: Vec<(&str, &str)> = [("pid", pid.as_str())]
@@ -250,15 +271,14 @@ impl HeosPlayer {
     }
 }
 
-/// An open CLI connection and the player it drives.
 struct Connection {
     cli: Cli,
     pid: i64,
 }
 
 impl Connection {
-    fn open(host: &str, port: u16) -> Result<Connection> {
-        let mut cli = Cli::connect(host, port)?;
+    fn open(host: &str, port: u16, io_timeout: Duration) -> Result<Connection> {
+        let mut cli = Cli::connect(host, port, io_timeout)?;
         let peer = cli.peer_ip();
         let players = cli.players()?;
         let player = players
@@ -279,20 +299,17 @@ impl Connection {
 
 struct Cli {
     reader: BufReader<TcpStream>,
+    io_timeout: Duration,
 }
 
 impl Cli {
-    fn connect(host: &str, port: u16) -> Result<Cli> {
-        let addr = (host, port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| anyhow!("cannot resolve {host}"))?;
-        let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-            .with_context(|| format!("HEOS speaker {addr} not reachable"))?;
-        stream.set_read_timeout(Some(IO_TIMEOUT))?;
-        stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    fn connect(host: &str, port: u16, io_timeout: Duration) -> Result<Cli> {
+        let stream = super::connect(host, port)?;
+        stream.set_read_timeout(Some(io_timeout))?;
+        stream.set_write_timeout(Some(io_timeout))?;
         let mut cli = Cli {
             reader: BufReader::new(stream),
+            io_timeout,
         };
         // The spec's start-up advice; it also keeps change events off this connection.
         cli.request("system/register_for_change_events", &[("enable", "off")])?;
@@ -324,11 +341,15 @@ impl Cli {
             "a HEOS command cannot contain a line break"
         );
         self.reader.get_mut().write_all(line.as_bytes())?;
-        let deadline = Instant::now() + IO_TIMEOUT;
+        let deadline = Instant::now() + self.io_timeout;
         loop {
             let mut buf = String::new();
             if self.reader.read_line(&mut buf)? == 0 {
-                bail!("the HEOS speaker closed the connection");
+                let closed = io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "the HEOS speaker closed the connection",
+                );
+                return Err(closed.into());
             }
             if !buf.trim().is_empty() {
                 let reply: Reply = serde_json::from_str(buf.trim())
@@ -340,6 +361,13 @@ impl Cli {
             ensure!(Instant::now() < deadline, "no HEOS reply to {command}");
         }
     }
+}
+
+/// The socket failed at once (reset, closed, broken pipe) rather than timing
+/// out; a read timeout is `WouldBlock` on Unix and `TimedOut` on Windows.
+fn connection_lost(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<io::Error>()
+        .is_some_and(|e| !matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut))
 }
 
 /// `url` goes last and unencoded, as the spec asks: the CLI takes the rest of
@@ -415,7 +443,6 @@ fn unspaced(s: &str) -> String {
         .collect()
 }
 
-/// A reply's `message`: `key=value` pairs joined by `&`.
 struct Message(Vec<(String, String)>);
 
 impl Message {
@@ -483,7 +510,6 @@ fn decode(s: &str) -> String {
     out
 }
 
-/// A player the HEOS system knows about, for `--check`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerInfo {
     pub pid: i64,
@@ -529,9 +555,8 @@ impl TryFrom<RawPlayer> for PlayerInfo {
     }
 }
 
-/// Lists the players the HEOS device at `host:port` knows about.
 pub fn players(host: &str, port: u16) -> Result<Vec<PlayerInfo>> {
-    Cli::connect(host, port)?.players()
+    Cli::connect(host, port, IO_TIMEOUT)?.players()
 }
 
 #[cfg(test)]

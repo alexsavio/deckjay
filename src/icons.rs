@@ -2,26 +2,26 @@
 //! 0.0–1.0 coordinates, rendered 4x oversized and scaled down for smooth edges.
 
 use image::imageops::{self, FilterType};
-use image::{DynamicImage, Rgb, RgbImage};
+use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
 
 const SUPERSAMPLE: u32 = 4;
 
-pub const WHITE: Rgb<u8> = Rgb([255, 255, 255]);
-pub const HIGHLIGHT: Rgb<u8> = Rgb([255, 205, 0]);
-pub const BG_PLAY: Rgb<u8> = Rgb([22, 150, 70]);
-pub const BG_SKIP: Rgb<u8> = Rgb([90, 70, 190]);
-pub const BG_VOLUME: Rgb<u8> = Rgb([30, 110, 210]);
-pub const BG_MORE: Rgb<u8> = Rgb([235, 120, 20]);
-pub const BG_BLANK: Rgb<u8> = Rgb([0, 0, 0]);
+const WHITE: Rgb<u8> = Rgb([255, 255, 255]);
+const HIGHLIGHT: Rgb<u8> = Rgb([255, 205, 0]);
+const BG_PLAY: Rgb<u8> = Rgb([22, 150, 70]);
+const BG_SKIP: Rgb<u8> = Rgb([90, 70, 190]);
+const BG_VOLUME: Rgb<u8> = Rgb([30, 110, 210]);
+const BG_MORE: Rgb<u8> = Rgb([235, 120, 20]);
+const BG_BLANK: Rgb<u8> = Rgb([0, 0, 0]);
 
-pub struct Canvas {
+struct Canvas {
     img: RgbImage,
     /// Oversampled canvas width in pixels; scales 0.0–1.0 coordinates into pixel space.
     scale: f32,
 }
 
 impl Canvas {
-    pub fn new(size: u32, background: Rgb<u8>) -> Self {
+    fn new(size: u32, background: Rgb<u8>) -> Self {
         let big = size * SUPERSAMPLE;
         Canvas {
             img: RgbImage::from_pixel(big, big, background),
@@ -30,7 +30,7 @@ impl Canvas {
     }
 
     /// Fills a convex polygon given in 0.0–1.0 coordinates.
-    pub fn polygon(&mut self, points: &[(f32, f32)], color: Rgb<u8>) {
+    fn polygon(&mut self, points: &[(f32, f32)], color: Rgb<u8>) {
         let pts: Vec<(f32, f32)> = points
             .iter()
             .map(|&(x, y)| (x * self.scale, y * self.scale))
@@ -46,15 +46,15 @@ impl Canvas {
         }
     }
 
-    pub fn rect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: Rgb<u8>) {
+    fn rect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: Rgb<u8>) {
         self.polygon(&[(x0, y0), (x1, y0), (x1, y1), (x0, y1)], color);
     }
 
-    pub fn circle(&mut self, cx: f32, cy: f32, r: f32, color: Rgb<u8>) {
+    fn circle(&mut self, cx: f32, cy: f32, r: f32, color: Rgb<u8>) {
         let (cx, cy, r) = (cx * self.scale, cy * self.scale, r * self.scale);
         let size = self.img.width() as f32;
-        let (x0, x1) = ((cx - r).max(0.0) as u32, (cx + r).min(size) as u32);
-        let (y0, y1) = ((cy - r).max(0.0) as u32, (cy + r).min(size) as u32);
+        let (x0, x1) = ((cx - r).max(0.0) as u32, (cx + r).min(size).ceil() as u32);
+        let (y0, y1) = ((cy - r).max(0.0) as u32, (cy + r).min(size).ceil() as u32);
         for y in y0..y1 {
             for x in x0..x1 {
                 let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
@@ -65,7 +65,7 @@ impl Canvas {
         }
     }
 
-    pub fn finish(self, size: u32) -> RgbImage {
+    fn finish(self, size: u32) -> RgbImage {
         imageops::resize(&self.img, size, size, FilterType::Triangle)
     }
 }
@@ -162,14 +162,21 @@ pub fn more(size: u32, page: usize, pages: usize) -> RgbImage {
     let mut c = Canvas::new(size, BG_MORE);
     c.rect(0.20, 0.36, 0.56, 0.52, WHITE);
     c.polygon(&[(0.54, 0.20), (0.54, 0.68), (0.82, 0.44)], WHITE);
-    let pages = pages.clamp(1, 8);
+    let (dots, filled) = page_dots(page, pages);
     let spacing = 0.11;
-    let start = 0.5 - spacing * (pages as f32 - 1.0) / 2.0;
-    for i in 0..pages {
-        let r = if i == page { 0.045 } else { 0.025 };
+    let start = 0.5 - spacing * (dots as f32 - 1.0) / 2.0;
+    for i in 0..dots {
+        let r = if i == filled { 0.045 } else { 0.025 };
         c.circle(start + spacing * i as f32, 0.84, r, WHITE);
     }
     c.finish(size)
+}
+
+/// (dots drawn, index of the filled dot). At most 8 dots fit on a key, so
+/// with more pages neighbouring pages share a dot.
+fn page_dots(page: usize, pages: usize) -> (usize, usize) {
+    let dots = pages.clamp(1, 8);
+    (dots, page * dots / pages.max(1))
 }
 
 pub fn blank(size: u32) -> RgbImage {
@@ -180,9 +187,20 @@ pub fn blank(size: u32) -> RgbImage {
 
 /// Center-cropped square thumbnail of a cover image.
 pub fn thumbnail(cover: &DynamicImage, size: u32) -> RgbImage {
+    let (w, h) = cover.dimensions();
+    let short = w.min(h);
+    let target = size * 4;
+    if short > target {
+        // Lanczos3's kernel grows with the shrink ratio, so a box filter does
+        // the bulk first: about 4x faster on a 3000 px cover, no visible change.
+        let cover = cover.thumbnail_exact(w * target / short, h * target / short);
+        return cover
+            .resize_to_fill(size, size, FilterType::Lanczos3)
+            .into_rgb8();
+    }
     cover
         .resize_to_fill(size, size, FilterType::Lanczos3)
-        .to_rgb8()
+        .into_rgb8()
 }
 
 /// Colored tile with a music note, for albums without a cover.
@@ -235,4 +253,35 @@ fn hue_to_rgb(hue: f32) -> Rgb<u8> {
     };
     let to = |f: f32| ((f + m) * 255.0).round() as u8;
     Rgb([to(r), to(g), to(b)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_page_fills_a_dot() {
+        for pages in 1..=20 {
+            for page in 0..pages {
+                let (dots, filled) = page_dots(page, pages);
+                assert!(filled < dots, "page {page} of {pages}");
+                if pages <= 8 {
+                    assert_eq!((dots, filled), (pages, page));
+                }
+            }
+            assert_eq!(page_dots(0, pages).1, 0);
+            assert_eq!(
+                page_dots(pages - 1, pages),
+                (pages.min(8), pages.min(8) - 1)
+            );
+        }
+    }
+
+    #[test]
+    fn a_thumbnail_is_a_square_of_the_key_size() {
+        for (w, h) in [(3000, 2000), (500, 1600), (300, 300), (50, 40)] {
+            let cover = DynamicImage::new_rgb8(w, h);
+            assert_eq!(thumbnail(&cover, 72).dimensions(), (72, 72), "{w}x{h}");
+        }
+    }
 }

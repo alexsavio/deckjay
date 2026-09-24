@@ -1,6 +1,7 @@
 //! The web Stream Deck simulator ([`crate::simulator`]) over HTTP.
 
 use std::io::Cursor;
+use std::ops::RangeInclusive;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -12,6 +13,10 @@ use crate::simulator::{Brightness, Info};
 
 /// Time allowed for one request, on top of a long-poll's own wait.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+// Bounds on a simulator's grid: the largest real deck has 36 keys, and key
+// images are drawn at 4x, so a bogus grid could exhaust a Pi's memory.
+const MAX_KEYS: usize = 64;
+const KEY_SIZES: RangeInclusive<u32> = 16..=512;
 
 pub(super) struct RemoteDeck {
     agent: Agent,
@@ -27,13 +32,18 @@ pub(super) fn agent() -> Agent {
 }
 
 /// `None` when nothing answers at `url`, so the caller keeps waiting as it
-/// does for an unplugged deck. HTTP errors are real errors: wrong URL.
+/// does for an unplugged deck. HTTP errors and URLs ureq cannot use are real
+/// errors: waiting would never help.
 pub(super) fn fetch_info(agent: &Agent, url: &str) -> Result<Option<Info>> {
     let base = url.trim_end_matches('/');
     let mut reply = match agent.get(format!("{base}/api/info")).call() {
         Ok(reply) => reply,
         Err(ureq::Error::StatusCode(code)) => {
             bail!("{base}/api/info answered HTTP {code}: is this the deck simulator?")
+        }
+        // TlsRequired: ureq is built without TLS, so an https URL can never work.
+        Err(err @ (ureq::Error::BadUri(_) | ureq::Error::Http(_) | ureq::Error::TlsRequired)) => {
+            bail!("{base} is not a usable simulator URL (use http://HOST:PORT): {err}")
         }
         Err(err) => {
             tracing::debug!("deck simulator not reachable: {err}");
@@ -51,11 +61,19 @@ impl RemoteDeck {
         let Some(info) = fetch_info(&agent, url)? else {
             return Ok(None);
         };
-        if info.rows < 2 || info.cols == 0 {
+        let too_many_keys = info
+            .rows
+            .checked_mul(info.cols)
+            .is_none_or(|n| n > MAX_KEYS);
+        if info.rows < 2 || info.cols == 0 || too_many_keys || !KEY_SIZES.contains(&info.key_size) {
             bail!(
-                "the simulator has {}x{} keys; at least 2 rows are needed",
+                "the simulator has {}x{} keys of {} px; the player needs at least 2 rows, \
+                 at most {MAX_KEYS} keys and keys of {} to {} px",
                 info.rows,
-                info.cols
+                info.cols,
+                info.key_size,
+                KEY_SIZES.start(),
+                KEY_SIZES.end()
             );
         }
         let base = url.trim_end_matches('/').to_string();
@@ -170,9 +188,35 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_grid_the_player_cannot_draw() {
+        for (rows, cols, key_size) in [(3, 5, 0), (3, 5, 513), (2, 33, 72)] {
+            let url = start_simulator(Info {
+                rows,
+                cols,
+                key_size,
+            });
+            assert!(
+                Deck::open_simulator(&url).is_err(),
+                "{rows}x{cols} keys of {key_size} px"
+            );
+        }
+    }
+
+    #[test]
     fn a_wrong_url_is_an_error_not_a_wait() {
         let url = start_simulator(Model::Mk2.info());
         assert!(Deck::open_simulator(&format!("{url}/nope")).is_err());
+    }
+
+    #[test]
+    fn a_url_ureq_cannot_use_is_an_error_not_a_wait() {
+        let url = start_simulator(Model::Mk2.info());
+        let without_scheme = url.trim_start_matches("http://");
+        let https = url.replacen("http://", "https://", 1);
+        for bad in [without_scheme, &https] {
+            assert!(Deck::open_simulator(bad).is_err(), "open {bad}");
+            assert!(Deck::simulator_info(bad).is_err(), "info {bad}");
+        }
     }
 
     #[test]
@@ -218,6 +262,9 @@ mod tests {
 
         Deck::open_simulator(&url).unwrap().unwrap();
 
-        assert!(ureq::get(format!("{url}/api/keys/0")).call().is_err());
+        assert!(matches!(
+            ureq::get(format!("{url}/api/keys/0")).call(),
+            Err(ureq::Error::StatusCode(404))
+        ));
     }
 }

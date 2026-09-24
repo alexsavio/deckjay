@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use image::{ImageFormat, Rgb, RgbImage};
 use serde::de::DeserializeOwned;
 
+use super::api::MAX_QUEUED;
 use super::{Brightness, Info, Model, State, serve};
 
 fn start(info: Info) -> String {
@@ -129,6 +130,16 @@ fn presses_are_returned_once_oldest_first() {
     press(&url, 2);
     assert_eq!(presses(&url, 0), [7, 2]);
     assert!(presses(&url, 0).is_empty());
+}
+
+#[test]
+fn a_full_queue_drops_the_oldest_press() {
+    let url = start(Model::Mk2.info());
+    press(&url, 0);
+    for _ in 0..MAX_QUEUED {
+        press(&url, 1);
+    }
+    assert_eq!(presses(&url, 0), vec![1; MAX_QUEUED]);
 }
 
 #[test]

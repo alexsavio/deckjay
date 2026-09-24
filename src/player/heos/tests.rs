@@ -24,6 +24,8 @@ struct Script {
     noisy: bool,
     /// Close the connection instead of answering the next command.
     hang_up: bool,
+    /// Never answer this command; the connection stays open.
+    mute: Option<&'static str>,
 }
 
 /// A HEOS CLI on 127.0.0.1 that answers with canned JSON.
@@ -82,6 +84,9 @@ fn serve(stream: TcpStream, script: &Mutex<Script>, players: &str) {
             script.commands.push(command.clone());
             if std::mem::take(&mut script.hang_up) {
                 return;
+            }
+            if script.mute.is_some_and(|name| command.starts_with(name)) {
+                continue;
             }
             answer(&mut script, &command, players)
         };
@@ -388,21 +393,104 @@ fn the_player_loop_reports_stopped_when_a_command_fails() {
 }
 
 #[test]
-fn a_dropped_connection_is_reopened_on_the_next_command() {
+fn a_dropped_connection_is_reopened_and_the_command_sent_again() {
     let mut rig = Rig::new(ONE_PLAYER);
     rig.send(PlayerCmd::SetVolume(0.5)).unwrap();
     rig.fake.script().hang_up = true;
-    assert!(rig.send(PlayerCmd::SetVolume(0.6)).is_err());
-    rig.send(PlayerCmd::SetVolume(0.7)).unwrap();
+    rig.send(PlayerCmd::SetVolume(0.6)).unwrap();
     assert_eq!(
         rig.fake.commands()[3..],
         [
             "player/set_volume?pid=7&level=60",
             "system/register_for_change_events?enable=off",
             "player/get_players",
-            "player/set_volume?pid=7&level=70",
+            "player/set_volume?pid=7&level=60",
         ]
     );
+}
+
+#[test]
+fn a_timed_out_command_is_not_sent_again() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.player.io_timeout = Duration::from_millis(100);
+    rig.send(PlayerCmd::SetVolume(0.5)).unwrap();
+    rig.fake.script().mute = Some("player/set_volume");
+    assert!(rig.send(PlayerCmd::SetVolume(0.6)).is_err());
+    assert_eq!(rig.fake.last_command(), "player/set_volume?pid=7&level=60");
+}
+
+#[test]
+fn a_silent_cli_fails_within_the_io_timeout() {
+    // The kernel accepts the connection; nothing ever answers.
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut player = HeosPlayer::new("127.0.0.1".into(), silent.local_addr().unwrap().port());
+    player.io_timeout = Duration::from_millis(100);
+    let (tx, _events) = mpsc::channel();
+    let start = Instant::now();
+    let result = player.handle(PlayerCmd::SetVolume(0.5), &mut Emitter { tx, last: None });
+    assert!(result.is_err());
+    assert!(
+        start.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn a_timed_out_clear_queue_stops_the_track_change() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.player.io_timeout = Duration::from_millis(100);
+    rig.send(play_album(3)).unwrap();
+    rig.fake.script().mute = Some("player/clear_queue");
+    assert!(rig.send(PlayerCmd::Next).is_err());
+    assert_eq!(
+        rig.fake.streamed(),
+        [track_url(0)],
+        "no stream goes out without its clear_queue"
+    );
+}
+
+#[test]
+fn a_poll_that_sees_pause_reports_it_and_counts_the_track_as_started() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(play_album(3)).unwrap();
+    rig.poll_with("pause");
+    rig.poll_with("stop");
+    assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
+    assert_eq!(rig.events(), [Playing(3), Paused(3), Playing(3)]);
+}
+
+#[test]
+fn a_failed_play_stream_from_a_poll_ends_the_album() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(play_album(3)).unwrap();
+    rig.poll_with("play");
+    rig.fake.script().fail = Some("browse/play_stream");
+    rig.fake.script().state = "stop";
+    assert!(rig.player.poll(&mut rig.emitter).is_err());
+    assert_eq!(rig.events(), [Playing(3), Stopped]);
+    assert_eq!(rig.player.poll_interval(), None);
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_play_state?pid=7&state=stop"
+    );
+}
+
+#[test]
+fn next_and_prev_without_an_album_send_nothing() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(PlayerCmd::Next).unwrap();
+    rig.send(PlayerCmd::Prev).unwrap();
+    assert_eq!(rig.fake.commands(), Vec::<String>::new());
+    assert_eq!(rig.events(), []);
+}
+
+#[test]
+fn an_album_without_tracks_is_an_error() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    let err = rig.send(play_album(0)).unwrap_err();
+    assert!(format!("{err:#}").contains("no track 0"), "{err:#}");
+    assert_eq!(rig.fake.streamed(), Vec::<String>::new());
 }
 
 #[test]

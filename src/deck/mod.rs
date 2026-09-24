@@ -94,10 +94,10 @@ impl Deck {
         }
         if !self.encoded.contains_key(face) {
             let data = self.backend.encode(render())?;
-            self.encoded.insert(face.clone(), data);
+            self.encoded.insert(*face, data);
         }
         self.backend.write_image(key, &self.encoded[face])?;
-        self.shown[key] = Some(face.clone());
+        self.shown[key] = Some(*face);
         Ok(())
     }
 
@@ -109,5 +109,106 @@ impl Deck {
     /// Waits up to `timeout` for input and returns the keys that were pressed down.
     pub fn pressed_keys(&self, timeout: Duration) -> Result<Vec<usize>> {
         self.backend.pressed_keys(timeout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use anyhow::bail;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Log {
+        encodes: usize,
+        writes: Vec<usize>,
+        unplugged: bool,
+    }
+
+    struct FakeBackend(Rc<RefCell<Log>>);
+
+    impl Backend for FakeBackend {
+        fn name(&self) -> String {
+            "fake".into()
+        }
+
+        fn layout(&self) -> (usize, usize) {
+            (2, 3)
+        }
+
+        fn key_size(&self) -> u32 {
+            4
+        }
+
+        fn set_brightness(&self, _: u8) -> Result<()> {
+            Ok(())
+        }
+
+        fn encode(&self, _: RgbImage) -> Result<Vec<u8>> {
+            self.0.borrow_mut().encodes += 1;
+            Ok(Vec::new())
+        }
+
+        fn write_image(&self, key: usize, _: &[u8]) -> Result<()> {
+            let mut log = self.0.borrow_mut();
+            if log.unplugged {
+                bail!("unplugged");
+            }
+            log.writes.push(key);
+            Ok(())
+        }
+
+        fn flush(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn pressed_keys(&self, _: Duration) -> Result<Vec<usize>> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn fake_deck() -> (Deck, Rc<RefCell<Log>>) {
+        let log = Rc::new(RefCell::new(Log::default()));
+        (Deck::new(FakeBackend(Rc::clone(&log))), log)
+    }
+
+    fn tile() -> RgbImage {
+        RgbImage::new(4, 4)
+    }
+
+    #[test]
+    fn a_key_is_only_sent_when_its_face_changes() {
+        let (mut deck, log) = fake_deck();
+        deck.show(0, &Face::Play, tile).unwrap();
+        deck.show(0, &Face::Play, tile).unwrap();
+        deck.show(0, &Face::Pause, tile).unwrap();
+        assert_eq!(log.borrow().writes, [0, 0]);
+    }
+
+    #[test]
+    fn a_face_is_rendered_and_encoded_once_for_every_key() {
+        let (mut deck, log) = fake_deck();
+        deck.show(0, &Face::Blank, tile).unwrap();
+        deck.show(1, &Face::Blank, || panic!("Blank rendered twice"))
+            .unwrap();
+        deck.show(0, &Face::Play, tile).unwrap();
+        deck.show(0, &Face::Blank, || panic!("Blank rendered twice"))
+            .unwrap();
+        assert_eq!(log.borrow().encodes, 2);
+        assert_eq!(log.borrow().writes, [0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn a_failed_write_is_sent_again_on_the_next_show() {
+        let (mut deck, log) = fake_deck();
+        log.borrow_mut().unplugged = true;
+        assert!(deck.show(5, &Face::Play, tile).is_err());
+
+        log.borrow_mut().unplugged = false;
+        deck.show(5, &Face::Play, tile).unwrap();
+        assert_eq!(log.borrow().writes, [5]);
     }
 }

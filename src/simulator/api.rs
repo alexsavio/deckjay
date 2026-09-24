@@ -20,7 +20,7 @@ const MAX_WAIT: Duration = Duration::from_secs(10);
 const CONNECTED_FOR: Duration = Duration::from_secs(2);
 /// Oldest presses are dropped beyond this, so clicks without a player cannot
 /// grow the queue forever.
-const MAX_QUEUED: usize = 64;
+pub(super) const MAX_QUEUED: usize = 64;
 
 type Reply<T> = Result<T, (StatusCode, &'static str)>;
 const NOT_A_KEY: (StatusCode, &str) = (StatusCode::NOT_FOUND, "no such key");
