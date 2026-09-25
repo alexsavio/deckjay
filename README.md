@@ -180,5 +180,9 @@ devices.
 | `state.rs` | What the deck remembers in `state.json`: shelf, pages, audiobook progress |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
 | `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
-| `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`) |
-| `server.rs` | HTTP server the speaker downloads the music from |
+| `player/` | The player thread: shared command loop (`mod.rs`), when to report progress (`progress.rs`), speaker or Spotify (`router.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`), Spotify Connect (`spotify.rs`) |
+| `server.rs` | HTTP server the speaker downloads the music from; its allowlist changes as podcasts refresh |
+| `podcasts/` | The podcasts thread: feeds, download plan, cache and refresh |
+| `spotify/` | Spotify sign-in, saved login, Web API client and playlist covers |
+| `radio.rs` | Turns a station URL (or its `.pls` / `.m3u`) into the stream |
+| `net.rs` | HTTPS agents for feeds, radio and Spotify |

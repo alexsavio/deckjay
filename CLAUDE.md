@@ -66,8 +66,12 @@ servers:
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
 - **player** (`player/`, thread `cast`, `heos` or `local`): `main::output` turns
   the config into a `player::Output` (`Cast`/`Heos` carry host and port, `Local`
-  only the device name), and `spawn` builds the speaker on the player thread,
-  because a sound-card stream cannot move between threads on every platform.
+  only the device name), and `spawn_with` builds the speaker on the player
+  thread, because a sound-card stream cannot move between threads on every
+  platform. With `[spotify]` and `spotify.device` it also builds the Spotify
+  player (`spotify.rs`, Web API remote control of a Connect device), and
+  `router.rs` sends playlists there and everything else to the speaker,
+  calling `Speaker::stop` on the one that played when the other takes over.
   `mod.rs` owns the command loop for all speaker types: it coalesces commands
   (button mashing; a `SetVolume` before the last `Play` is dropped, since
   `Play` carries the volume), calls the private `Speaker` trait, and polls
