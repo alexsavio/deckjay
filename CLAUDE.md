@@ -128,15 +128,18 @@ Playback flow:
    (per-segment percent-encoding) on `base_url`:
    `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
    `main::local_ip_towards(speaker)`.
-3. `PlayerCmd::Play` with `Content::Tracks` reaches the speaker backend
-   (every backend fails `Content::Stream` and `Content::Spotify` as not
-   supported yet, which the loop reports as `Stopped`; `radio::resolve`
-   turns a station URL into its stream for the backends). Cast launches the
+3. `PlayerCmd::Play` reaches the router: `Content::Spotify` goes to the
+   Spotify player, the rest to the speaker backend. Cast launches the
    Default Media Receiver (`CC1AD845`) and loads the whole album as a
    `MediaQueue`. HEOS sets the volume and sends `browse/play_stream` for one
    track; the `url` parameter goes last and unencoded, all other values
-   encode `&`, `=`, `%`.
-4. The speaker pulls the files itself; this program never streams audio.
+   encode `&`, `=`, `%`. For `Content::Stream` every backend first runs
+   `radio::resolve` (`.pls` / `.m3u` to the stream); Cast loads it as one
+   LIVE item, HEOS with `play_stream` (retried when it drops right after
+   starting), local audio reads it with `local/netread.rs`. Details:
+   `docs/radio.md`.
+4. The speaker pulls the files itself; only local audio reads a stream
+   over the network.
 
 State:
 

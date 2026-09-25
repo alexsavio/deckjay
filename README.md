@@ -165,8 +165,8 @@ by hand. [`docs/local-audio.md`](docs/local-audio.md) describes local
 playback: decoding, sound outputs and the Raspberry Pi's audio devices.
 
 [`docs/podcasts.md`](docs/podcasts.md) explains podcast sources and their
-cache, and [`docs/spotify.md`](docs/spotify.md) the Spotify app, sign-in and
-devices.
+cache, [`docs/radio.md`](docs/radio.md) internet radio stations, and
+[`docs/spotify.md`](docs/spotify.md) the Spotify app, sign-in and devices.
 
 ## Code map
 
@@ -180,7 +180,7 @@ devices.
 | `state.rs` | What the deck remembers in `state.json`: shelf, pages, audiobook progress |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
 | `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
-| `player/` | The player thread: shared command loop (`mod.rs`), when to report progress (`progress.rs`), speaker or Spotify (`router.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`), Spotify Connect (`spotify.rs`) |
+| `player/` | The player thread: shared command loop (`mod.rs`), when to report progress (`progress.rs`), speaker or Spotify (`router.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`, radio streams in `local/netread.rs`), Spotify Connect (`spotify.rs`) |
 | `server.rs` | HTTP server the speaker downloads the music from; its allowlist changes as podcasts refresh |
 | `podcasts/` | The podcasts thread: feeds, download plan, cache and refresh |
 | `spotify/` | Spotify sign-in, saved login, Web API client and playlist covers |
