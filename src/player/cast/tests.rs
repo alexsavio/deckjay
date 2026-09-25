@@ -335,3 +335,42 @@ fn a_station_type_comes_from_the_stream_then_the_station_then_mp3() {
     assert_eq!(content_type(Some("audio/ogg"), None), "audio/ogg");
     assert_eq!(content_type(None, None), "audio/mpeg");
 }
+
+#[test]
+fn stop_ends_only_a_session_of_ours() {
+    let tracks = tracks();
+    let album = entry(PlayerState::Paused, Some(&url(2)));
+    assert!(ours(&album, &tracks, None));
+    let station = on_air(PlayerState::Playing, LIVE);
+    assert!(ours(&station, &[], Some(LIVE)));
+    let other = on_air(PlayerState::Playing, "http://radio.example/other.mp3");
+    assert!(!ours(&other, &tracks, Some(LIVE)));
+    assert!(!ours(&entry(PlayerState::Idle, None), &tracks, Some(LIVE)));
+}
+
+#[test]
+fn stop_without_an_item_of_ours_does_not_connect() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut player = CastPlayer::new("127.0.0.1".into(), port);
+    let (tx, _events) = std::sync::mpsc::channel();
+    player.halt(&mut Emitter::new(tx));
+    listener.set_nonblocking(true).unwrap();
+    assert!(listener.accept().is_err(), "nobody connected");
+}
+
+#[test]
+fn stop_with_the_receiver_gone_only_forgets_the_item() {
+    // Nothing listens on this port.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut player = CastPlayer::new("127.0.0.1".into(), port);
+    player.active = true;
+    let (tx, events) = std::sync::mpsc::channel();
+    player.halt(&mut Emitter::new(tx));
+    assert_eq!(player.poll_interval(), None);
+    assert_eq!(events.try_iter().count(), 0);
+}

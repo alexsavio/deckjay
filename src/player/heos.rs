@@ -212,6 +212,11 @@ impl Speaker for HeosPlayer {
     fn reset(&mut self) {
         self.current = None;
     }
+
+    fn stop(&mut self, events: &mut Emitter) -> Result<()> {
+        self.halt(events);
+        Ok(())
+    }
 }
 
 impl HeosPlayer {
@@ -411,6 +416,15 @@ impl HeosPlayer {
         self.current = None;
         if let Err(err) = self.set_play_state("stop") {
             warn!("cannot stop the speaker: {err:#}");
+        }
+    }
+
+    /// Stops the receiver if our item is on it, and forgets the item; the
+    /// caller reports what follows.
+    fn halt(&mut self, events: &mut Emitter) {
+        if self.current.is_some() {
+            self.report_place(events);
+            self.silence();
         }
     }
 

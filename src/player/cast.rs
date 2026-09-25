@@ -263,6 +263,11 @@ impl Speaker for CastPlayer {
     fn reset(&mut self) {
         self.active = false;
     }
+
+    fn stop(&mut self, events: &mut Emitter) -> Result<()> {
+        self.halt(events);
+        Ok(())
+    }
 }
 
 impl CastPlayer {
@@ -371,6 +376,34 @@ impl CastPlayer {
         }
     }
 
+    /// Ends our item's media session, if the receiver still plays it, and
+    /// forgets the item; a failure is only logged. The caller reports what
+    /// follows.
+    fn halt(&mut self, events: &mut Emitter) {
+        if !self.active {
+            return;
+        }
+        self.active = false;
+        if let Err(err) = self.end_session(events) {
+            warn!("cannot stop the speaker: {err:#}");
+        }
+    }
+
+    fn end_session(&mut self, events: &mut Emitter) -> Result<()> {
+        let s = self.open()?;
+        let Some((tid, entry)) = media_status(&s)? else {
+            return Ok(());
+        };
+        if let Some(at) = place(&entry, &self.tracks) {
+            self.note_place(at, events);
+        }
+        let live = self.live.as_ref().map(|l| l.url.as_str());
+        if ours(&entry, &self.tracks, live) {
+            s.device.media.stop(tid, entry.media_session_id)?;
+        }
+        Ok(())
+    }
+
     fn note_place(&mut self, at: Place, events: &mut Emitter) {
         self.last_place = Some(at);
         events.place(at, false);
@@ -441,8 +474,13 @@ fn track_index(entry: &StatusEntry, tracks: &[TrackInfo]) -> Option<usize> {
     tracks.iter().position(|t| &t.url == id)
 }
 
-/// What a status poll reports; `None` keeps the last event. The media is
-/// ours when it is one of `tracks` or the `live` stream.
+/// Whether the entry's media is one of `tracks` or the `live` stream.
+fn ours(entry: &StatusEntry, tracks: &[TrackInfo], live: Option<&str>) -> bool {
+    let on_air = |url| entry.media.as_ref().is_some_and(|m| m.content_id == url);
+    track_index(entry, tracks).is_some() || live.is_some_and(on_air)
+}
+
+/// What a status poll reports; `None` keeps the last event.
 fn poll_event(
     entry: Option<&StatusEntry>,
     tracks: &[TrackInfo],
@@ -455,8 +493,7 @@ fn poll_event(
     if loading(entry) {
         return None;
     }
-    let on_air = |url| entry.media.as_ref().is_some_and(|m| m.content_id == url);
-    let ours = track_index(entry, tracks).is_some() || live.is_some_and(on_air);
+    let ours = ours(entry, tracks, live);
     Some(match entry.player_state {
         PlayerState::Playing | PlayerState::Buffering if ours => PlayerEvent::Playing(item),
         PlayerState::Paused if ours => PlayerEvent::Paused(item),

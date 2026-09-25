@@ -69,6 +69,7 @@ a listener token.
 | Play again | `LOAD` again | `play_stream` again | connects again |
 | Next, Prev | nothing | nothing | nothing |
 | Ends when | the media is not ours | a stop that lasts | 3 reconnects fail |
+| `Speaker::stop` | `STOP` if ours | `set_play_state stop` | closes the sound card |
 
 - A station never reports `Progress` or `Finished`: the UI plays it with
   `progress: false`, and every backend starts it that way.

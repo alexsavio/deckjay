@@ -186,3 +186,46 @@ fn a_station_after_an_album_does_not_walk_the_album() {
     assert_eq!(rig.fake.streamed(), [track_url(0), live]);
     assert_eq!(rig.events(), [Playing(ITEM), Playing(ITEM), Stopped]);
 }
+
+#[test]
+fn stop_stops_the_receiver_and_forgets_the_station() {
+    let (mut rig, _) = tuned();
+    rig.player.halt(&mut rig.emitter);
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_play_state?pid=7&state=stop"
+    );
+    assert_eq!(rig.player.poll_interval(), None);
+    assert_eq!(
+        rig.events(),
+        [Playing(ITEM)],
+        "the caller reports what follows"
+    );
+
+    let before = rig.fake.commands().len();
+    rig.player.halt(&mut rig.emitter);
+    assert_eq!(rig.fake.commands().len(), before, "nothing of ours plays");
+}
+
+#[test]
+fn stop_stops_an_album_too() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(play_album(3)).unwrap();
+    rig.poll_with("play");
+    rig.player.halt(&mut rig.emitter);
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_play_state?pid=7&state=stop"
+    );
+    assert_eq!(rig.player.poll_interval(), None);
+}
+
+#[test]
+fn stop_after_the_receiver_went_away_only_forgets_the_item() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.player.io_timeout = Duration::from_millis(100);
+    rig.send(play_station(station_urls().0)).unwrap();
+    rig.fake.script().mute = Some("player/set_play_state");
+    rig.player.halt(&mut rig.emitter);
+    assert_eq!(rig.player.poll_interval(), None);
+}

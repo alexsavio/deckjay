@@ -184,6 +184,12 @@ album press opens the output again. Dropouts (xruns) and the default output
 changing on a Mac do not stop playback: they are only logged at debug
 level.
 
+`Speaker::stop` (before another speaker takes over) closes the output: the
+stream is dropped, which releases the sound card for another program, such
+as a Spotify Connect client on the Pi. An item that reports progress first
+offers its latest place; the caller reports what follows. The next item
+opens the output again.
+
 ## Formats
 
 | Files | Codec | Notes |

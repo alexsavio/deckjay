@@ -82,7 +82,7 @@ and it takes `mediaSessionId` from `MEDIA_STATUS`.
 | `media.get_status(transportId, None)` | the app | first entry |
 | `media.pause` / `media.play` | the app | success or failure |
 | `media.seek(…)` (resume only) | the app | success or failure |
-| `media.stop` (station) | the app | success or failure |
+| `media.stop` (station, stop) | the app | success or failure |
 
 ```json
 {"type":"CONNECT","userAgent":"RustCast"}
@@ -132,7 +132,8 @@ the destination come from the app entry of `RECEIVER_STATUS`):
   [Resume inside a track](#resume-inside-a-track)).
 - kids-deck never sends `QUEUE_*`, `CLOSE`, `PING` or `PONG`, `SEEK` only
   right after a `LOAD` that resumes inside a track, and `STOP` only for a
-  station the receiver will not pause (see [Radio](#radio)).
+  station the receiver will not pause (see [Radio](#radio)) and before
+  another speaker takes over (item 9 of [Sequence](#sequence)).
 
 `MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
 (`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,
@@ -207,6 +208,12 @@ Every command opens its own connection and drops it at the end, without a
    timeout. A failed poll is logged at debug level; three in a row
    (`MAX_FAILED_POLLS`) end the album the same way, about 20 s after the
    speaker went away. A poll or command that works restarts the count.
+9. **Stop** (`Speaker::stop`, before another speaker takes over): only
+   while an item of ours is active. Media `GET_STATUS` (an item that
+   reports progress takes its place from it), then `STOP` to the media
+   session when the media is ours. Polling stops, and the caller reports
+   what follows. A failure is logged as a warning and changes nothing
+   else.
 
 ## Radio
 

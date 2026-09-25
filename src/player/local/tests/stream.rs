@@ -250,3 +250,47 @@ fn decodes_real_stations() {
         assert!(peak(&samples) > 0.01, "{url} is silent");
     }
 }
+
+#[test]
+fn stop_closes_the_sound_card_until_the_next_item() {
+    let mut rig = Rig::new();
+    let (url, _) = closing(tone(), "audio/mpeg");
+    play_station(&mut rig, url).unwrap();
+    rig.player.halt(&mut rig.emitter);
+    assert!(rig.player.output.is_none());
+    assert_eq!(rig.player.poll_interval(), None);
+    assert_eq!(
+        rig.events(),
+        [PlayerEvent::Playing(ITEM)],
+        "the caller reports what follows"
+    );
+
+    let tracks = vec![rig.track("1.wav", 0.2, 1000)];
+    rig.play_album(tracks, 1.0).unwrap();
+    assert_eq!(rig.opened.get(), 2);
+    assert_eq!(levels(&rig.listen(0.1), 1.0), [1000]);
+}
+
+#[test]
+fn stop_reports_where_a_book_got_to() {
+    let mut rig = Rig::new();
+    rig.emitter.progress.interval = Duration::ZERO;
+    let tracks = vec![rig.track("1.wav", 1.0, 1000)];
+    rig.send(PlayerCmd::Play {
+        item: ITEM,
+        content: Content::Tracks {
+            tracks,
+            start: Start::default(),
+            progress: true,
+        },
+        volume: 1.0,
+    })
+    .unwrap();
+    rig.listen(0.3);
+    rig.events();
+    rig.player.halt(&mut rig.emitter);
+    let reported = rig.events().iter().any(|event| {
+        matches!(event, PlayerEvent::Progress { position, .. } if *position >= Duration::from_millis(300))
+    });
+    assert!(reported);
+}

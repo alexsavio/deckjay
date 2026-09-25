@@ -89,7 +89,7 @@ Error codes that matter here (spec §6.2):
 | `player/clear_queue?pid=P` | before each `play_stream` | nothing |
 | `browse/play_stream?pid=P&url=U` | each track or station | result |
 | `player/get_play_state?pid=P` | poll, play/pause key | `state` |
-| `player/set_play_state?pid=P&state=S` | play/pause key, item end | result |
+| `player/set_play_state?pid=P&state=S` | play/pause, item end, stop | result |
 
 - `level` is `round(volume × 100)`, volume clamped to 0.0–1.0 (spec range
   0 to 100).
@@ -190,6 +190,11 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    (`MAX_FAILED_POLLS`) end the album the same way, about 12 to 18 s after
    the speaker went away. A poll or command that works restarts the
    count. A failed `play_stream` from a poll ends the album.
+9. **Stop** (`Speaker::stop`, before another speaker takes over): only
+   while an album or station is active. `set_play_state stop` (an item that
+   reports progress first offers its latest place); polling stops, and the
+   caller reports what follows. A failure is logged as a warning and
+   changes nothing else.
 
 ## Radio
 

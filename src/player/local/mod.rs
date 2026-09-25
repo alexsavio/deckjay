@@ -173,9 +173,25 @@ impl Speaker for LocalPlayer {
         self.paused = false;
         self.output = None;
     }
+
+    fn stop(&mut self, events: &mut Emitter) -> Result<()> {
+        self.halt(events);
+        Ok(())
+    }
 }
 
 impl LocalPlayer {
+    /// Stops what plays and closes the sound card, which another program
+    /// (a Spotify Connect client on a Pi) may need next. The caller reports
+    /// what follows.
+    fn halt(&mut self, events: &mut Emitter) {
+        self.report_place(events);
+        if self.output.is_some() {
+            info!("closing the sound output");
+        }
+        self.reset();
+    }
+
     /// Fails once the open output broke.
     fn check(&self) -> Result<()> {
         match &self.output {
