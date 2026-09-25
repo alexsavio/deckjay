@@ -1,8 +1,12 @@
 //! Draws key images without any font or icon files: simple shapes in
 //! 0.0–1.0 coordinates, rendered 4x oversized and scaled down for smooth edges.
 
+mod glyphs;
+
 use image::imageops::{self, FilterType};
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
+
+pub use glyphs::Glyph;
 
 const SUPERSAMPLE: u32 = 4;
 
@@ -13,6 +17,10 @@ const BG_SKIP: Rgb<u8> = Rgb([90, 70, 190]);
 const BG_VOLUME: Rgb<u8> = Rgb([30, 110, 210]);
 const BG_MORE: Rgb<u8> = Rgb([235, 120, 20]);
 const BG_BLANK: Rgb<u8> = Rgb([0, 0, 0]);
+/// Background for a badge chip and a progress track: dark enough to read on
+/// any cover.
+const DECOR_DARK: Rgb<u8> = Rgb([20, 20, 24]);
+const NEW_DOT: Rgb<u8> = Rgb([214, 40, 40]);
 
 struct Canvas {
     img: RgbImage,
@@ -203,12 +211,18 @@ pub fn thumbnail(cover: &DynamicImage, size: u32) -> RgbImage {
         .into_rgb8()
 }
 
-/// Colored tile with a music note, for albums without a cover.
-pub fn placeholder(name: &str, size: u32) -> RgbImage {
+/// Deterministic color for `name` (FNV-1a hash to hue), so a placeholder
+/// without a configured color still gets a stable, distinct one.
+pub fn name_color(name: &str) -> Rgb<u8> {
     let hash = name.bytes().fold(2_166_136_261_u32, |h, b| {
         (h ^ u32::from(b)).wrapping_mul(16_777_619)
     });
-    let mut c = Canvas::new(size, hue_to_rgb((hash % 360) as f32));
+    hue_to_rgb((hash % 360) as f32)
+}
+
+/// Colored tile with a music note, for albums without a cover.
+pub fn placeholder(name: &str, size: u32) -> RgbImage {
+    let mut c = Canvas::new(size, name_color(name));
     c.circle(0.40, 0.66, 0.12, WHITE);
     c.rect(0.47, 0.22, 0.53, 0.66, WHITE);
     c.polygon(
@@ -218,19 +232,193 @@ pub fn placeholder(name: &str, size: u32) -> RgbImage {
     c.finish(size)
 }
 
+/// Colored tile with a large white glyph, for an item without a picture.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
+)]
+pub fn glyph_placeholder(glyph: Glyph, color: Rgb<u8>, size: u32) -> RgbImage {
+    let mut c = Canvas::new(size, color);
+    glyphs::draw(&mut c, glyph, 0.5, 0.5, 0.30, WHITE);
+    c.finish(size)
+}
+
 /// Draws the "now playing" frame on an album tile.
 pub fn with_highlight(tile: &RgbImage) -> RgbImage {
+    decorate(
+        tile,
+        Decor {
+            current: true,
+            ..Decor::default()
+        },
+    )
+}
+
+// ------------------------------------------------------------- decorations
+
+/// What to draw on top of a tile (a cover or a placeholder). `progress` is
+/// steps out of 10; values above 10 clamp to 10.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Decor {
+    pub current: bool,
+    pub badge: Option<Glyph>,
+    pub progress: Option<u8>,
+    pub new: bool,
+}
+
+/// Draws `decor` onto `tile`. Every decoration keeps `inset(size)` clear of
+/// the edge, so the highlight frame never cuts into one, whatever order they
+/// are drawn in; the frame is drawn last regardless.
+pub fn decorate(tile: &RgbImage, decor: Decor) -> RgbImage {
     let mut img = tile.clone();
+    let size = img.width();
+    let margin = inset(size) as f32 / size as f32;
+    if let Some(glyph) = decor.badge {
+        badge(&mut img, glyph, margin);
+    }
+    if let Some(step) = decor.progress {
+        progress(&mut img, step.min(10), margin);
+    }
+    if decor.new {
+        new_dot(&mut img, margin);
+    }
+    if decor.current {
+        frame(&mut img, inset(size), HIGHLIGHT);
+    }
+    img
+}
+
+/// Highlight-frame thickness for a `size`-px key, also the margin every
+/// decoration keeps from the edge.
+fn inset(size: u32) -> u32 {
+    (size as f32 * 0.08).round().max(2.0) as u32
+}
+
+/// Solid frame, `t` px thick, around the edge of `img`.
+fn frame(img: &mut RgbImage, t: u32, color: Rgb<u8>) {
     let (w, h) = img.dimensions();
-    let t = (w as f32 * 0.08).round().max(2.0) as u32;
     for y in 0..h {
         for x in 0..w {
             if x < t || y < t || x >= w - t || y >= h - t {
-                img.put_pixel(x, y, HIGHLIGHT);
+                img.put_pixel(x, y, color);
             }
         }
     }
+}
+
+/// Renders `draw` (in `WHITE`, on a black background) as a `size`-square
+/// coverage mask: `Canvas` has no notion of an existing image to draw onto,
+/// so a decoration is rendered on its own, then blended over the tile.
+fn mask(size: u32, draw: impl FnOnce(&mut Canvas)) -> RgbImage {
+    let mut c = Canvas::new(size, BG_BLANK);
+    draw(&mut c);
+    c.finish(size)
+}
+
+/// Blends `color` onto `img`, weighted by `mask`'s brightness (0 none, 255
+/// full) times `opacity`. `mask` and `img` must be the same size.
+fn blend(img: &mut RgbImage, mask: &RgbImage, color: Rgb<u8>, opacity: f32) {
+    for (px, mp) in img.pixels_mut().zip(mask.pixels()) {
+        let a = f32::from(mp[0]) / 255.0 * opacity;
+        if a <= 0.0 {
+            continue;
+        }
+        for i in 0..3 {
+            px[i] = (f32::from(px[i]) * (1.0 - a) + f32::from(color[i]) * a).round() as u8;
+        }
+    }
+}
+
+/// Small chip in the top-left corner naming the item's kind.
+fn badge(img: &mut RgbImage, glyph: Glyph, margin: f32) {
+    let size = img.width();
+    let chip = 0.30;
+    let center = margin + chip / 2.0;
+    let chip_mask = mask(size, |c| {
+        c.rect(margin, margin, margin + chip, margin + chip, WHITE);
+    });
+    blend(img, &chip_mask, DECOR_DARK, 0.78);
+    let glyph_mask = mask(size, |c| {
+        glyphs::draw(c, glyph, center, center, chip * 0.38, WHITE);
+    });
+    blend(img, &glyph_mask, WHITE, 1.0);
+}
+
+/// Playback progress bar along the bottom edge, `step` of 10 filled.
+fn progress(img: &mut RgbImage, step: u8, margin: f32) {
+    let size = img.width();
+    let bar_h = 0.14;
+    let (y0, y1) = (1.0 - margin - bar_h, 1.0 - margin);
+    let track_mask = mask(size, |c| c.rect(margin, y0, 1.0 - margin, y1, WHITE));
+    blend(img, &track_mask, DECOR_DARK, 0.65);
+    if step > 0 {
+        let x1 = margin + (1.0 - 2.0 * margin) * (f32::from(step) / 10.0);
+        let fill_mask = mask(size, |c| c.rect(margin, y0, x1, y1, WHITE));
+        blend(img, &fill_mask, WHITE, 1.0);
+    }
+}
+
+/// Red dot with a thin white ring in the top-right corner, marking a new item.
+fn new_dot(img: &mut RgbImage, margin: f32) {
+    let size = img.width();
+    let (cx, cy, r) = (1.0 - margin - 0.10, margin + 0.10, 0.10);
+    let ring_mask = mask(size, |c| c.circle(cx, cy, r, WHITE));
+    blend(img, &ring_mask, WHITE, 1.0);
+    let dot_mask = mask(size, |c| c.circle(cx, cy, r * 0.62, WHITE));
+    blend(img, &dot_mask, NEW_DOT, 1.0);
+}
+
+// -------------------------------------------------------------------- shelf
+
+/// A shelf key: the shelf's own picture (or a glyph placeholder), framed
+/// orange, with one dot per shelf and `position + 1` of them lit.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
+)]
+pub fn shelf(tile: &RgbImage, position: usize, count: usize) -> RgbImage {
+    let mut img = tile.clone();
+    let t = inset(img.width());
+    frame(&mut img, t, BG_MORE);
+    fill_dots(&mut img, position, count, 0.84, WHITE);
     img
+}
+
+/// Flip key for small decks: pages the current shelf, then moves to the next
+/// one. Orange background like `more`, a double-chevron in place of its
+/// single arrow, plus one dot per step.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
+)]
+pub fn flip(size: u32, step: usize, steps: usize) -> RgbImage {
+    let mut c = Canvas::new(size, BG_MORE);
+    for dx in [0.0_f32, 0.22] {
+        c.polygon(
+            &[(0.30 + dx, 0.20), (0.30 + dx, 0.68), (0.58 + dx, 0.44)],
+            WHITE,
+        );
+    }
+    let mut img = c.finish(size);
+    fill_dots(&mut img, step, steps, 0.84, WHITE);
+    img
+}
+
+/// Row of dots along the bottom: `position + 1` of `count` (capped at 8) lit,
+/// bigger than the rest, at height `y` (0.0-1.0 of the key).
+fn fill_dots(img: &mut RgbImage, position: usize, count: usize, y: f32, color: Rgb<u8>) {
+    let size = img.width();
+    let dots = count.clamp(1, 8);
+    let filled = ((position + 1) * dots / count.max(1)).clamp(1, dots);
+    let spacing = 0.11;
+    let start = 0.5 - spacing * (dots as f32 - 1.0) / 2.0;
+    let dots_mask = mask(size, |c| {
+        for i in 0..dots {
+            let r = if i < filled { 0.045 } else { 0.025 };
+            c.circle(start + spacing * i as f32, y, r, WHITE);
+        }
+    });
+    blend(img, &dots_mask, color, 1.0);
 }
 
 #[expect(
@@ -256,32 +444,4 @@ fn hue_to_rgb(hue: f32) -> Rgb<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_page_fills_a_dot() {
-        for pages in 1..=20 {
-            for page in 0..pages {
-                let (dots, filled) = page_dots(page, pages);
-                assert!(filled < dots, "page {page} of {pages}");
-                if pages <= 8 {
-                    assert_eq!((dots, filled), (pages, page));
-                }
-            }
-            assert_eq!(page_dots(0, pages).1, 0);
-            assert_eq!(
-                page_dots(pages - 1, pages),
-                (pages.min(8), pages.min(8) - 1)
-            );
-        }
-    }
-
-    #[test]
-    fn a_thumbnail_is_a_square_of_the_key_size() {
-        for (w, h) in [(3000, 2000), (500, 1600), (300, 300), (50, 40)] {
-            let cover = DynamicImage::new_rgb8(w, h);
-            assert_eq!(thumbnail(&cover, 72).dimensions(), (72, 72), "{w}x{h}");
-        }
-    }
-}
+mod tests;
