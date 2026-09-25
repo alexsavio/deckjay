@@ -21,8 +21,10 @@ mod icons;
 mod library;
 mod net;
 mod player;
+mod podcasts;
 mod server;
 mod simulator;
+mod spotify;
 mod ui;
 
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
