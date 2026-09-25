@@ -188,12 +188,16 @@ fn main() -> Result<()> {
 fn scan_sources(cfg: &Config) -> Library {
     let library = Library::scan(&cfg.sources);
     for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
-        info!(
-            "found {} items in {} ({})",
-            shelf.items.len(),
-            source.name,
-            source.path.display()
-        );
+        let count = shelf.items.len();
+        if source.serves_files() {
+            info!(
+                "found {count} items in {} ({})",
+                source.name,
+                source.path.display()
+            );
+        } else {
+            info!("found {count} items in {}", source.name);
+        }
     }
     library
 }
@@ -413,12 +417,12 @@ fn run_check(
     simulator_url: Option<&str>,
 ) -> Result<()> {
     for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
-        println!(
-            "Source {} ({:?}) in {}:",
-            source.name,
-            source.kind,
-            source.path.display()
-        );
+        if source.serves_files() {
+            let (name, kind, path) = (&source.name, source.kind, source.path.display());
+            println!("Source {name} ({kind:?}) in {path}:");
+        } else {
+            println!("Source {} ({:?}):", source.name, source.kind);
+        }
         if let Some(podcast) = &source.podcast {
             for feed in &podcast.feeds {
                 match podcasts::check_feed(&feed.url) {
@@ -439,11 +443,13 @@ fn run_check(
             } else {
                 "no cover"
             };
-            println!(
-                "  {:<40} {:>3} tracks, {cover}",
-                item.name,
-                item.tracks().len()
-            );
+            match &item.media {
+                library::Media::Tracks(tracks) => {
+                    println!("  {:<40} {:>3} tracks, {cover}", item.name, tracks.len());
+                }
+                library::Media::Stream { url } => println!("  {:<40} {url}", item.name),
+                library::Media::Spotify { uri } => println!("  {:<40} {uri}, {cover}", item.name),
+            }
         }
     }
     match base_url {
