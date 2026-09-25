@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{info, warn};
 
 const FILE_NAME: &str = "state.json";
 const VERSION: u32 = 1;
@@ -96,6 +96,8 @@ pub struct Store {
     state: State,
     dirty: bool,
     last_save: Option<Instant>,
+    /// The last save failed; the warning is not repeated until one works.
+    failing: bool,
 }
 
 impl Store {
@@ -159,6 +161,7 @@ impl Store {
             state,
             dirty: false,
             last_save: None,
+            failing: false,
         }
     }
 
@@ -168,6 +171,7 @@ impl Store {
             state,
             dirty: false,
             last_save: None,
+            failing: false,
         }
     }
 
@@ -262,8 +266,21 @@ impl Store {
             return;
         };
         match write_atomically(path, &self.state) {
-            Ok(()) => self.dirty = false,
-            Err(err) => warn!("cannot save {}: {err:#}", path.display()),
+            Ok(()) => {
+                if self.failing {
+                    info!("saved {} again", path.display());
+                }
+                self.dirty = false;
+                self.failing = false;
+            }
+            Err(err) if !self.failing => {
+                warn!(
+                    "cannot save {}: {err:#}; trying again every 10 s",
+                    path.display()
+                );
+                self.failing = true;
+            }
+            Err(_) => {}
         }
     }
 }

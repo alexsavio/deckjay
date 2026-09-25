@@ -168,9 +168,11 @@ Rendering:
 
 - `Face` is both "what a key shows" and the image-cache key. `Deck::show`
   re-sends only keys whose `Face` changed and caches encoded images per
-  `Face` until `Deck::retain` drops them (nothing calls it yet), so keep
-  the set of distinct faces small (volume is quantised to 20 levels for
-  this reason).
+  `Face` until `Deck::retain` drops them (after a podcast refresh: items
+  that left the deck, items whose picture changed, or all items when the
+  tiles were remade), so keep the set of distinct faces small (volume is
+  quantised to 20 levels for this reason). `Ui::prepare_tiles` keeps
+  tiles only for items on the deck and the loaded one.
 - `Layout::new(rows, cols, shelves)` (`ui/layout.rs`): the bottom row holds
   controls (`control_row` picks them by width), the other keys hold the
   items of one shelf. The deck shows only non-empty shelves
@@ -197,8 +199,9 @@ shelves from `podcasts::load_cached` (no network). The UI takes the newest
 snapshot in its loop (`Ui::take_snapshots`), refills the shelf with
 `Library::refill` (known `ItemKey`s keep their `ItemId`; items are never
 removed from the table), recomputes the shelves on the deck, and drops
-cached key images with `Deck::retain`. `Ui::pin_playing` sends the playing
-episode's id (`NowPlaying`) so the thread does not delete its file. Episode
+cached key images with `Deck::retain`. `Ui::pin_playing` sends the id of
+the loaded episode (`NowPlaying`, found by its key, since a refresh can take
+it off the shelf) so the thread keeps its file until it stops. Episode
 keys are `<source>/<feed folder>/<episode id>`; a podcast item without
 saved progress shows the "new" dot.
 
@@ -206,7 +209,8 @@ State (`state.rs`): `Store` keeps `<state_dir>/state.json`: the shelf on the
 deck, the page of each shelf (by shelf name) and the progress of each item
 that resumes (by `ItemKey`). It writes a temp file and renames it, at most
 every 10 s (`save_if_due`) and at once on pause and stop. A broken file is
-moved to `state.json.bad`; an unwritable folder keeps the state in memory.
+moved to `state.json.bad`; a folder that cannot be created or read keeps
+the state in memory, and failed saves warn once and are tried again.
 
 Config: `Config` uses `#[serde(deny_unknown_fields)]`. A new key needs a field
 and default fn in `config/mod.rs` (or `config/source.rs` for `[[source]]`

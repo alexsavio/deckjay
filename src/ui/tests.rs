@@ -479,6 +479,76 @@ mod podcasts {
     }
 
     #[test]
+    fn a_playing_episode_stays_pinned_when_it_leaves_its_shelf() {
+        let (mut ui, _cmds, _events, snapshots, pins) = podcast_ui();
+        snapshots.send(snapshot(&["a1"])).unwrap();
+        ui.take_snapshots();
+        let layout = ui.layout(3, 5);
+        ui.update(&layout, &[9]);
+        ui.update(&layout, &[0]);
+        assert_eq!(pins.try_recv(), Ok(NowPlaying(Some("a1".into()))));
+
+        snapshots.send(snapshot(&["b2"])).unwrap();
+        ui.take_snapshots();
+        ui.update(&ui.layout(3, 5), &[]);
+
+        assert!(pins.try_recv().is_err(), "a1 plays on, so it stays pinned");
+    }
+
+    #[test]
+    fn the_saved_podcast_shelf_comes_back_once_it_fills() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut saved = Store::open(dir.path());
+        saved.set_shelf("pod");
+        saved.set_page("pod", 1);
+        saved.save_now(Instant::now());
+        let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
+        let store = Store::open(dir.path());
+        ui = Ui {
+            waiting_for: store.shelf().map(str::to_string),
+            store,
+            ..ui
+        };
+        assert_eq!(ui.shelf, 0, "the podcast shelf is empty at start");
+
+        let ids: Vec<String> = (0..12).map(|i| format!("e{i}")).collect();
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        snapshots.send(snapshot(&ids)).unwrap();
+        ui.take_snapshots();
+
+        assert_eq!((ui.shelf, ui.page()), (1, 1));
+    }
+
+    #[test]
+    fn a_key_pressed_before_the_saved_shelf_fills_wins() {
+        let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
+        ui.waiting_for = Some("pod".into());
+        // What every "more", shelf and flip key does.
+        ui.remember_place();
+        snapshots.send(snapshot(&["a"])).unwrap();
+        ui.take_snapshots();
+        assert_eq!(ui.shelf, 0);
+    }
+
+    #[test]
+    fn an_episode_with_a_new_picture_gets_a_new_tile() {
+        let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
+        snapshots.send(snapshot(&["a1"])).unwrap();
+        ui.take_snapshots();
+        ui.prepare_tiles(8);
+        let id = ui.library.shelves()[1].items[0];
+        assert!(ui.tiles.contains_key(&id));
+
+        let mut newer = snapshot(&["a1"]);
+        newer.feeds[0].episodes[0].picture = Some("/cache/maus/a1.jpg".into());
+        snapshots.send(newer).unwrap();
+
+        assert!(ui.take_snapshots());
+        assert!(!ui.tiles.contains_key(&id));
+        assert!(ui.restyled.contains(&id));
+    }
+
+    #[test]
     fn tiles_are_remade_when_a_second_kind_brings_badges() {
         let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
         assert!(ui.prepare_tiles(8), "the first tiles");

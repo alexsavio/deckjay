@@ -97,6 +97,15 @@ pub struct Shelf {
     pub color: Option<Color>,
 }
 
+/// What [`Library::refill`] changed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Refilled {
+    /// The shelf's list: items came, went or moved.
+    pub moved: bool,
+    /// Known items whose picture, cover, colour or name changed.
+    pub restyled: Vec<ItemId>,
+}
+
 pub struct Library {
     /// `ItemId(n)` is `items[n]`; items are only ever added at the end.
     items: Vec<Item>,
@@ -184,9 +193,9 @@ impl Library {
     }
 
     /// Puts `items` on shelf `shelf` in this order. Items with a known key
-    /// keep their id (their data is updated); new ones get new ids. Returns
-    /// whether the shelf's list changed.
-    pub fn refill(&mut self, shelf: usize, items: Vec<Item>) -> bool {
+    /// keep their id (their data is updated); new ones get new ids.
+    pub fn refill(&mut self, shelf: usize, items: Vec<Item>) -> Refilled {
+        let mut restyled = Vec::new();
         let known: HashMap<ItemKey, ItemId> = self
             .items()
             .map(|(id, item)| (item.key.clone(), id))
@@ -195,6 +204,12 @@ impl Library {
             .into_iter()
             .map(|item| {
                 if let Some(&id) = known.get(&item.key) {
+                    let old = &self.items[id.0 as usize];
+                    let same_look = (&old.name, &old.cover, &old.picture, old.color)
+                        == (&item.name, &item.cover, &item.picture, item.color);
+                    if !same_look {
+                        restyled.push(id);
+                    }
                     self.items[id.0 as usize] = item;
                     id
                 } else {
@@ -203,9 +218,9 @@ impl Library {
                 }
             })
             .collect();
-        let changed = self.shelves[shelf].items != ids;
+        let moved = self.shelves[shelf].items != ids;
         self.shelves[shelf].items = ids;
-        changed
+        Refilled { moved, restyled }
     }
 
     /// Adds `shelf` with `items` (its own item list is replaced).

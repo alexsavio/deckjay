@@ -69,10 +69,13 @@ impl RemoteDeck {
             .rows
             .checked_mul(info.cols)
             .is_none_or(|n| n > MAX_KEYS);
-        if info.rows < 2 || info.cols == 0 || too_many_keys || !KEY_SIZES.contains(&info.key_size) {
+        // The layout needs two keys above the control row: an item and "more".
+        let too_few_keys = info.rows < 2 || (info.rows - 1) * info.cols < 2;
+        if too_few_keys || too_many_keys || !KEY_SIZES.contains(&info.key_size) {
             bail!(
-                "the simulator has {}x{} keys of {} px; the player needs at least 2 rows, \
-                 at most {MAX_KEYS} keys and keys of {} to {} px",
+                "the simulator has {}x{} keys of {} px; the player needs at least 2 rows \
+                 with 2 keys above the bottom row, at most {MAX_KEYS} keys and keys of \
+                 {} to {} px",
                 info.rows,
                 info.cols,
                 info.key_size,
@@ -193,7 +196,7 @@ mod tests {
 
     #[test]
     fn rejects_a_grid_the_player_cannot_draw() {
-        for (rows, cols, key_size) in [(3, 5, 0), (3, 5, 513), (2, 33, 72)] {
+        for (rows, cols, key_size) in [(3, 5, 0), (3, 5, 513), (2, 33, 72), (2, 1, 72)] {
             let url = start_simulator(Info {
                 rows,
                 cols,

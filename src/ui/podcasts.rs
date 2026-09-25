@@ -46,31 +46,40 @@ impl Ui {
     /// Puts the newest snapshot of each podcast thread on its shelf.
     /// Returns whether a shelf changed.
     pub fn take_snapshots(&mut self) -> bool {
-        let mut changed = false;
+        let (mut changed, mut moved) = (false, false);
         for thread in &self.podcasts {
             let Some(snapshot) = thread.snapshots.try_iter().last() else {
                 continue;
             };
             let items = library::podcast::items(&thread.source, &snapshot);
-            changed |= self.library.refill(thread.shelf, items);
+            let refilled = self.library.refill(thread.shelf, items);
+            changed |= refilled.moved || !refilled.restyled.is_empty();
+            for id in refilled.restyled {
+                self.tiles.remove(&id);
+                self.restyled.insert(id);
+            }
+            moved |= refilled.moved;
         }
-        if changed {
+        if moved {
             self.reshelve();
         }
         changed
     }
 
-    /// Tells each podcast thread which of its episodes plays, so that it
-    /// keeps the file until another one plays.
+    /// Tells each podcast thread which of its episodes is loaded, so that
+    /// it keeps the file until the episode stops or another item starts.
+    /// The key tells the thread, not the shelf: a refresh can take a
+    /// playing episode off its shelf.
     pub(super) fn pin_playing(&mut self) {
         for thread in &mut self.podcasts {
-            let episode = self
-                .current
-                .filter(|id| self.library.shelves()[thread.shelf].items.contains(id))
-                .and_then(|id| {
-                    let key = &self.library.item(id).key.0;
-                    key.rsplit('/').next().map(str::to_string)
-                });
+            let prefix = format!("{}/", thread.source.name);
+            let episode = self.current.and_then(|id| {
+                let key = &self.library.item(id).key.0;
+                key.strip_prefix(&prefix)?
+                    .rsplit('/')
+                    .next()
+                    .map(str::to_string)
+            });
             if episode != thread.pinned {
                 if thread
                     .now_playing

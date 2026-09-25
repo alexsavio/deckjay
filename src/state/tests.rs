@@ -181,3 +181,23 @@ fn done_counts_tracks_and_the_position_in_the_track() {
     assert!((p.done(4) - 1.0).abs() < f32::EPSILON);
     assert!((progress(0, "x", 0).done(0)).abs() < f32::EPSILON);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_folder_that_becomes_writable_gets_the_state_that_waited() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let mode =
+        |m| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
+    mode(0o500);
+    let mut store = Store::open(dir.path());
+    store.set_shelf("books");
+    store.save_now(Instant::now());
+    store.save_now(Instant::now());
+    mode(0o700);
+    assert!(!dir.path().join("state.json").exists());
+
+    store.save_now(Instant::now());
+
+    assert_eq!(Store::open(dir.path()).shelf(), Some("books"));
+}

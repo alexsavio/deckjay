@@ -4,9 +4,9 @@
 //! cover, a book, a story). Each source is a shelf of items; the deck shows
 //! one shelf at a time. With several shelves, the last item key shows the
 //! next shelf and switches to it. If a shelf has more items than keys, an
-//! orange "more" arrow pages through them. Decks with 4 item keys or fewer
-//! have one "flip" key instead: it pages, and after the last page goes to
-//! the next shelf.
+//! orange "more" arrow pages through them. Decks with fewer than 6 item keys
+//! (Mini, Neo, Plus) have one "flip" key instead: it pages, and after the
+//! last page goes to the next shelf.
 //!
 //! ```text
 //!  one shelf (MK.2)       several shelves (MK.2)    several shelves (Mini)
@@ -96,6 +96,10 @@ pub struct Ui {
     shelf: usize,
     /// The page each deck shelf is on.
     pages: Vec<usize>,
+    /// The saved shelf, while it is not on the deck yet (a podcast shelf
+    /// whose cache is empty at start); the deck moves there when it fills,
+    /// unless a key moved the deck first.
+    waiting_for: Option<String>,
     /// Item currently loaded on the speaker (highlighted with a frame).
     current: Option<ItemId>,
     playing: bool,
@@ -106,6 +110,8 @@ pub struct Ui {
     tile_size: u32,
     /// Whether the tiles carry kind badges.
     badges: bool,
+    /// Items whose look changed since the deck last drew them.
+    restyled: HashSet<ItemId>,
 
     /// One per podcast source.
     podcasts: Vec<podcasts::PodcastThread>,
@@ -129,11 +135,19 @@ impl Ui {
         if pages.is_empty() {
             pages.push(0);
         }
-        let shelf = store
-            .shelf()
-            .and_then(|name| deck_shelves.iter().position(|&i| shelves[i].name == name))
-            .unwrap_or(0);
+        let saved = store.shelf().map(|name| {
+            (
+                name,
+                deck_shelves.iter().position(|&i| shelves[i].name == name),
+            )
+        });
+        let shelf = saved.and_then(|(_, position)| position).unwrap_or(0);
+        let waiting_for = match saved {
+            Some((name, None)) => Some(name.to_string()),
+            _ => None,
+        };
         Ui {
+            waiting_for,
             pages,
             deck_shelves,
             shelf,
@@ -150,6 +164,7 @@ impl Ui {
             tiles: HashMap::new(),
             tile_size: 0,
             badges: false,
+            restyled: HashSet::new(),
             podcasts: Vec::new(),
         }
     }
@@ -176,8 +191,11 @@ impl Ui {
                     .flat_map(|&shelf| self.library.shelves()[shelf].items.iter().copied())
                     .collect();
                 // The deck caches images by face, and a remade tile keeps its face.
+                let restyled = std::mem::take(&mut self.restyled);
                 deck.retain(|face| match face {
-                    Face::Item { id, .. } => !remade && shown.contains(id),
+                    Face::Item { id, .. } => {
+                        !remade && shown.contains(id) && !restyled.contains(id)
+                    }
                     _ => true,
                 });
                 changed = true;
@@ -396,21 +414,38 @@ impl Ui {
             .zip(self.pages.iter().copied())
             .collect();
         self.deck_shelves = non_empty(&self.library);
+        let shelves = self.library.shelves();
         self.pages = self
             .deck_shelves
             .iter()
-            .map(|shelf| pages.get(shelf).copied().unwrap_or(0))
+            .map(|&shelf| {
+                pages
+                    .get(&shelf)
+                    .copied()
+                    .unwrap_or_else(|| self.store.page(&shelves[shelf].name))
+            })
             .collect();
         if self.pages.is_empty() {
             self.pages.push(0);
         }
-        self.shelf = current
-            .and_then(|current| self.deck_shelves.iter().position(|&s| s == current))
+        let waited = self.waiting_for.as_deref().and_then(|name| {
+            self.deck_shelves
+                .iter()
+                .position(|&s| shelves[s].name == name)
+        });
+        if waited.is_some() {
+            self.waiting_for = None;
+        }
+        self.shelf = waited
+            .or_else(|| {
+                current.and_then(|current| self.deck_shelves.iter().position(|&s| s == current))
+            })
             .unwrap_or(0);
     }
 
     /// Saves the shelf on the deck and its page.
     fn remember_place(&mut self) {
+        self.waiting_for = None;
         if let Some(&shelf) = self.deck_shelves.get(self.shelf) {
             let name = &self.library.shelves()[shelf].name;
             self.store.set_shelf(name);

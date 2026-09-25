@@ -9,7 +9,7 @@ use tracing::warn;
 use super::Ui;
 use crate::config::Color;
 use crate::icons::{self, Decor};
-use crate::library::{Item, Kind};
+use crate::library::{Item, ItemId, Kind};
 
 impl Ui {
     /// The picture of a shelf key: the shelf's picture, else the glyph of
@@ -25,9 +25,10 @@ impl Ui {
             })
     }
 
-    /// Loads and shrinks the pictures of items that have no tile yet, so
-    /// drawing stays fast on a Pi. Returns true when every tile was made
-    /// again (a new key size, or badges that come or go).
+    /// Loads and shrinks the pictures of the items on the deck that have no
+    /// tile yet, so drawing stays fast on a Pi, and drops the tiles of items
+    /// that left the deck. Returns true when every tile was made again (a
+    /// new key size, or badges that come or go).
     pub(super) fn prepare_tiles(&mut self, size: u32) -> bool {
         // Badges tell the shelves apart; with one kind there is nothing to tell.
         let kinds: HashSet<Kind> = self
@@ -42,7 +43,15 @@ impl Ui {
             self.tile_size = size;
             self.badges = badges;
         }
-        for (id, item) in self.library.items() {
+        let on_deck: HashSet<ItemId> = self
+            .deck_shelves
+            .iter()
+            .flat_map(|&shelf| self.library.shelves()[shelf].items.iter().copied())
+            .chain(self.current)
+            .collect();
+        self.tiles.retain(|id, _| on_deck.contains(id));
+        for id in on_deck {
+            let item = self.library.item(id);
             self.tiles
                 .entry(id)
                 .or_insert_with(|| item_tile(item, size, badges));
