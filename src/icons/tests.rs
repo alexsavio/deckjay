@@ -21,6 +21,29 @@ fn same_pixels(a: &RgbImage, b: &RgbImage) -> bool {
     a.dimensions() == b.dimensions() && a.as_raw() == b.as_raw()
 }
 
+/// Lays `tiles` out in a 4-column grid on a dark background, for a contact
+/// sheet a human can look at.
+fn sheet(tiles: &[RgbImage], size: u32, gap: u32) -> RgbImage {
+    let cols = 4;
+    let rows = u32::try_from(tiles.len()).unwrap().div_ceil(cols);
+    let mut canvas = RgbImage::from_pixel(
+        cols * (size + gap) + gap,
+        rows * (size + gap) + gap,
+        Rgb([45, 45, 50]),
+    );
+    for (i, tile) in tiles.iter().enumerate() {
+        let i = u32::try_from(i).unwrap();
+        let (row, col) = (i / cols, i % cols);
+        imageops::replace(
+            &mut canvas,
+            tile,
+            i64::from(gap + col * (size + gap)),
+            i64::from(gap + row * (size + gap)),
+        );
+    }
+    canvas
+}
+
 fn diff_positions(a: &RgbImage, b: &RgbImage) -> Vec<(u32, u32)> {
     a.enumerate_pixels()
         .zip(b.pixels())
@@ -317,23 +340,39 @@ fn contact_sheet() {
     ));
     tiles.push(shelf(&cover, 1, 4));
     tiles.push(flip(size, 2, 4));
+    // A shelf's dots must clear a placeholder's glyph: Note's head and
+    // Star's lower point are the two shapes that reach closest to the
+    // bottom edge.
+    tiles.push(shelf(
+        &glyph_placeholder(Glyph::Note, name_color("Note"), size),
+        0,
+        3,
+    ));
+    tiles.push(shelf(
+        &glyph_placeholder(Glyph::Star, name_color("Star"), size),
+        1,
+        3,
+    ));
 
-    let cols = 4;
-    let rows = u32::try_from(tiles.len()).unwrap().div_ceil(cols);
-    let mut sheet = RgbImage::from_pixel(
-        cols * (size + gap) + gap,
-        rows * (size + gap) + gap,
-        Rgb([45, 45, 50]),
-    );
-    for (i, tile) in tiles.iter().enumerate() {
-        let i = u32::try_from(i).unwrap();
-        let (row, col) = (i / cols, i % cols);
-        imageops::replace(
-            &mut sheet,
-            tile,
-            i64::from(gap + col * (size + gap)),
-            i64::from(gap + row * (size + gap)),
-        );
-    }
-    sheet.save(&path).expect("save contact sheet");
+    sheet(&tiles, size, gap)
+        .save(&path)
+        .expect("save contact sheet");
+
+    let small = 72;
+    let small_tiles = [
+        shelf(
+            &glyph_placeholder(Glyph::Note, name_color("Note"), small),
+            0,
+            3,
+        ),
+        shelf(
+            &glyph_placeholder(Glyph::Star, name_color("Star"), small),
+            1,
+            3,
+        ),
+    ];
+    let small_path = path.replace(".png", "-72.png");
+    sheet(&small_tiles, small, gap)
+        .save(&small_path)
+        .expect("save 72px contact sheet");
 }

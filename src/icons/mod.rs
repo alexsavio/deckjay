@@ -21,6 +21,8 @@ const BG_BLANK: Rgb<u8> = Rgb([0, 0, 0]);
 /// any cover.
 const DECOR_DARK: Rgb<u8> = Rgb([20, 20, 24]);
 const NEW_DOT: Rgb<u8> = Rgb([214, 40, 40]);
+/// Fraction of a shelf key's height reserved for its bottom ledge and dots.
+const SHELF_LEDGE: f32 = 0.22;
 
 struct Canvas {
     img: RgbImage,
@@ -378,9 +380,13 @@ fn new_dot(img: &mut RgbImage, margin: f32) {
 )]
 pub fn shelf(tile: &RgbImage, position: usize, count: usize) -> RgbImage {
     let mut img = tile.clone();
-    let t = inset(img.width());
-    frame(&mut img, t, BG_MORE);
-    fill_dots(&mut img, position, count, 0.84, WHITE);
+    let size = img.width();
+    frame(&mut img, inset(size), BG_MORE);
+    // Wider than the other three sides: a placeholder's glyph can reach
+    // close to the bottom edge, and the dots must never land on it.
+    let ledge_mask = mask(size, |c| c.rect(0.0, 1.0 - SHELF_LEDGE, 1.0, 1.0, WHITE));
+    blend(&mut img, &ledge_mask, BG_MORE, 1.0);
+    fill_dots(&mut img, position, count, 1.0 - SHELF_LEDGE / 2.0, WHITE);
     img
 }
 
