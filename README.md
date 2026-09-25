@@ -154,10 +154,10 @@ playback: decoding, sound outputs and the Raspberry Pi's audio devices.
 |---|---|
 | `main.rs` | Startup, command-line options, reconnecting to the deck |
 | `config.rs` | `config.toml` loading and validation |
-| `library.rs` | Scans album folders, finds covers, builds URLs |
-| `ui.rs` | Key layout, what each key shows and does |
+| `library/` | Items and shelves (`mod.rs`); scans album folders and finds covers (`scan.rs`); builds URLs |
+| `ui/` | What each key shows and does (`mod.rs`), key layout (`layout.rs`) |
 | `icons.rs` | Draws control icons and album tiles (no image files needed) |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
 | `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
-| `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`), local sound output (`local`) |
+| `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`) |
 | `server.rs` | HTTP server the speaker downloads the music from |

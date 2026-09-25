@@ -3,8 +3,9 @@
 kids-deck drives Denon / Marantz HEOS devices through the HEOS CLI, set by
 `speaker_type = "heos"` in `config.toml`. The code:
 
-- [`src/player/heos.rs`](../src/player/heos.rs): the protocol, the player
-  choice and the album walk.
+- [`src/player/heos.rs`](../src/player/heos.rs): the player choice and the
+  album walk.
+- [`src/player/heos/cli.rs`](../src/player/heos/cli.rs): the protocol.
 - [`src/player/heos/tests.rs`](../src/player/heos/tests.rs): a fake receiver
   on 127.0.0.1 that records every command line kids-deck sends.
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
@@ -123,7 +124,7 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    again and sends the command once more: the CLI resets idle connections
    when it recovers from a hang (item 6), and a restarted receiver has
    none. Every command it sends is safe to send twice.
-2. **Play an album** (`PlayerCmd::PlayAlbum`): `set_volume`, then track 1:
+2. **Play an album** (`PlayerCmd::Play`): `set_volume`, then track 1:
    `clear_queue`, `play_stream`. Emits `Playing`. The track is "loading".
 3. **Poll** every 1 s while an album is active: `get_play_state`.
    - `play`: the track is "started"; emits `Playing`. `pause`: "started";
@@ -323,6 +324,7 @@ the current track means the receiver is playing a stale stream (item 1).
 - [pyheos `message.py`][pyheos] (Home Assistant's library): encodes
   `&`, `=`, `%` as `%26`, `%3D`, `%25` and appends `url` last, unencoded.
 - Code: [`heos.rs`](../src/player/heos.rs),
+  [`heos/cli.rs`](../src/player/heos/cli.rs),
   [`heos/tests.rs`](../src/player/heos/tests.rs),
   [`mod.rs`](../src/player/mod.rs), [`config.rs`](../src/config.rs),
   `print_heos_players` in [`main.rs`](../src/main.rs).

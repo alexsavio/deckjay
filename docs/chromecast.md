@@ -116,7 +116,7 @@ the destination come from the app entry of `RECEIVER_STATUS`):
 - `media` is the start track; `queueData.items` holds every track of the
   album, `startIndex` points at the start track.
 - `contentId` is the track URL from `library::url_for`, `contentType` the
-  MIME type from the file extension (`library.rs`). `metadataType` 3 is
+  MIME type from the file extension (`library/scan.rs`). `metadataType` 3 is
   `MusicTrackMediaMetadata`. `images` holds the cover URL when the album
   has one.
 - rust_cast hard-codes `repeatMode` `REPEAT_OFF`, item `autoplay: true`,
@@ -138,7 +138,7 @@ Every command opens its own connection and drops it at the end, without a
    timeout. Then `connect_without_host_verification`, `CONNECT` to
    `receiver-0`, receiver `GET_STATUS`, and look for the app with `appId`
    `CC1AD845`.
-2. **Play an album** (`PlayerCmd::PlayAlbum`): `SET_VOLUME`; `LAUNCH` if the
+2. **Play an album** (`PlayerCmd::Play`): `SET_VOLUME`; `LAUNCH` if the
    Default Media Receiver is not running; `CONNECT` to its `transportId`;
    `LOAD` with the whole album, start index 0. Emits `Playing`; polling
    starts. The speaker then downloads the tracks itself.

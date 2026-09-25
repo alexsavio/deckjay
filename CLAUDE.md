@@ -56,7 +56,7 @@ all three together.
 Three threads joined by `std::sync::mpsc`; async exists only inside the HTTP
 servers:
 
-- **main** (`main.rs` → `ui.rs`, `deck/`): `DeckSource::open` retries every
+- **main** (`main.rs` → `ui/`, `deck/`): `DeckSource::open` retries every
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
 - **player** (`player/`, thread `cast`, `heos` or `local`): `main::output` turns
@@ -64,8 +64,8 @@ servers:
   only the device name), and `spawn` builds the speaker on the player thread,
   because a sound-card stream cannot move between threads on every platform.
   `mod.rs` owns the command loop for all speaker types: it coalesces commands
-  (button mashing; a `SetVolume` before the last `PlayAlbum` is dropped, since
-  `PlayAlbum` carries the volume), calls the private `Speaker` trait, and polls
+  (button mashing; a `SetVolume` before the last `Play` is dropped, since
+  `Play` carries the volume), calls the private `Speaker` trait, and polls
   while `poll_interval()` is `Some`. A failed command emits `Stopped` and drops
   the rest of its batch; 3 failed polls in a row end the album the same way.
   `Emitter` drops repeats of the last event, except for the first event after
@@ -74,10 +74,11 @@ servers:
   - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
     connection (after a TCP connect-timeout probe, because `rust_cast` has no
     timeout) and drops it. Polls every 4 s while an album is active.
-  - `heos.rs`: one persistent HEOS CLI connection (TCP 1255, JSON lines),
-    reconnects after errors. `play_stream` plays one URL and HEOS has no
-    queue for URLs, so it polls `get_play_state` every second and starts the
-    next track when the state goes from `play` to `stop`. A real Denon
+  - `heos.rs`: one persistent HEOS CLI connection (TCP 1255, JSON lines;
+    the protocol is in `heos/cli.rs`), reconnects after errors.
+    `play_stream` plays one URL and HEOS has no queue for URLs, so it polls
+    `get_play_state` every second and starts the next track when the state
+    goes from `play` to `stop`. A real Denon
     AVR-X1600H needs `clear_queue` before each `play_stream` (else it plays
     a hidden queue of earlier streams and never reports `stop`) and
     `set_play_state stop` when an album ends. These and its other quirks
@@ -92,19 +93,22 @@ servers:
     smart display (Chromecast built-in); the JBL itself is not tested yet.
 - **http** (`server.rs`): single-thread tokio runtime, axum `ServeDir` under
   `/music`, behind a middleware that answers 404 for every path not in
-  `library::served_files` (the scanned tracks and covers): no dotfiles, stray
+  `Library::served_files` (the scanned tracks and covers): no dotfiles, stray
   files or symlink escapes reach the LAN. The port, the runtime and the
   listener are set up on the calling thread, so start-up failures are
   errors, not a dead server thread.
 
 Playback flow:
 
-1. `library::scan` builds `Album` / `Track` from the music folder.
+1. `Library::scan` (`library/scan.rs`) builds one `Item` with its `Track`s
+   per album folder, all on one music `Shelf`.
 2. `Ui::tracks` turns them into `TrackInfo` URLs with `library::url_for`
    (per-segment percent-encoding) on `base_url`:
    `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
    `main::local_ip_towards(speaker)`.
-3. `PlayerCmd::PlayAlbum` reaches the speaker backend. Cast launches the
+3. `PlayerCmd::Play` with `Content::Tracks` reaches the speaker backend
+   (every backend fails `Content::Stream` and `Content::Spotify` as not
+   supported yet, which the loop reports as `Stopped`). Cast launches the
    Default Media Receiver (`CC1AD845`) and loads the whole album as a
    `MediaQueue`. HEOS sets the volume and sends `browse/play_stream` for one
    track; the `url` parameter goes last and unencoded, all other values
@@ -119,8 +123,10 @@ State:
   such check: while an album is active it trusts the play state, so a stop
   in the HEOS app looks like the end of a track.
 - The UI is optimistic: a key press sets `current` / `playing` at once, and
-  later events correct it. Album ids in commands and events are indexes into
-  `Ui::albums`.
+  later events correct it. Commands, events and `Face`s name items by
+  `ItemId`, an index into the `Library` that is never reused while the
+  program runs; `ItemKey` (`<source>/<path>`, e.g. `music/01 Animal Songs`)
+  is the name that survives a restart.
 
 Deck backends (`deck/`): `Deck` owns the per-`Face` image cache and what each
 key shows; the private `Backend` trait does device IO. `hid.rs` is the USB
@@ -143,12 +149,13 @@ Rendering:
 
 - `Face` is both "what a key shows" and the image-cache key. `Deck::show`
   re-sends only keys whose `Face` changed and caches encoded images per
-  `Face` forever, so keep the set of distinct faces small (volume is
-  quantised to 20 levels for this reason).
-- `Layout::new(rows, cols, albums)`: the bottom row holds controls
-  (`control_row` picks them by width), the other keys hold albums; with too
-  many albums the last album key becomes "more" and pages. Decks with fewer
-  than 2 rows are ignored.
+  `Face` until `Deck::retain` drops them (nothing calls it yet), so keep
+  the set of distinct faces small (volume is quantised to 20 levels for
+  this reason).
+- `Layout::new(rows, cols, items)` (`ui/layout.rs`): the bottom row holds
+  controls (`control_row` picks them by width), the other keys hold albums;
+  with too many albums the last album key becomes "more" and pages. Decks
+  with fewer than 2 rows are ignored.
 - `icons.rs` draws every icon procedurally (4x supersampling); there are no
   image or font assets.
 
