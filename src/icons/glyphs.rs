@@ -174,17 +174,12 @@ fn mic(c: &mut Canvas, cx: f32, cy: f32, s: f32, color: Rgb<u8>) {
     );
 }
 
-/// Generic (non-brand) playlist mark: a ring around three curved bars.
+/// Generic (non-brand) playlist mark: a ring around three curved bars, all
+/// centered on one point so they read as concentric, not stacked straight.
 fn spotify(c: &mut Canvas, cx: f32, cy: f32, s: f32, color: Rgb<u8>) {
-    arc(c, (cx, cy), 0.92 * s, (0.0, 360.0), 0.08 * s, color);
-    for (radius_mul, y_off) in [(0.55_f32, -0.24), (0.42, 0.0), (0.55, 0.24)] {
-        arc(
-            c,
-            (cx - 0.12 * s, cy + y_off * s),
-            radius_mul * s,
-            (-38.0, 38.0),
-            0.07 * s,
-            color,
-        );
+    arc(c, (cx, cy), 0.92 * s, (0.0, 360.0), 0.07 * s, color);
+    let origin = (cx - 0.30 * s, cy + 0.35 * s);
+    for radius_mul in [0.32_f32, 0.54, 0.76] {
+        arc(c, origin, radius_mul * s, (-72.0, 18.0), 0.075 * s, color);
     }
 }
