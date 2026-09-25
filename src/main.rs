@@ -23,6 +23,7 @@ mod library;
 mod net;
 mod player;
 mod podcasts;
+mod radio;
 mod server;
 mod simulator;
 mod spotify;
