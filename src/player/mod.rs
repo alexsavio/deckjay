@@ -209,6 +209,12 @@ trait Speaker {
     fn poll_interval(&self) -> Option<Duration>;
     /// Forgets the album after a failed command.
     fn reset(&mut self);
+    /// Stops what plays and forgets it, before another speaker takes over.
+    #[expect(dead_code, reason = "called once Spotify can take over")]
+    fn stop(&mut self, _events: &mut Emitter) -> Result<()> {
+        self.reset();
+        Ok(())
+    }
 }
 
 fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
