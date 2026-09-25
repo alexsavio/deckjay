@@ -83,6 +83,7 @@ Run `just` to list every recipe. The ones you need most:
 | `just doc --open` | Build and open the API docs |
 | `just sim [MODEL]` | Run the player with a web Stream Deck simulator |
 | `just deploy` | Build the Pi image and start it on the Pi |
+| `just spotify-login` | Sign in to Spotify once (`pi-spotify-login` on the Pi) |
 
 The code targets Rust 1.98 (edition 2024). `cargo clippy` uses the
 pedantic lint group; the lint settings are in `Cargo.toml`.

@@ -25,6 +25,10 @@ pub struct Config {
     #[serde(skip)]
     pub sources: Vec<Source>,
 
+    /// The `[spotify]` table: needed to sign in and to play Spotify.
+    #[serde(default)]
+    pub spotify: Option<Spotify>,
+
     /// Writable folder for what the deck remembers. Relative paths are
     /// resolved against the folder the config file lives in.
     #[serde(default = "default_state_dir")]
@@ -66,6 +70,15 @@ pub struct Config {
     /// "HDMI" on a Raspberry Pi). `None` uses the system's default output.
     #[serde(default)]
     pub audio_device: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Spotify {
+    /// Of the app made at developer.spotify.com.
+    pub client_id: String,
+    /// Part of the name of the Spotify Connect device that plays.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -129,6 +142,19 @@ impl Config {
             );
         }
         cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base)?;
+        if let Some(spotify) = &cfg.spotify {
+            let id = &spotify.client_id;
+            if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+                bail!("spotify.client_id {id:?} must be the Client ID of your Spotify app");
+            }
+            if spotify
+                .device
+                .as_deref()
+                .is_some_and(|d| d.trim().is_empty())
+            {
+                bail!("spotify.device is empty; leave it out or name the speaker");
+            }
+        }
         cfg.state_dir = base.join(&cfg.state_dir);
 
         if cfg.speaker_type != SpeakerType::Local && cfg.speaker_host.trim().is_empty() {
@@ -344,6 +370,32 @@ mod tests {
         for host in ["192.168.1.20", "pi.local"] {
             let cfg = parse(&format!("advertise_host = \"{host}\"\n")).unwrap();
             assert_eq!(cfg.advertise_host.as_deref(), Some(host));
+        }
+    }
+
+    #[test]
+    fn reads_the_spotify_table() {
+        let cfg = parse("[spotify]\nclient_id = \"0123abcdef\"\ndevice = \"Denon\"\n").unwrap();
+        assert_eq!(
+            cfg.spotify,
+            Some(Spotify {
+                client_id: "0123abcdef".into(),
+                device: Some("Denon".into()),
+            })
+        );
+        assert_eq!(parse("").unwrap().spotify, None);
+    }
+
+    #[test]
+    fn rejects_a_bad_spotify_table() {
+        for table in [
+            "client_id = \"\"",
+            "client_id = \"abc def\"",
+            "client_id = \"abc\"\ndevice = \" \"",
+            "client_id = \"abc\"\nsecret = \"x\"",
+            "device = \"Denon\"",
+        ] {
+            assert!(parse(&format!("[spotify]\n{table}\n")).is_err(), "{table}");
         }
     }
 

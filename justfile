@@ -53,6 +53,10 @@ debug *ARGS:
 doctor:
     cargo run --release -- --check
 
+# Sign in to Spotify once (needs [spotify] in config.toml)
+spotify-login:
+    cargo run --release -- spotify-login
+
 # Draw the 15-key layout into a picture, no hardware needed
 preview FILE="layout.png":
     cargo run --release -- --preview {{FILE}}
@@ -110,6 +114,11 @@ deploy: image
 [confirm("Delete music on the Pi that is not in ./music? [y/N]")]
 pi-music-prune:
     rsync -a --delete music/ {{pi}}:{{pi_dir}}/music/
+
+# Sign in to Spotify on the Pi: open the address it prints on this computer,
+# then paste the address the browser ends up at
+pi-spotify-login:
+    ssh -t {{pi}} "cd {{pi_dir}} && docker compose run --rm kids-deck spotify-login /app/config.toml"
 
 # Follow the logs on the Pi
 pi-logs:

@@ -26,7 +26,11 @@ deploy steps and the per-file code map.
   Still needs a valid `config.toml` with a `[[source]]`, and a route to
   `speaker_host` (unless `advertise_host` is set).
 - `just doctor` (`--check`): sources and their items, connected decks, speaker
-  reachability.
+  reachability, and with `[spotify]` the account and its Connect devices.
+- `just spotify-login` (`kids-deck spotify-login`): the one-time Spotify
+  sign-in (OAuth PKCE, `src/spotify/login.rs`); the token goes to
+  `<state_dir>/spotify-token.json`, mode 0600. The default log filter keeps
+  `ureq_proto` at info, because at trace it logs raw requests with tokens.
 - `just sim [MODEL]`: player + simulator in Docker (`compose.sim.yaml`),
   page at <http://localhost:8090>. It passes the Mac's LAN IP as
   `--advertise-host`, because inside a container `local_ip_towards` returns

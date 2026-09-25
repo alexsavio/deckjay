@@ -49,6 +49,7 @@ const USAGE: &str = "\
 usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
                  [--check | --preview FILE.png]
        kids-deck simulator [--model NAME] [--port PORT]
+       kids-deck spotify-login [CONFIG] [--listen ADDR]
 
   CONFIG              path to config.toml (default: ./config.toml)
   --simulator URL     use the deck simulator at URL, e.g. http://localhost:8090,
@@ -62,7 +63,12 @@ usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
   simulator           run the web Stream Deck simulator
   --model NAME        mk2 (default), mini, neo, xl or plus
   --port PORT         port of the simulator page and API (default: 8090)
+
+  spotify-login       sign in to Spotify once; saves the login in state_dir
+  --listen ADDR       where the browser comes back to (default: 127.0.0.1:8898)
 ";
+
+const DEFAULT_SPOTIFY_LISTEN: &str = "127.0.0.1:8898";
 
 const DEFAULT_SIMULATOR_PORT: u16 = 8090;
 
@@ -71,13 +77,17 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,symphonia=error")),
+                // ureq_proto logs raw requests, tokens included, at trace level.
+                .unwrap_or_else(|_| EnvFilter::new("info,symphonia=error,ureq_proto=info")),
         )
         .init();
 
     let mut args = std::env::args().skip(1).peekable();
     if args.next_if(|arg| arg == "simulator").is_some() {
         return run_simulator(args);
+    }
+    if args.next_if(|arg| arg == "spotify-login").is_some() {
+        return run_spotify_login(args);
     }
 
     let mut config_path = PathBuf::from("config.toml");
@@ -243,6 +253,41 @@ fn run_simulator(mut args: impl Iterator<Item = String>) -> Result<()> {
     simulator::run(port, model)
 }
 
+fn run_spotify_login(args: impl Iterator<Item = String>) -> Result<()> {
+    let mut config_path = PathBuf::from("config.toml");
+    let mut listen = DEFAULT_SPOTIFY_LISTEN.to_string();
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--listen" => listen = args.next().context("--listen needs an address")?,
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(());
+            }
+            s if s.starts_with('-') => bail!("unknown spotify-login option {s}\n\n{USAGE}"),
+            s => config_path = s.into(),
+        }
+    }
+    let listen = listen
+        .parse()
+        .with_context(|| format!("--listen needs an address like 127.0.0.1:8898, not {listen}"))?;
+    let cfg = Config::load(&config_path)?;
+    let spotify = cfg.spotify.as_ref().with_context(|| {
+        format!(
+            "{} has no [spotify] table with the client_id of your Spotify app",
+            config_path.display()
+        )
+    })?;
+    spotify::login::run(
+        &spotify.client_id,
+        &cfg.state_dir,
+        listen,
+        std::io::BufReader::new(std::io::stdin()),
+        spotify::api::Endpoints::default(),
+        &mut std::io::stdout(),
+    )
+}
+
 fn write_preview(cfg: &Config, library: Library, base_url: String, path: &Path) -> Result<()> {
     let (tx, _) = mpsc::channel();
     let (_, rx) = mpsc::channel();
@@ -346,6 +391,9 @@ fn run_check(
         print_usb_decks()?;
     }
 
+    if let Some(spotify) = &cfg.spotify {
+        print_spotify(cfg, spotify);
+    }
     if cfg.speaker_type == SpeakerType::Local {
         print_audio_outputs(cfg);
         return Ok(());
@@ -362,6 +410,36 @@ fn run_check(
         SpeakerType::Local => unreachable!("handled above"),
     }
     Ok(())
+}
+
+fn print_spotify(cfg: &Config, spotify: &config::Spotify) {
+    println!("\nSpotify:");
+    let mut client =
+        match spotify::api::Client::load(&cfg.state_dir, spotify::api::Endpoints::default()) {
+            Ok(client) => client,
+            Err(err) => {
+                println!("  {err:#}");
+                return;
+            }
+        };
+    let mut out = Vec::new();
+    if let Err(err) = spotify::login::print_account(&mut client, &mut out) {
+        println!("  {err:#}");
+    }
+    for line in String::from_utf8_lossy(&out).lines() {
+        println!("  {line}");
+    }
+    let Some(device) = &spotify.device else {
+        println!("  no spotify.device set: Spotify cannot play yet");
+        return;
+    };
+    match client.devices() {
+        Ok(devices) => match spotify::pick_device(&devices, device) {
+            Ok(found) => println!("  spotify.device {device:?} is {:?} ✓", found.name),
+            Err(err) => println!("  spotify.device {device:?}: {err:#}"),
+        },
+        Err(err) => println!("  cannot check spotify.device: {err:#}"),
+    }
 }
 
 fn print_audio_outputs(cfg: &Config) {

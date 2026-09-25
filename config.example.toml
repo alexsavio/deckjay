@@ -44,6 +44,15 @@ brightness = 60
 # absolute; it must be writable.
 # state_dir = "state"
 
+# Spotify (needs Premium): kids-deck remote-controls a Spotify Connect device,
+# such as a speaker, a receiver or a Chromecast. Make an app at
+# https://developer.spotify.com/dashboard with the redirect URI
+# http://127.0.0.1:8898/callback and the Web API, put its Client ID here,
+# then run `just spotify-login` once. `just doctor` lists the devices.
+# [spotify]
+# client_id = "0123456789abcdef0123456789abcdef"
+# device = "Denon"   # part of the Connect device's name
+
 # What the deck plays comes from sources: one [[source]] table each. They go
 # at the end of the file: TOML reads every key after a [[source]] line as
 # part of that source. Each source is one shelf on the deck.
