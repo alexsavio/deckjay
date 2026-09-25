@@ -44,7 +44,6 @@ pub struct Start {
 
 /// An internet radio station.
 #[derive(Clone, Debug)]
-#[expect(dead_code, reason = "no backend plays radio yet")]
 pub struct Station {
     pub url: String,
     /// The MIME type of the stream, when known.

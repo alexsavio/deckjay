@@ -9,7 +9,7 @@ rust_cast writes for kids-deck's calls, and Google's docs.
 Cast is the default `speaker_type`. The code:
 
 - [`src/player/cast.rs`](../src/player/cast.rs): the rust_cast calls, the
-  album queue, polling and the "ours" check.
+  album queue, radio stations, polling and the "ours" check.
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
   HEOS, the `Speaker` trait and the `Emitter`;
   [`progress.rs`](../src/player/progress.rs): when an item reports its
@@ -20,7 +20,7 @@ Cast is the default `speaker_type`. The code:
 
 There is no fake Cast receiver. `cast/tests.rs` tests the status decisions
 (`poll_event`, `skip_target`, `place`, `finished`) on hand-built
-`StatusEntry` values, and
+`StatusEntry` values and the media a station loads (`Live::to_media`), and
 `every_failed_command_reports_stopped` in `mod.rs` sends commands to a
 closed port. No test talks Cast V2.
 
@@ -55,7 +55,7 @@ Namespaces, all `urn:x-cast:com.google.cast.` plus:
 | `tp.connection` | `CONNECT` | none |
 | `tp.heartbeat` | nothing | none (the receiver's `PING`s are buffered) |
 | `receiver` | `GET_STATUS`, `SET_VOLUME`, `LAUNCH` | `RECEIVER_STATUS` |
-| `media` | `LOAD`, `GET_STATUS`, `PAUSE`, `PLAY`, `SEEK` | `MEDIA_STATUS` |
+| `media` | `LOAD`, `GET_STATUS`, `PAUSE`, `PLAY`, `SEEK`, `STOP` | `MEDIA_STATUS` |
 
 rust_cast turns `LAUNCH_ERROR` and the media errors `LOAD_FAILED`,
 `LOAD_CANCELLED`, `INVALID_PLAYER_STATE` and `INVALID_REQUEST` into a
@@ -78,9 +78,11 @@ and it takes `mediaSessionId` from `MEDIA_STATUS`.
 | `receiver.launch_app(DefaultMediaReceiver)` | `receiver-0` | the app |
 | `connection.connect(transportId)` | the app | no reply |
 | `media.load_with_queue(…)` | the app | success or failure |
+| `media.load_with_opts(…)` (station) | the app | success or failure |
 | `media.get_status(transportId, None)` | the app | first entry |
 | `media.pause` / `media.play` | the app | success or failure |
 | `media.seek(…)` (resume only) | the app | success or failure |
+| `media.stop` (station) | the app | success or failure |
 
 ```json
 {"type":"CONNECT","userAgent":"RustCast"}
@@ -128,8 +130,9 @@ the destination come from the app entry of `RECEIVER_STATUS`):
 - `currentTime` is `start.position` in seconds (`LoadOptions.current_time`),
   0.0 unless an item resumes inside a track (see
   [Resume inside a track](#resume-inside-a-track)).
-- kids-deck never sends `STOP`, `QUEUE_*`, `CLOSE`, `PING` or `PONG`, and
-  `SEEK` only right after a `LOAD` that resumes inside a track.
+- kids-deck never sends `QUEUE_*`, `CLOSE`, `PING` or `PONG`, `SEEK` only
+  right after a `LOAD` that resumes inside a track, and `STOP` only for a
+  station the receiver will not pause (see [Radio](#radio)).
 
 `MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
 (`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,
@@ -204,6 +207,44 @@ Every command opens its own connection and drops it at the end, without a
    timeout. A failed poll is logged at debug level; three in a row
    (`MAX_FAILED_POLLS`) end the album the same way, about 20 s after the
    speaker went away. A poll or command that works restarts the count.
+
+## Radio
+
+A station (`Content::Stream`) loads as one live item, without a queue.
+How the station's URL becomes the stream URL is in [radio.md](radio.md).
+The `LOAD` (wrapped; from the fields rust_cast 0.21.0 serializes, not a
+byte capture):
+
+```json
+{"requestId": 4, "sessionId": "<app sessionId>", "type": "LOAD",
+ "media": {"contentId": "http://radio.example/kids.mp3",
+           "streamType": "LIVE", "contentType": "audio/mpeg",
+           "metadata": {"metadataType": 0, "title": "Kids Radio",
+                        "images": [{"url": "…"}]}},
+ "currentTime": 0.0, "customData": {}, "autoplay": true}
+```
+
+- `contentId` is the resolved stream URL; `contentType` is the stream's
+  content type, else the station's, else `audio/mpeg`. For HLS it is
+  `application/x-mpegURL`. `metadataType` 0 is `GenericMediaMetadata`,
+  with the station's name as the title and its cover, if it has one.
+- **Play:** resolve the station on the player thread (a failure sends
+  nothing and reports `Stopped`), `SET_VOLUME`, `LAUNCH` if needed,
+  `CONNECT`, the `LOAD`. Emits `Playing`; polling starts. No `Progress`,
+  no `Finished`.
+- **Poll:** as for an album, every 4 s. The station is "ours" while
+  `media.contentId` equals the stream URL; `IDLE`, no entry or other media
+  report `Stopped`.
+- **Play/pause key:** `GET_STATUS`. `PLAYING` or `BUFFERING`: `PAUSE`,
+  emits `Paused`. When the receiver refuses (an error reply), `STOP`
+  instead, and polling stops. `PAUSED`, stopped, or nothing loaded: the
+  `LOAD` again, so the station goes on live, not from where it paused.
+- **Next / previous:** nothing is sent.
+
+Unverified on a device: all of it. In particular whether the Default Media
+Receiver pauses a live item, whether it keeps `contentId` as sent after
+following redirects, and whether audio-only HLS plays: packed-audio
+segments may need `hlsSegmentFormat`, which rust_cast cannot send.
 
 ## Resume inside a track
 

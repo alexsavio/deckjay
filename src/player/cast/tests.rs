@@ -50,7 +50,7 @@ fn entry(state: PlayerState, content_id: Option<&str>) -> StatusEntry {
 }
 
 fn poll(entry: Option<&StatusEntry>) -> Option<PlayerEvent> {
-    poll_event(entry, &tracks(), ITEM)
+    poll_event(entry, &tracks(), None, ITEM)
 }
 
 #[test]
@@ -244,4 +244,94 @@ fn a_stop_seen_near_the_end_of_the_last_track_is_its_end() {
     assert!(!near_end(seen(1, 299, Some(300)), 3), "not the last track");
     assert!(!near_end(seen(2, 299, None), 3), "length unknown");
     assert!(!near_end(None, 3));
+}
+
+const LIVE: &str = "http://radio.example/kids.mp3?listener=1";
+
+fn live_poll(entry: Option<&StatusEntry>) -> Option<PlayerEvent> {
+    poll_event(entry, &[], Some(LIVE), ITEM)
+}
+
+fn on_air(state: PlayerState, content_id: &str) -> StatusEntry {
+    let mut e = entry(state, Some(content_id));
+    e.media.as_mut().unwrap().stream_type = StreamType::Live;
+    e
+}
+
+#[test]
+fn our_station_playing_buffering_or_paused_is_ours() {
+    for state in [PlayerState::Playing, PlayerState::Buffering] {
+        let e = on_air(state, LIVE);
+        assert_eq!(live_poll(Some(&e)), Some(PlayerEvent::Playing(ITEM)));
+    }
+    let paused = on_air(PlayerState::Paused, LIVE);
+    assert_eq!(live_poll(Some(&paused)), Some(PlayerEvent::Paused(ITEM)));
+}
+
+#[test]
+fn another_stream_an_idle_receiver_or_an_album_is_not_our_station() {
+    let other = on_air(PlayerState::Playing, "http://radio.example/other.mp3");
+    assert_eq!(live_poll(Some(&other)), Some(PlayerEvent::Stopped));
+    let mut ended = on_air(PlayerState::Idle, LIVE);
+    ended.idle_reason = Some(IdleReason::Error);
+    assert_eq!(live_poll(Some(&ended)), Some(PlayerEvent::Stopped));
+    assert_eq!(live_poll(None), Some(PlayerEvent::Stopped));
+    let album = entry(PlayerState::Playing, Some(&url(0)));
+    assert_eq!(live_poll(Some(&album)), Some(PlayerEvent::Stopped));
+}
+
+#[test]
+fn a_station_has_no_place_no_end_and_no_next_track() {
+    let mut e = on_air(PlayerState::Playing, LIVE);
+    e.current_time = Some(1234.0);
+    assert_eq!(place(&e, &[]), None);
+    assert_eq!(skip_target(&e, &[], true), None);
+    assert_eq!(skip_target(&e, &[], false), None);
+    let mut idle = on_air(PlayerState::Idle, LIVE);
+    idle.idle_reason = Some(IdleReason::Finished);
+    assert!(!finished(&idle, &[]));
+}
+
+fn station(content_type: Option<&str>, cover_url: Option<&str>) -> Station {
+    Station {
+        url: "http://radio.example/kids.pls".into(),
+        content_type: content_type.map(Into::into),
+        name: "Kids Radio".into(),
+        cover_url: cover_url.map(Into::into),
+    }
+}
+
+fn resolved(content_type: Option<&str>) -> crate::radio::Stream {
+    crate::radio::Stream {
+        url: LIVE.into(),
+        content_type: content_type.map(Into::into),
+    }
+}
+
+#[test]
+fn a_station_loads_as_one_live_item_named_after_it() {
+    let cover = "http://10.0.0.2:8765/covers/kids.png";
+    let media = Live::new(&station(None, Some(cover)), resolved(Some("audio/aac"))).to_media();
+    assert_eq!(media.content_id, LIVE);
+    assert_eq!(media.stream_type, StreamType::Live);
+    assert_eq!(media.content_type, "audio/aac");
+    assert_eq!(media.duration, None);
+    let Some(Metadata::Generic(metadata)) = media.metadata else {
+        panic!("{:?}", media.metadata);
+    };
+    assert_eq!(metadata.title.as_deref(), Some("Kids Radio"));
+    assert_eq!(metadata.images, [Image::new(cover.into())]);
+}
+
+#[test]
+fn a_station_type_comes_from_the_stream_then_the_station_then_mp3() {
+    let content_type = |station_type, stream_type| {
+        Live::new(&station(station_type, None), resolved(stream_type))
+            .to_media()
+            .content_type
+    };
+    let hls = crate::radio::HLS;
+    assert_eq!(content_type(Some("audio/ogg"), Some(hls)), hls);
+    assert_eq!(content_type(Some("audio/ogg"), None), "audio/ogg");
+    assert_eq!(content_type(None, None), "audio/mpeg");
 }
