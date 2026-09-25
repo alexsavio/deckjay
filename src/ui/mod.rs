@@ -204,12 +204,28 @@ impl Ui {
     /// Applies status updates from the speaker. Returns true if anything changed.
     pub fn handle_events(&mut self) -> bool {
         let mut changed = false;
-        for event in self.events.try_iter() {
+        let events: Vec<PlayerEvent> = self.events.try_iter().collect();
+        for event in events {
             let (current, playing) = match event {
                 PlayerEvent::Playing(item) => (Some(item), true),
                 PlayerEvent::Paused(item) => (Some(item), false),
                 PlayerEvent::Stopped => (None, false),
-                PlayerEvent::Progress { .. } | PlayerEvent::Finished(_) => continue,
+                PlayerEvent::Progress {
+                    item,
+                    track,
+                    position,
+                    duration,
+                } => {
+                    changed |= self.record_progress(item, track, position, duration);
+                    continue;
+                }
+                PlayerEvent::Finished(item) => {
+                    let key = &self.library.item(item).key.0;
+                    self.store.finish(key);
+                    self.store.save_now(Instant::now());
+                    changed = true;
+                    continue;
+                }
             };
             if !playing {
                 self.store.save_now(Instant::now());
@@ -330,6 +346,28 @@ impl Ui {
         let files: Vec<&Path> = item.tracks().iter().map(|t| t.rel_path.as_path()).collect();
         let (track, position) = progress.resume_at(&files);
         Start { track, position }
+    }
+
+    /// Saves how far `id` got. Returns whether its key changes.
+    fn record_progress(
+        &mut self,
+        id: ItemId,
+        track: usize,
+        position: Duration,
+        duration: Option<Duration>,
+    ) -> bool {
+        let item = self.library.item(id);
+        let Some(file) = item.tracks().get(track).map(|t| t.rel_path.clone()) else {
+            return false;
+        };
+        if !item.kind.resumes() {
+            return false;
+        }
+        let before = (self.progress_steps(id), self.is_new(id));
+        let key = item.key.0.clone();
+        self.store
+            .set_progress(&key, track, &file, position, duration);
+        before != (self.progress_steps(id), self.is_new(id))
     }
 
     /// How much of `id` is done, in tenths, for items that resume.

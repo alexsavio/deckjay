@@ -198,10 +198,6 @@ impl Store {
     }
 
     /// `file` is the track's path in the library.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "called once the player reports progress")
-    )]
     pub fn set_progress(
         &mut self,
         key: &str,
@@ -222,10 +218,6 @@ impl Store {
         self.dirty = true;
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "called once the player reports progress")
-    )]
     pub fn finish(&mut self, key: &str) {
         if let Some(progress) = self.state.progress.get_mut(key) {
             progress.finished = true;
@@ -293,18 +285,10 @@ fn write_atomically(path: &Path, state: &State) -> Result<()> {
     Ok(())
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "called once the player reports progress")
-)]
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "called once the player reports progress")
-)]
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

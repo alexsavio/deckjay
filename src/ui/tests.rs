@@ -523,3 +523,58 @@ fn a_station_plays_its_stream() {
         (ItemId(0), "https://example.org/kinder.mp3", "Kinder")
     );
 }
+
+#[test]
+fn progress_events_are_saved_and_a_finished_book_starts_over() {
+    let (mut ui, cmds, events) = ui_with(
+        Library::with_shelves(vec![(
+            "books",
+            Kind::Audiobook,
+            items(Kind::Audiobook, 0..1),
+        )]),
+        "",
+    );
+    let layout = ui.layout(3, 5);
+    events
+        .send(PlayerEvent::Progress {
+            item: ItemId(0),
+            track: 2,
+            position: Duration::from_secs(30),
+            duration: Some(Duration::from_secs(60)),
+        })
+        .unwrap();
+    assert!(ui.update(&layout, &[]), "the progress bar grows");
+    let saved = ui.store.progress("music/album 0").unwrap();
+    assert_eq!(
+        (saved.track, saved.file.as_str(), saved.position_ms),
+        (2, "music/album 0/03.mp3", 30_000)
+    );
+    assert!(matches!(
+        ui.faces(&layout)[0],
+        Face::Item {
+            progress: Some(8),
+            ..
+        }
+    ));
+
+    events.send(PlayerEvent::Finished(ItemId(0))).unwrap();
+    events.send(PlayerEvent::Stopped).unwrap();
+    ui.update(&layout, &[0]);
+    assert_eq!(played(&cmds), [(ItemId(0), Start::default(), true)]);
+}
+
+#[test]
+fn progress_of_an_item_that_does_not_resume_is_ignored() {
+    let (mut ui, _cmds, events) = test_ui(1, "");
+    let layout = ui.layout(3, 5);
+    events
+        .send(PlayerEvent::Progress {
+            item: ItemId(0),
+            track: 0,
+            position: Duration::from_secs(3),
+            duration: None,
+        })
+        .unwrap();
+    ui.update(&layout, &[]);
+    assert!(ui.store.progress("music/album 0").is_none());
+}
