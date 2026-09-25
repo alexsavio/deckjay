@@ -63,10 +63,16 @@ pub enum Content {
     /// Files the speaker plays one after the other.
     Tracks {
         tracks: Vec<TrackInfo>,
-        #[expect(dead_code, reason = "every backend starts at the first track so far")]
+        #[cfg_attr(
+            not(test),
+            expect(dead_code, reason = "every backend starts at the first track so far")
+        )]
         start: Start,
         /// Whether to report how far playback got, for items that resume.
-        #[expect(dead_code, reason = "no backend reports progress yet")]
+        #[cfg_attr(
+            not(test),
+            expect(dead_code, reason = "no backend reports progress yet")
+        )]
         progress: bool,
     },
     #[cfg_attr(not(test), expect(dead_code, reason = "radio items do not exist yet"))]

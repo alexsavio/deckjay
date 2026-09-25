@@ -26,6 +26,7 @@ mod podcasts;
 mod server;
 mod simulator;
 mod spotify;
+mod state;
 mod ui;
 
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
@@ -139,7 +140,8 @@ fn main() -> Result<()> {
 
     let (event_tx, event_rx) = mpsc::channel();
     let player = player::spawn(output(&cfg), event_tx);
-    let mut ui = Ui::new(&cfg, library, base_url, player, event_rx);
+    let store = state::Store::open(&cfg.state_dir);
+    let mut ui = Ui::new(&cfg, library, base_url, player, event_rx, store);
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
     let mut source = match simulator_url {
@@ -244,7 +246,7 @@ fn run_simulator(mut args: impl Iterator<Item = String>) -> Result<()> {
 fn write_preview(cfg: &Config, library: Library, base_url: String, path: &Path) -> Result<()> {
     let (tx, _) = mpsc::channel();
     let (_, rx) = mpsc::channel();
-    let mut ui = Ui::new(cfg, library, base_url, tx, rx);
+    let mut ui = Ui::new(cfg, library, base_url, tx, rx, state::Store::in_memory());
     ui.preview(3, 5, 144, true)
         .save(path)
         .with_context(|| format!("cannot write {}", path.display()))?;

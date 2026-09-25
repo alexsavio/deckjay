@@ -45,6 +45,8 @@ pedantic = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
+# Reads `shelf` as a typo of `self`.
+similar_names = "allow"
 
 [profile.release]
 strip = true

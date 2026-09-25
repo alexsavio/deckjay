@@ -13,6 +13,8 @@ services:
       - /run/udev:/run/udev:ro
       - ./config.toml:/app/config.toml:ro
       - ./music:/app/music:ro
+      # What the deck remembers (state_dir); must be writable.
+      - ./state:/app/state
       # Every [[source]] folder outside ./music needs a volume too. Mount it at
       # the same path it has on the Pi, so config.toml works unchanged:
       # - /mnt/usb/audiobooks:/mnt/usb/audiobooks:ro

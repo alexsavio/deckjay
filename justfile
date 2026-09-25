@@ -36,10 +36,10 @@ pi_dir := env("PI_DIR", "~/kids-deck")
 help:
     @just --list
 
-# Create config.toml and the music folder if they don't exist
+# Create config.toml, the music folder and the state folder if they don't exist
 setup:
     @test -f config.toml || (cp config.example.toml config.toml && echo "created config.toml: set speaker_host")
-    @mkdir -p music
+    @mkdir -p music state
 
 # Run the player (quit the Elgato Stream Deck app first)
 run *ARGS:
@@ -101,7 +101,7 @@ image:
 # Copy the image, compose file, config and music to the Pi, then start it
 deploy: image
     docker save kids-deck | ssh {{pi}} docker load
-    ssh {{pi}} "mkdir -p {{pi_dir}}/music"
+    ssh {{pi}} "mkdir -p {{pi_dir}}/music {{pi_dir}}/state"
     scp docker-compose.yml config.toml {{pi}}:{{pi_dir}}/
     rsync -a music/ {{pi}}:{{pi_dir}}/music/
     ssh {{pi}} "cd {{pi_dir}} && docker compose up -d"

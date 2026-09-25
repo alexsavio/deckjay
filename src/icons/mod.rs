@@ -222,38 +222,11 @@ pub fn name_color(name: &str) -> Rgb<u8> {
     hue_to_rgb((hash % 360) as f32)
 }
 
-/// Colored tile with a music note, for albums without a cover.
-pub fn placeholder(name: &str, size: u32) -> RgbImage {
-    let mut c = Canvas::new(size, name_color(name));
-    c.circle(0.40, 0.66, 0.12, WHITE);
-    c.rect(0.47, 0.22, 0.53, 0.66, WHITE);
-    c.polygon(
-        &[(0.47, 0.22), (0.72, 0.32), (0.72, 0.42), (0.47, 0.32)],
-        WHITE,
-    );
-    c.finish(size)
-}
-
 /// Colored tile with a large white glyph, for an item without a picture.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
-)]
 pub fn glyph_placeholder(glyph: Glyph, color: Rgb<u8>, size: u32) -> RgbImage {
     let mut c = Canvas::new(size, color);
     glyphs::draw(&mut c, glyph, 0.5, 0.5, 0.30, WHITE);
     c.finish(size)
-}
-
-/// Draws the "now playing" frame on an album tile.
-pub fn with_highlight(tile: &RgbImage) -> RgbImage {
-    decorate(
-        tile,
-        Decor {
-            current: true,
-            ..Decor::default()
-        },
-    )
 }
 
 // ------------------------------------------------------------- decorations
@@ -374,10 +347,6 @@ fn new_dot(img: &mut RgbImage, margin: f32) {
 
 /// A shelf key: the shelf's own picture (or a glyph placeholder), framed
 /// orange, with one dot per shelf and `position + 1` of them lit.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
-)]
 pub fn shelf(tile: &RgbImage, position: usize, count: usize) -> RgbImage {
     let mut img = tile.clone();
     let size = img.width();
@@ -393,10 +362,6 @@ pub fn shelf(tile: &RgbImage, position: usize, count: usize) -> RgbImage {
 /// Flip key for small decks: pages the current shelf, then moves to the next
 /// one. Orange background like `more`, a double-chevron in place of its
 /// single arrow, plus one dot per step.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
-)]
 pub fn flip(size: u32, step: usize, steps: usize) -> RgbImage {
     let mut c = Canvas::new(size, BG_MORE);
     for dx in [0.0_f32, 0.22] {

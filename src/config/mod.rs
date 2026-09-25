@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+#[cfg(test)]
+pub use self::source::Look;
 use self::source::RawSource;
-pub use self::source::{Source, SourceKind};
+pub use self::source::{Color, Source, SourceKind};
 
 /// Unknown keys are an error, so typos are caught.
 #[derive(Debug, Deserialize)]

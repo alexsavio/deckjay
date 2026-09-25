@@ -28,6 +28,10 @@ use crate::config::Source;
 /// Cover file names (without extension), best match first.
 const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
 
+/// `key.png` or `key.jpg` in a folder: a picture for the deck only, never
+/// sent to the speaker as the cover.
+const KEY_PICTURE: &str = "key";
+
 /// The items of `source`, in name order.
 pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
     let entries = usable_entries(&source.path).with_context(|| {
@@ -38,7 +42,7 @@ pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
         )
     })?;
     let top_files: Vec<PathBuf> = entries.iter().filter(|p| p.is_file()).cloned().collect();
-    Ok(entries
+    let items: Vec<Item> = entries
         .iter()
         .filter_map(|entry| {
             if entry.is_dir() {
@@ -47,7 +51,17 @@ pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
                 file_item(source, entry, &top_files)
             }
         })
-        .collect())
+        .collect();
+    for name in source.items.keys() {
+        let key = format!("{}/{name}", source.name);
+        if !items.iter().any(|i| i.key.0 == key || i.name == *name) {
+            tracing::warn!(
+                "[source.item.{name:?}] of source {} matches no item",
+                source.name
+            );
+        }
+    }
+    Ok(items)
 }
 
 fn folder_item(source: &Source, dir: &Path) -> Option<Item> {
@@ -72,7 +86,13 @@ fn folder_item(source: &Source, dir: &Path) -> Option<Item> {
     }
     let name = file_name(dir);
     let cover = find_cover(&top_files).or_else(|| find_cover(&files));
-    Some(item(source, &name, name.clone(), tracks, cover))
+    let key_picture = top_files
+        .iter()
+        .find(|f| is_image(f) && has_stem(f, KEY_PICTURE))
+        .cloned();
+    let mut item = item(source, &name, name.clone(), tracks, cover);
+    item.picture = item.picture.or(key_picture);
+    Some(item)
 }
 
 fn file_item(source: &Source, file: &Path, top_files: &[PathBuf]) -> Option<Item> {
@@ -88,7 +108,8 @@ fn file_item(source: &Source, file: &Path, top_files: &[PathBuf]) -> Option<Item
     Some(item(source, &file_name(file), stem, tracks, cover))
 }
 
-/// `key_name` is the entry's name in the source folder.
+/// `key_name` is the entry's name in the source folder. The picture and
+/// colour come from the source's `[source.item]` table for it, if any.
 fn item(
     source: &Source,
     key_name: &str,
@@ -96,6 +117,12 @@ fn item(
     tracks: Vec<Track>,
     cover: Option<PathBuf>,
 ) -> Item {
+    let look = source
+        .items
+        .get(key_name)
+        .or_else(|| source.items.get(&name))
+        .cloned()
+        .unwrap_or_default();
     Item {
         kind: source.kind.into(),
         key: ItemKey(format!("{}/{key_name}", source.name)),
@@ -103,6 +130,8 @@ fn item(
         media: Media::Tracks(tracks),
         cover_rel: cover.as_deref().and_then(|c| served_path(source, c)),
         cover,
+        picture: look.picture,
+        color: look.color,
     }
 }
 
@@ -181,19 +210,23 @@ fn is_image(p: &Path) -> bool {
     matches!(extension(p).as_str(), "jpg" | "jpeg" | "png")
 }
 
-/// Prefers cover.jpg / folder.png / ..., falls back to any image in the folder.
+/// Prefers cover.jpg / folder.png / ..., falls back to any image in the
+/// folder except the deck's key picture.
 fn find_cover(files: &[PathBuf]) -> Option<PathBuf> {
-    let images: Vec<&PathBuf> = files.iter().filter(|f| is_image(f)).collect();
+    let images: Vec<&PathBuf> = files
+        .iter()
+        .filter(|f| is_image(f) && !has_stem(f, KEY_PICTURE))
+        .collect();
     COVER_NAMES
         .iter()
-        .find_map(|name| {
-            images.iter().find(|f| {
-                f.file_stem()
-                    .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(name))
-            })
-        })
+        .find_map(|name| images.iter().find(|f| has_stem(f, name)))
         .or_else(|| images.first())
         .map(|p| (*p).clone())
+}
+
+fn has_stem(p: &Path, stem: &str) -> bool {
+    p.file_stem()
+        .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(stem))
 }
 
 #[cfg(test)]
@@ -208,12 +241,7 @@ mod tests {
     }
 
     fn music(root: &Path) -> Vec<Item> {
-        scan(&Source {
-            name: "music".into(),
-            kind: SourceKind::Music,
-            path: root.into(),
-        })
-        .unwrap()
+        scan(&Source::plain("music", SourceKind::Music, root)).unwrap()
     }
 
     fn names(items: &[Item]) -> Vec<&str> {
@@ -312,11 +340,7 @@ mod tests {
         std::fs::create_dir(&locked).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-        let albums = scan(&Source {
-            name: "music".into(),
-            kind: SourceKind::Music,
-            path: root.into(),
-        });
+        let albums = scan(&Source::plain("music", SourceKind::Music, root));
 
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         let names: Vec<String> = albums.unwrap().into_iter().map(|a| a.name).collect();
@@ -336,11 +360,11 @@ mod tests {
     #[test]
     fn a_missing_folder_is_an_error_naming_the_source() {
         let dir = tempfile::tempdir().unwrap();
-        let err = scan(&Source {
-            name: "books".into(),
-            kind: SourceKind::Audiobook,
-            path: dir.path().join("nope"),
-        })
+        let err = scan(&Source::plain(
+            "books",
+            SourceKind::Audiobook,
+            &dir.path().join("nope"),
+        ))
         .unwrap_err();
         assert!(err.to_string().contains("source books"), "{err:#}");
     }
@@ -422,15 +446,55 @@ mod tests {
         let root = dir.path();
         touch(&root.join("Pippi/01.m4b"));
 
-        let items = scan(&Source {
-            name: "books".into(),
-            kind: SourceKind::Audiobook,
-            path: root.into(),
-        })
-        .unwrap();
+        let items = scan(&Source::plain("books", SourceKind::Audiobook, root)).unwrap();
 
         assert_eq!(items[0].kind, Kind::Audiobook);
         assert_eq!(items[0].key.0, "books/Pippi");
         assert_eq!(rel_paths(&items[0]), [Path::new("books/Pippi/01.m4b")]);
+    }
+
+    #[test]
+    fn a_key_picture_is_for_the_deck_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Album/01.mp3"));
+        touch(&root.join("Album/Key.PNG"));
+        touch(&root.join("Only Key/01.mp3"));
+        touch(&root.join("Only Key/key.jpg"));
+
+        let items = music(root);
+
+        assert_eq!(items[0].picture, Some(root.join("Album/Key.PNG")));
+        assert_eq!(items[0].cover, None);
+        assert_eq!(items[1].picture, Some(root.join("Only Key/key.jpg")));
+        assert_eq!(items[1].cover_rel, None);
+    }
+
+    #[test]
+    fn item_tables_set_pictures_and_colours_by_name() {
+        use crate::config::{Color, Look};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Album/01.mp3"));
+        touch(&root.join("Album/key.png"));
+        touch(&root.join("Rain.mp3"));
+        touch(&root.join("Wind.mp3"));
+        let mut source = Source::plain("music", SourceKind::Music, root);
+        let look = |picture: Option<&str>, color| Look {
+            picture: picture.map(PathBuf::from),
+            color,
+        };
+        source.items = [
+            ("Album".to_string(), look(Some("/pics/a.png"), None)),
+            ("Rain.mp3".to_string(), look(None, Some(Color([1, 2, 3])))),
+            ("Wind".to_string(), look(None, Some(Color([4, 5, 6])))),
+        ]
+        .into();
+
+        let items = scan(&source).unwrap();
+
+        assert_eq!(items[0].picture.as_deref(), Some(Path::new("/pics/a.png")));
+        assert_eq!(items[1].color, Some(Color([1, 2, 3])));
+        assert_eq!(items[2].color, Some(Color([4, 5, 6])));
     }
 }

@@ -8,10 +8,6 @@ use super::Canvas;
 
 /// The kind of item a key represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used once keys show kinds, progress and shelves")
-)]
 pub enum Glyph {
     /// Music album.
     Note,

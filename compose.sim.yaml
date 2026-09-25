@@ -26,6 +26,7 @@ services:
     volumes:
       - ./config.toml:/app/config.toml:ro
       - ./music:/app/music:ro
+      - ./state:/app/state
       # Every [[source]] folder outside ./music needs a volume too, at the
       # same path as on this computer, e.g.:
       # - /Volumes/Stick/audiobooks:/Volumes/Stick/audiobooks:ro

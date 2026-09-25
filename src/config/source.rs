@@ -1,6 +1,6 @@
 //! `[[source]]` tables: where the deck's items come from and what kind they are.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
@@ -16,6 +16,62 @@ pub struct Source {
     /// The folder to scan. Relative paths are resolved against the folder
     /// the config file lives in.
     pub path: PathBuf,
+    /// How the shelf key looks.
+    pub look: Look,
+    /// How single items look, by their name in the folder (with or without
+    /// the file extension).
+    pub items: BTreeMap<String, Look>,
+}
+
+/// A picture or a colour for a key; pictures are resolved like `path`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Look {
+    pub picture: Option<PathBuf>,
+    /// The background of a key without a picture.
+    pub color: Option<Color>,
+}
+
+impl Look {
+    fn resolve(self, base: &Path) -> Look {
+        Look {
+            picture: self.picture.map(|p| base.join(p)),
+            color: self.color,
+        }
+    }
+}
+
+/// `#rrggbb` in the config file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Color(pub [u8; 3]);
+
+impl TryFrom<String> for Color {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Color, String> {
+        let invalid = || format!("colour {text:?} must look like \"#e8a33d\"");
+        let hex = text.strip_prefix('#').ok_or_else(invalid)?;
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid());
+        }
+        let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| invalid());
+        Ok(Color([byte(0)?, byte(2)?, byte(4)?]))
+    }
+}
+
+impl Source {
+    /// A source with no pictures or colours.
+    #[cfg(test)]
+    pub fn plain(name: &str, kind: SourceKind, path: &Path) -> Source {
+        Source {
+            name: name.into(),
+            kind,
+            path: path.into(),
+            look: Look::default(),
+            items: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +106,10 @@ pub(super) enum RawSource {
 pub(super) struct Folder {
     name: Option<String>,
     path: PathBuf,
+    picture: Option<PathBuf>,
+    color: Option<Color>,
+    #[serde(default)]
+    item: BTreeMap<String, Look>,
 }
 
 /// Checks names and resolves relative paths against `base`.
@@ -80,6 +140,16 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path) -> Result<Vec<Source>> {
                 name,
                 kind,
                 path: base.join(folder.path),
+                look: Look {
+                    picture: folder.picture,
+                    color: folder.color,
+                }
+                .resolve(base),
+                items: folder
+                    .item
+                    .into_iter()
+                    .map(|(name, look)| (name, look.resolve(base)))
+                    .collect(),
             })
         })
         .collect()
@@ -126,16 +196,22 @@ mod tests {
                     name: "music".into(),
                     kind: SourceKind::Music,
                     path: "/srv/deck/music".into(),
+                    look: Look::default(),
+                    items: BTreeMap::new(),
                 },
                 Source {
                     name: "books".into(),
                     kind: SourceKind::Audiobook,
                     path: "/mnt/usb/books".into(),
+                    look: Look::default(),
+                    items: BTreeMap::new(),
                 },
                 Source {
                     name: "story".into(),
                     kind: SourceKind::Story,
                     path: "/srv/deck/sounds".into(),
+                    look: Look::default(),
+                    items: BTreeMap::new(),
                 },
             ]
         );
@@ -182,5 +258,47 @@ mod tests {
     fn no_source_is_an_error() {
         let err = resolve(Vec::new(), Path::new("/")).unwrap_err();
         assert!(err.to_string().contains("[[source]]"), "{err:#}");
+    }
+
+    #[test]
+    fn a_source_and_its_items_have_pictures_and_colours() {
+        let got = sources(
+            "[[source]]\ntype = \"music\"\npath = \"music\"\n\
+             picture = \"pictures/music.png\"\ncolor = \"#E8a33d\"\n\
+             [source.item.\"01 Animal Songs\"]\npicture = \"/pics/animals.png\"\n\
+             [source.item.\"Rain.mp3\"]\ncolor = \"#000000\"\n",
+        )
+        .unwrap();
+        let music = &got[0];
+        assert_eq!(
+            music.look,
+            Look {
+                picture: Some("/srv/deck/pictures/music.png".into()),
+                color: Some(Color([0xe8, 0xa3, 0x3d])),
+            }
+        );
+        assert_eq!(
+            music.items["01 Animal Songs"].picture.as_deref(),
+            Some(Path::new("/pics/animals.png"))
+        );
+        assert_eq!(music.items["Rain.mp3"].color, Some(Color([0, 0, 0])));
+    }
+
+    #[test]
+    fn a_colour_must_be_six_hex_digits() {
+        for color in ["e8a33d", "#e8a33", "#e8a33dd", "#g8a33d", "red"] {
+            let text = format!("[[source]]\ntype = \"music\"\npath = \"m\"\ncolor = \"{color}\"\n");
+            let err = sources(&text).unwrap_err();
+            assert!(err.to_string().contains("#e8a33d"), "{color}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_key_in_an_item_is_an_error() {
+        let err = sources(
+            "[[source]]\ntype = \"music\"\npath = \"m\"\n[source.item.\"A\"]\ncolour = \"#000000\"\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("colour"), "{err:#}");
     }
 }

@@ -235,6 +235,7 @@ mod tests {
         let gone = Face::Item {
             id: ItemId(7),
             current: false,
+            progress: None,
         };
         deck.show(0, &gone, tile).unwrap();
         deck.show(1, &Face::Play, tile).unwrap();

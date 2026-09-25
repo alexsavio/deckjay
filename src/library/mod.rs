@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-use crate::config::{Source, SourceKind};
+use crate::config::{Color, Source, SourceKind};
 
 #[derive(Debug, Clone)]
 pub struct Track {
@@ -22,7 +22,7 @@ pub struct Track {
     pub content_type: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[expect(dead_code, reason = "radio, podcast and Spotify sources come later")]
 pub enum Kind {
     Music,
@@ -53,15 +53,7 @@ pub enum Media {
 /// One thing a key plays, e.g. an album folder or a story file.
 #[derive(Debug, Clone)]
 pub struct Item {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read once keys show what kind an item is")
-    )]
     pub kind: Kind,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read once playback progress is saved")
-    )]
     pub key: ItemKey,
     /// Folder name, or file name without the extension, including any
     /// number prefix.
@@ -72,6 +64,11 @@ pub struct Item {
     /// Where the web server serves the cover, like [`Track::rel_path`] (for
     /// the speaker's metadata).
     pub cover_rel: Option<PathBuf>,
+    /// What the key shows instead of the cover: a `[source.item]` picture
+    /// or a `key.png` / `key.jpg` in the folder.
+    pub picture: Option<PathBuf>,
+    /// The background of the key when it has neither picture nor cover.
+    pub color: Option<Color>,
 }
 
 impl Item {
@@ -84,24 +81,26 @@ impl Item {
 /// Items the deck shows together.
 #[derive(Debug, Clone)]
 pub struct Shelf {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read once the deck has shelf keys")
-    )]
     pub name: String,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read once the deck has shelf keys")
-    )]
     pub kind: Kind,
     /// In the order the deck shows them.
     pub items: Vec<ItemId>,
+    /// The shelf key's picture, from the `[[source]]` table.
+    pub picture: Option<PathBuf>,
+    pub color: Option<Color>,
 }
 
 pub struct Library {
     /// `ItemId(n)` is `items[n]`; items are only ever added at the end.
     items: Vec<Item>,
     shelves: Vec<Shelf>,
+}
+
+impl Kind {
+    /// Whether a press plays on from where the item stopped.
+    pub fn resumes(self) -> bool {
+        matches!(self, Kind::Audiobook | Kind::Podcast)
+    }
 }
 
 impl From<SourceKind> for Kind {
@@ -127,7 +126,14 @@ impl Library {
                 tracing::warn!("{err:#}");
                 Vec::new()
             });
-            library.add_shelf(source.name.clone(), source.kind.into(), items);
+            let shelf = Shelf {
+                name: source.name.clone(),
+                kind: source.kind.into(),
+                items: Vec::new(),
+                picture: source.look.picture.clone(),
+                color: source.look.color,
+            };
+            library.add_shelf(shelf, items);
         }
         library
     }
@@ -135,25 +141,37 @@ impl Library {
     /// `items` in this order on one music shelf.
     #[cfg(test)]
     pub fn music(items: Vec<Item>) -> Library {
+        Library::with_shelves(vec![("music", Kind::Music, items)])
+    }
+
+    /// One shelf per `(name, kind, items)`, in this order.
+    #[cfg(test)]
+    pub fn with_shelves(shelves: Vec<(&str, Kind, Vec<Item>)>) -> Library {
         let mut library = Library {
             items: Vec::new(),
             shelves: Vec::new(),
         };
-        library.add_shelf("music".into(), Kind::Music, items);
+        for (name, kind, items) in shelves {
+            let shelf = Shelf {
+                name: name.into(),
+                kind,
+                items: Vec::new(),
+                picture: None,
+                color: None,
+            };
+            library.add_shelf(shelf, items);
+        }
         library
     }
 
-    fn add_shelf(&mut self, name: String, kind: Kind, items: Vec<Item>) {
+    /// Adds `shelf` with `items` (its own item list is replaced).
+    fn add_shelf(&mut self, mut shelf: Shelf, items: Vec<Item>) {
         let first = self.items.len();
-        let ids = (first..first + items.len())
+        shelf.items = (first..first + items.len())
             .map(|i| ItemId(i as u32))
             .collect();
         self.items.extend(items);
-        self.shelves.push(Shelf {
-            name,
-            kind,
-            items: ids,
-        });
+        self.shelves.push(shelf);
     }
 
     pub fn item(&self, id: ItemId) -> &Item {
@@ -227,11 +245,7 @@ mod tests {
     }
 
     fn source(name: &str, kind: SourceKind, path: &Path) -> Source {
-        Source {
-            name: name.into(),
-            kind,
-            path: path.into(),
-        }
+        Source::plain(name, kind, path)
     }
 
     #[test]

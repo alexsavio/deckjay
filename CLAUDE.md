@@ -156,15 +156,33 @@ Rendering:
   `Face` until `Deck::retain` drops them (nothing calls it yet), so keep
   the set of distinct faces small (volume is quantised to 20 levels for
   this reason).
-- `Layout::new(rows, cols, items)` (`ui/layout.rs`): the bottom row holds
-  controls (`control_row` picks them by width), the other keys hold albums;
-  with too many albums the last album key becomes "more" and pages. Decks
-  with fewer than 2 rows are ignored.
-- `icons.rs` draws every icon procedurally (4x supersampling); there are no
-  image or font assets.
+- `Layout::new(rows, cols, shelves)` (`ui/layout.rs`): the bottom row holds
+  controls (`control_row` picks them by width), the other keys hold the
+  items of one shelf. The deck shows only non-empty shelves
+  (`Ui::deck_shelves`). One shelf: the last item key becomes "more" when
+  the items do not fit. Several shelves: the last item key is the shelf key
+  (it shows the next shelf) with "more" just before it; decks with fewer
+  than 6 item keys (Mini, Neo, Plus) get one flip key instead, which pages
+  and then moves to the next shelf. Decks with fewer than 2 rows are
+  ignored.
+- `icons/` draws every icon procedurally (4x supersampling); there are no
+  image or font assets. `glyphs.rs` has the kind glyphs (note, book, star,
+  waves, mic, Spotify); `decorate` adds the "playing" frame, the kind badge,
+  the progress bar and the "new" dot to a tile. Item tiles: the item's
+  picture (`[source.item]` or `key.png`), else its cover, else the kind
+  glyph on its colour. Covers get a kind badge when the deck has shelves of
+  more than one kind.
+
+State (`state.rs`): `Store` keeps `<state_dir>/state.json`: the shelf on the
+deck, the page of each shelf (by shelf name) and the progress of each item
+that resumes (by `ItemKey`). It writes a temp file and renames it, at most
+every 10 s (`save_if_due`) and at once on pause and stop. A broken file is
+moved to `state.json.bad`; an unwritable folder keeps the state in memory.
 
 Config: `Config` uses `#[serde(deny_unknown_fields)]`. A new key needs a field
-and default fn in `config.rs` and an entry in `config.example.toml`.
+and default fn in `config/mod.rs` (or `config/source.rs` for `[[source]]`
+keys) and an entry in `config.example.toml`. `deny_unknown_fields` does not
+work together with `#[serde(flatten)]`, so source tables list their keys.
 `Config::parse` is the testable core; `load` adds file IO and error context.
 
 ## Conventions

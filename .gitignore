@@ -1,6 +1,7 @@
 target/
 config.toml
 music/
+/state/
 *.png
 
 # Local tooling: absolute symlinks into claude-files, and per-machine settings.

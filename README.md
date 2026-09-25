@@ -12,6 +12,12 @@ jack, HDMI or USB sound card of the Raspberry Pi.
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume
 ```
 
+Music, audiobooks and stories can come from several folders, each one a
+`[[source]]` in `config.toml`. Each source is a shelf: the last item key
+shows the next shelf and switches to it. Audiobooks play on from where they
+stopped, and their keys show a progress bar. The deck also remembers the
+shelf and page it showed, in the `state` folder.
+
 The program serves your music folders over HTTP and tells the speaker which
 file to play. The speaker downloads the files itself, so playback keeps going
 even if the computer is busy. A Chromecast gets the whole album as a queue. A
@@ -162,8 +168,9 @@ playback: decoding, sound outputs and the Raspberry Pi's audio devices.
 | `main.rs` | Startup, command-line options, reconnecting to the deck |
 | `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`) |
 | `library/` | Items and shelves, one shelf per source (`mod.rs`); scans source folders and finds covers (`scan.rs`); builds URLs |
-| `ui/` | What each key shows and does (`mod.rs`), key layout (`layout.rs`) |
-| `icons.rs` | Draws control icons and album tiles (no image files needed) |
+| `ui/` | What each key shows and does (`mod.rs`), key layout with shelves (`layout.rs`) |
+| `icons/` | Draws control icons, kind glyphs and key decorations (no image files needed) |
+| `state.rs` | What the deck remembers in `state.json`: shelf, pages, audiobook progress |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
 | `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
 | `player/` | The player thread: shared command loop (`mod.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`) |

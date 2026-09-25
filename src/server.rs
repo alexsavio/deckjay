@@ -88,11 +88,7 @@ mod tests {
     }
 
     fn source(name: &str, path: &Path) -> Source {
-        Source {
-            name: name.into(),
-            kind: SourceKind::Music,
-            path: path.into(),
-        }
+        Source::plain(name, SourceKind::Music, path)
     }
 
     /// Serves `sources` like `main` does; returns the base URL of `/music`.

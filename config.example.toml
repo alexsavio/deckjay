@@ -39,6 +39,11 @@ volume_step = 0.05
 # Stream Deck brightness in percent.
 brightness = 60
 
+# Folder where the deck saves what it remembers: the shelf and page it
+# shows, and where each audiobook stopped. Relative to this file, or
+# absolute; it must be writable.
+# state_dir = "state"
+
 # What the deck plays comes from sources: one [[source]] table each. They go
 # at the end of the file: TOML reads every key after a [[source]] line as
 # part of that source. Each source is one shelf on the deck.
@@ -53,12 +58,26 @@ brightness = 60
 #       is cover.jpg / folder.jpg / any jpg or png in it. Number prefixes
 #       like "01 " set the order. Files: mp3, m4a, m4b, aac, flac, ogg, wav.
 #
+# picture  Optional: the shelf key's picture (png or jpg), relative to this
+#          file or absolute. Without it, the key shows the kind of the
+#          source (a note, a book, a star) on a colour.
+# color    Optional: "#rrggbb", the colour of keys without a picture.
+#
+# A [source.item."<name>"] table sets the picture or colour of one key, by
+# the name of its folder or file. A key.png or key.jpg in an item's folder
+# is its picture too. These pictures are only for the deck: the speaker
+# shows the cover.
+#
 # In Docker, a folder outside ./music also needs a volume in
 # docker-compose.yml.
 
 [[source]]
 type = "music"
 path = "music"
+# picture = "pictures/music.png"
+# [source.item."01 Animal Songs"]
+# picture = "pictures/animals.png"
+# color = "#e8a33d"
 
 # [[source]]
 # type = "audiobook"

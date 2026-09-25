@@ -92,19 +92,6 @@ fn decorate_with_nothing_set_is_a_no_op() {
 }
 
 #[test]
-fn decorate_current_only_equals_with_highlight() {
-    let tile = gradient_tile(SIZE);
-    let via_decorate = decorate(
-        &tile,
-        Decor {
-            current: true,
-            ..Decor::default()
-        },
-    );
-    assert!(same_pixels(&via_decorate, &with_highlight(&tile)));
-}
-
-#[test]
 fn badge_only_touches_the_top_left_region() {
     let tile = gradient_tile(SIZE);
     let decorated = decorate(
