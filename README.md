@@ -164,6 +164,10 @@ the commands it sends, the order, the quirks of real devices, and how to test
 by hand. [`docs/local-audio.md`](docs/local-audio.md) describes local
 playback: decoding, sound outputs and the Raspberry Pi's audio devices.
 
+[`docs/podcasts.md`](docs/podcasts.md) explains podcast sources and their
+cache, and [`docs/spotify.md`](docs/spotify.md) the Spotify app, sign-in and
+devices.
+
 ## Code map
 
 | File | What it does |
