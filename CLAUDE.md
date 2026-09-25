@@ -74,7 +74,11 @@ servers:
   while `poll_interval()` is `Some`. A failed command emits `Stopped` and drops
   the rest of its batch; 3 failed polls in a row end the album the same way.
   `Emitter` drops repeats of the last event, except for the first event after
-  each command batch. The network backends share `connect` (every resolved
+  each command batch. Items played with `progress: true` also get
+  `PlayerEvent::Progress` (track, position, track length) and `Finished`;
+  `progress.rs` decides when (at most every 5 s while playing, at once on a
+  track change, pause, stop or the next item), apart from that dedup. The UI
+  saves them in `state.json`. The network backends share `connect` (every resolved
   address, 3 s timeout); all three share `clamp_volume`.
   - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
     connection (after a TCP connect-timeout probe, because `rust_cast` has no
@@ -105,18 +109,25 @@ servers:
 
 Playback flow:
 
-1. `Library::scan` (`library/scan.rs`) builds one `Item` with its `Track`s
-   per folder (tracks up to one folder down) or loose audio file of each
-   `[[source]]`, and one `Shelf` per source. The deck shows every shelf's
-   items one after the other. A source folder that cannot be read is an
-   empty shelf and a warning, not an error.
-2. `Ui::tracks` turns them into `TrackInfo` URLs with `library::url_for`
+1. `Library::scan` builds one `Shelf` per `[[source]]`. Folder sources
+   (music, audiobook, story; `library/scan.rs`) give one `Item` with its
+   `Track`s per folder (tracks up to one folder down) or loose audio file;
+   a folder that cannot be read is an empty shelf and a warning, not an
+   error. Podcast sources start from their cache (`library/podcast.rs`),
+   radio sources give one `Media::Stream` item per station and Spotify
+   sources one `Media::Spotify` item per playlist (`Source::serves_files`
+   is false for both).
+2. `Ui::content` picks what a press plays: `Content::Stream` for a station,
+   `Content::Spotify` for a playlist, else `Content::Tracks`, starting where
+   the item stopped when `Kind::resumes` (audiobooks, podcasts).
+   `Ui::tracks` turns tracks into `TrackInfo` URLs with `library::url_for`
    (per-segment percent-encoding) on `base_url`:
    `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
    `main::local_ip_towards(speaker)`.
 3. `PlayerCmd::Play` with `Content::Tracks` reaches the speaker backend
    (every backend fails `Content::Stream` and `Content::Spotify` as not
-   supported yet, which the loop reports as `Stopped`). Cast launches the
+   supported yet, which the loop reports as `Stopped`; `radio::resolve`
+   turns a station URL into its stream for the backends). Cast launches the
    Default Media Receiver (`CC1AD845`) and loads the whole album as a
    `MediaQueue`. HEOS sets the volume and sends `browse/play_stream` for one
    track; the `url` parameter goes last and unencoded, all other values
