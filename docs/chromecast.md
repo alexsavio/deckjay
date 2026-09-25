@@ -11,13 +11,16 @@ Cast is the default `speaker_type`. The code:
 - [`src/player/cast.rs`](../src/player/cast.rs): the rust_cast calls, the
   album queue, polling and the "ours" check.
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
-  HEOS, the `Speaker` trait and the `Emitter`.
+  HEOS, the `Speaker` trait and the `Emitter`;
+  [`progress.rs`](../src/player/progress.rs): when an item reports its
+  place.
 - [`src/config.rs`](../src/config/mod.rs): port 8009 as the default
   `speaker_port` for Cast.
 - `print_cast_speaker` in [`src/main.rs`](../src/main.rs): `just doctor`.
 
 There is no fake Cast receiver. `cast/tests.rs` tests the status decisions
-(`poll_event`, `skip_target`) on hand-built `StatusEntry` values, and
+(`poll_event`, `skip_target`, `place`, `finished`) on hand-built
+`StatusEntry` values, and
 `every_failed_command_reports_stopped` in `mod.rs` sends commands to a
 closed port. No test talks Cast V2.
 
@@ -125,8 +128,8 @@ the destination come from the app entry of `RECEIVER_STATUS`):
   `PONG`.
 
 `MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
-(`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `mediaSessionId`,
-`media.contentId`, `currentTime` (seconds).
+(`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,
+`media.contentId`, `media.duration` and `currentTime` (seconds).
 
 ## Sequence
 
@@ -140,8 +143,11 @@ Every command opens its own connection and drops it at the end, without a
    `CC1AD845`.
 2. **Play an album** (`PlayerCmd::Play`): `SET_VOLUME`; `LAUNCH` if the
    Default Media Receiver is not running; `CONNECT` to its `transportId`;
-   `LOAD` with the whole album, start index 0. Emits `Playing`; polling
-   starts. The speaker then downloads the tracks itself.
+   `LOAD` with the whole album, start index `start.track` (0 when it is out
+   of range). Emits `Playing`; polling starts. The speaker then downloads
+   the tracks itself. An item that reports progress first gets `Progress`
+   for the start of that track. When the item playing before reports
+   progress, a media `GET_STATUS` before the `LOAD` gives its last place.
 3. **Poll** every 4 s while an album is active: media `GET_STATUS`. The
    status is "ours" when its `media.contentId` equals one of our track
    URLs. `IDLE` with `loadingItemId` or `extendedStatus` set is the next
@@ -149,6 +155,13 @@ Every command opens its own connection and drops it at the end, without a
    on. `PLAYING` or `BUFFERING` and ours: `Playing`. `PAUSED` and ours:
    `Paused`. Anything else (`IDLE`, no entry, no Default Media Receiver,
    someone else's media): `Stopped`, and polling stops.
+   - For an item that reports progress, a status that is ours and
+     `PLAYING`, `BUFFERING` or `PAUSED` gives the place (`place`): the
+     track by `contentId`, `currentTime`, and `media.duration` as the
+     length (missing, 0 or not a number: unknown). The progress policy
+     reports at most every 5 s, so with the 4 s poll a playing item
+     reports about every 8 s; a new track reports at the first poll that
+     sees it.
 4. **Next / previous:** media `GET_STATUS`, then find the current track by
    `contentId`. Not ours: nothing. Next on the last track: nothing.
    Otherwise a new `LOAD` of the whole album with the start index moved.
@@ -157,17 +170,23 @@ Every command opens its own connection and drops it at the end, without a
    restarts).
 5. **Play/pause key:** media `GET_STATUS`. The next queue item loading:
    nothing is sent, emits `Playing`. `PLAYING` or `BUFFERING`: `PAUSE`,
-   emits `Paused`. `PAUSED`: `PLAY`, emits `Playing`. There is no "ours"
+   emits `Paused` (an item that reports progress first reports the place
+   from that status). `PAUSED`: `PLAY`, emits `Playing`. There is no "ours"
    check here: it pauses any media in the Default Media Receiver.
-   Otherwise the album starts again from track 1 with a `LOAD`. No album
-   ever started and nothing to pause: nothing is sent, emits `Stopped`.
+   Otherwise the album starts again with a `LOAD`, from track 1 (an item
+   that reports progress: from the track it got to). No album ever started
+   and nothing to pause: nothing is sent, emits `Stopped`.
 6. **Volume key:** `SET_VOLUME` to `receiver-0`, level clamped to 0.0–1.0.
    This is the device volume, not the stream volume.
 7. **End of album:** kids-deck sends nothing. Google documents that a queue
    item with `autoplay` starts "when the item becomes the currentItem", and
    that with `REPEAT_OFF` "When the queue is completed the media session is
    terminated." The next poll should then see `IDLE` (idle reason
-   `FINISHED`) or no entry, and report `Stopped`. This is read from the
+   `FINISHED`) or no entry, and report `Stopped`. For an item that reports
+   progress, `IDLE` with idle reason `FINISHED` and the `contentId` of our
+   last track (`finished`) sends `Finished` before `Stopped`. Without
+   `media` in that status, or with no entry, the track is unknown: only
+   `Stopped`, and the item keeps its last place. This is read from the
    docs, not seen on a device.
 8. **Errors:** a failed command makes `player::run` log a warning, call
    `reset` (polling stops), emit `Stopped` and drop the other key presses

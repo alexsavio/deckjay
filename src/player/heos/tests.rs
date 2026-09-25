@@ -28,6 +28,11 @@ struct Script {
     hang_up: bool,
     /// Never answer this command; the connection stays open.
     mute: Option<&'static str>,
+    /// Change events are on (`register_for_change_events`).
+    events: bool,
+    /// While change events are on, a `player_now_playing_progress` event
+    /// with this message comes before each reply.
+    progress: Option<&'static str>,
 }
 
 /// A HEOS CLI on 127.0.0.1 that answers with canned JSON.
@@ -107,6 +112,14 @@ fn answer(script: &mut Script, command: &str, players: &str) -> Vec<String> {
     // Echoed the way the spec's examples print it: " player/ set_volume ".
     let echoed = format!(" {} ", name.replacen('/', "/ ", 1));
     let mut lines = Vec::new();
+    if name == "system/register_for_change_events" {
+        script.events = query == "enable=on";
+    }
+    if let Some(message) = script.progress.filter(|_| script.events) {
+        lines.push(format!(
+            r#"{{"heos": {{"command": "event/player_now_playing_progress", "message": "{message}"}}}}"#
+        ));
+    }
     if script.noisy {
         lines.push(r#"{"heos": {"command": "event/player_state_changed", "message": "pid=7&state=pause"}}"#.to_string());
         lines.push(format!(
@@ -172,12 +185,16 @@ fn tracks(n: usize) -> Vec<TrackInfo> {
 const ITEM: ItemId = ItemId(3);
 
 fn play_album(n: usize) -> PlayerCmd {
+    play(n, Start::default(), false)
+}
+
+fn play(n: usize, start: Start, progress: bool) -> PlayerCmd {
     PlayerCmd::Play {
         item: ITEM,
         content: Content::Tracks {
             tracks: tracks(n),
-            start: Start::default(),
-            progress: false,
+            start,
+            progress,
         },
         volume: 0.2,
     }
@@ -198,7 +215,7 @@ impl Rig {
         Rig {
             player: HeosPlayer::new("127.0.0.1".into(), fake.port),
             fake,
-            emitter: Emitter { tx, last: None },
+            emitter: Emitter::new(tx),
             events,
         }
     }
@@ -440,7 +457,7 @@ fn a_silent_cli_fails_within_the_io_timeout() {
     player.io_timeout = Duration::from_millis(100);
     let (tx, _events) = mpsc::channel();
     let start = Instant::now();
-    let result = player.handle(PlayerCmd::SetVolume(0.5), &mut Emitter { tx, last: None });
+    let result = player.handle(PlayerCmd::SetVolume(0.5), &mut Emitter::new(tx));
     assert!(result.is_err());
     assert!(
         start.elapsed() < Duration::from_secs(1),
@@ -608,3 +625,5 @@ fn command_lines_encode_values_but_put_the_url_last_and_raw() {
         "heos://player/get_players\r\n"
     );
 }
+
+mod progress;

@@ -1,4 +1,6 @@
-//! The HEOS CLI protocol: one command line out, JSON lines back.
+//! The HEOS CLI protocol: one command line out, JSON lines back. Change
+//! events come on the same lines while they are on; the only one kept is
+//! `event/player_now_playing_progress` of the player we follow.
 
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::net::TcpStream;
@@ -14,6 +16,18 @@ pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(5);
 pub(super) struct Cli {
     reader: BufReader<TcpStream>,
     io_timeout: Duration,
+    /// The player whose progress events are kept.
+    follow: Option<i64>,
+    progress: Option<NowPlaying>,
+}
+
+/// Where the player is in the current stream, from
+/// `event/player_now_playing_progress`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct NowPlaying {
+    pub(super) position: Duration,
+    /// `None` when the event says 0: an m4a with its index at the end.
+    pub(super) duration: Option<Duration>,
 }
 
 impl Cli {
@@ -24,10 +38,29 @@ impl Cli {
         let mut cli = Cli {
             reader: BufReader::new(stream),
             io_timeout,
+            follow: None,
+            progress: None,
         };
         // The spec's start-up advice; it also keeps change events off this connection.
         cli.request("system/register_for_change_events", &[("enable", "off")])?;
         Ok(cli)
+    }
+
+    /// Change events on or off, for this connection only.
+    pub(super) fn set_change_events(&mut self, on: bool) -> Result<()> {
+        let enable = if on { "on" } else { "off" };
+        self.request("system/register_for_change_events", &[("enable", enable)])?;
+        Ok(())
+    }
+
+    /// Keep the progress events of player `pid` from now on.
+    pub(super) fn follow(&mut self, pid: i64) {
+        self.follow = Some(pid);
+    }
+
+    /// The latest progress event of the followed player since the last call.
+    pub(super) fn take_progress(&mut self) -> Option<NowPlaying> {
+        self.progress.take()
     }
 
     pub(super) fn peer_ip(&self) -> Option<String> {
@@ -71,8 +104,35 @@ impl Cli {
                 if reply.answers(command) {
                     return Ok(reply);
                 }
+                self.note(&reply);
             }
             ensure!(Instant::now() < deadline, "no HEOS reply to {command}");
+        }
+    }
+}
+
+impl Cli {
+    /// Keeps a progress event of the followed player; drops every other line.
+    fn note(&mut self, line: &Reply) {
+        if unspaced(&line.heos.command) != "event/player_now_playing_progress" {
+            return;
+        }
+        let message = line.message();
+        let pid = message.get("pid").and_then(|pid| pid.parse::<i64>().ok());
+        if pid.is_none() || pid != self.follow {
+            return;
+        }
+        let millis = |key| {
+            message
+                .get(key)
+                .and_then(|ms| ms.parse().ok())
+                .map(Duration::from_millis)
+        };
+        if let Some(position) = millis("cur_pos") {
+            self.progress = Some(NowPlaying {
+                position,
+                duration: millis("duration").filter(|d| !d.is_zero()),
+            });
         }
     }
 }

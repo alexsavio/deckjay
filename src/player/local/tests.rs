@@ -200,7 +200,7 @@ impl Rig {
         let (tx, events) = mpsc::channel();
         Rig {
             player: LocalPlayer::with_output(open),
-            emitter: Emitter { tx, last: None },
+            emitter: Emitter::new(tx),
             events,
             sink,
             opened,
@@ -523,3 +523,5 @@ fn radio_and_spotify_do_not_open_the_sound_card() {
     assert_eq!(rig.opened.get(), 0);
     assert_eq!(rig.events(), []);
 }
+
+mod resume;

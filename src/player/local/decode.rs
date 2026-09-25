@@ -4,13 +4,14 @@
 use std::fs::File;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use symphonia::core::codecs::CodecParameters;
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
+use symphonia::core::formats::{FormatOptions, FormatReader, Track, TrackType};
 use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use tracing::{debug, warn};
@@ -20,6 +21,7 @@ pub(super) struct Source {
     reader: Box<dyn FormatReader>,
     decoder: Box<dyn AudioDecoder>,
     track_id: u32,
+    duration: Option<Duration>,
 }
 
 impl Source {
@@ -49,6 +51,7 @@ impl Source {
             .as_ref()
             .and_then(CodecParameters::audio)
             .context("no audio track")?;
+        let duration = length(track, params.sample_rate);
         let decoder = symphonia::default::get_codecs()
             .make_audio_decoder(params, &AudioDecoderOptions::default())
             .context("cannot decode this codec")?;
@@ -56,7 +59,13 @@ impl Source {
             reader,
             decoder,
             track_id,
+            duration,
         })
+    }
+
+    /// The track's length, when the file tells it.
+    pub(super) fn duration(&self) -> Option<Duration> {
+        self.duration
     }
 
     /// Decodes the next packet into `samples` (interleaved) and returns its
@@ -94,6 +103,20 @@ impl Source {
             }
         }
     }
+}
+
+/// From the container's duration, else from the frame count and `rate`.
+fn length(track: &Track, rate: Option<u32>) -> Option<Duration> {
+    let stated = track
+        .time_base
+        .zip(track.duration)
+        .and_then(|(base, duration)| base.calc_duration(duration))
+        .map(|time| time.as_secs_f64());
+    let counted = || Some(track.num_frames? as f64 / f64::from(rate.filter(|r| *r > 0)?));
+    let secs = stated.or_else(counted)?;
+    Duration::try_from_secs_f64(secs)
+        .ok()
+        .filter(|d| !d.is_zero())
 }
 
 /// Fits decoded audio to the output's sample rate and channels: mono plays on

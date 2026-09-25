@@ -209,6 +209,7 @@ impl Ui {
                 PlayerEvent::Playing(item) => (Some(item), true),
                 PlayerEvent::Paused(item) => (Some(item), false),
                 PlayerEvent::Stopped => (None, false),
+                PlayerEvent::Progress { .. } | PlayerEvent::Finished(_) => continue,
             };
             if !playing {
                 self.store.save_now(Instant::now());

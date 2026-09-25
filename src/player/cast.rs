@@ -4,20 +4,22 @@
 //! The speaker keeps playing on its own, so there is no long-lived connection
 //! (and no heartbeat) to keep alive. While an album is active, the status is
 //! polled every few seconds so the deck can show play/pause correctly and
-//! notice when the album has finished.
+//! notice when the album has finished. The same poll gives the place in the
+//! track for items that report progress.
 
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use rust_cast::CastDevice;
 use rust_cast::channels::media::{
-    Image, LoadOptions, Media, MediaQueue, Metadata, MusicTrackMediaMetadata, PlayerState,
-    QueueItem, QueueType, StatusEntry, StreamType,
+    IdleReason, Image, LoadOptions, Media, MediaQueue, Metadata, MusicTrackMediaMetadata,
+    PlayerState, QueueItem, QueueType, StatusEntry, StreamType,
 };
 use rust_cast::channels::receiver::{Application, CastDeviceApp};
-use tracing::info;
+use tracing::{debug, info};
 
-use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
+use super::progress::Place;
+use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, Start, TrackInfo};
 use crate::library::ItemId;
 
 /// App id of Chromecast's built-in Default Media Receiver.
@@ -91,12 +93,16 @@ impl Speaker for CastPlayer {
                 content,
                 volume,
             } => {
-                let tracks = content.into_tracks()?;
-                self.item = item;
-                self.tracks = tracks;
+                let list = content.into_tracks()?;
                 let s = self.open()?;
+                if self.active && events.wants_progress() {
+                    self.report_place(&s, events);
+                }
+                events.begin(item, list.progress);
+                self.item = item;
+                self.tracks = list.tracks;
                 s.device.receiver.set_volume(super::clamp_volume(volume))?;
-                self.load(s, 0, events)
+                self.load(s, list.start, events)
             }
             PlayerCmd::SetVolume(volume) => {
                 let s = self.open()?;
@@ -115,14 +121,21 @@ impl Speaker for CastPlayer {
                         ) =>
                     {
                         s.device.media.pause(tid, e.media_session_id)?;
+                        if let Some(at) = place(&e, &self.tracks) {
+                            events.place(at, false);
+                        }
                         events.emit(PlayerEvent::Paused(self.item));
                     }
                     Some((tid, e)) if matches!(e.player_state, PlayerState::Paused) => {
                         s.device.media.play(tid, e.media_session_id)?;
                         events.emit(PlayerEvent::Playing(self.item));
                     }
-                    // Finished or nothing loaded: start our album again from the top.
-                    _ if !self.tracks.is_empty() => self.load(s, 0, events)?,
+                    // Finished or nothing loaded: start our album again, from
+                    // the top or where a resuming item got to.
+                    _ if !self.tracks.is_empty() => {
+                        let start = events.resume_point();
+                        self.load(s, start, events)?;
+                    }
                     _ => events.emit(PlayerEvent::Stopped),
                 }
                 Ok(())
@@ -133,7 +146,14 @@ impl Speaker for CastPlayer {
                     return Ok(());
                 };
                 match skip_target(&entry, &self.tracks, matches!(cmd, PlayerCmd::Next)) {
-                    Some(target) => self.load(s, target, events),
+                    Some(track) => self.load(
+                        s,
+                        Start {
+                            track,
+                            ..Start::default()
+                        },
+                        events,
+                    ),
                     None => Ok(()),
                 }
             }
@@ -143,11 +163,17 @@ impl Speaker for CastPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         let s = self.open()?;
         let entry = media_status(&s)?.map(|(_, e)| e);
+        if let Some(at) = entry.as_ref().and_then(|e| place(e, &self.tracks)) {
+            events.place(at, false);
+        }
         let Some(event) = poll_event(entry.as_ref(), &self.tracks, self.item) else {
             return Ok(());
         };
         if event == PlayerEvent::Stopped {
             self.active = false;
+            if entry.as_ref().is_some_and(|e| finished(e, &self.tracks)) {
+                events.finished();
+            }
         }
         events.emit(event);
         Ok(())
@@ -163,12 +189,14 @@ impl Speaker for CastPlayer {
 }
 
 impl CastPlayer {
-    /// Loads our album as a queue on the speaker, starting at `start`.
-    fn load(&mut self, s: Session, start: usize, events: &mut Emitter) -> Result<()> {
+    /// Loads our album as a queue on the speaker, starting at `start.track`;
+    /// `start.position` is ignored.
+    fn load(&mut self, s: Session, start: Start, events: &mut Emitter) -> Result<()> {
+        let index = start.track;
         let track = self
             .tracks
-            .get(start)
-            .ok_or_else(|| anyhow!("no track {start}"))?;
+            .get(index)
+            .ok_or_else(|| anyhow!("no track {index}"))?;
         let app = match s.app {
             Some(app) => app,
             None => s
@@ -186,7 +214,7 @@ impl CastPlayer {
                     media: t.to_media(),
                 })
                 .collect(),
-            start_index: start as u16,
+            start_index: index as u16,
             queue_type: QueueType::Album,
         };
         s.device.media.load_with_queue(
@@ -198,8 +226,22 @@ impl CastPlayer {
         )?;
         info!(album = %track.album, track = %track.title, "playing");
         self.active = true;
+        events.place(Place::start_of(index, Duration::ZERO), true);
         events.emit(PlayerEvent::Playing(self.item));
         Ok(())
+    }
+
+    /// Reports where the item playing got to; a failure only loses the report.
+    fn report_place(&self, s: &Session, events: &mut Emitter) {
+        match media_status(s) {
+            Ok(Some((_, entry))) => {
+                if let Some(at) = place(&entry, &self.tracks) {
+                    events.place(at, false);
+                }
+            }
+            Ok(None) => {}
+            Err(err) => debug!("no place for the item playing: {err:#}"),
+        }
     }
 
     fn open(&self) -> Result<Session> {
@@ -248,6 +290,40 @@ fn poll_event(
         PlayerState::Paused if ours => PlayerEvent::Paused(item),
         _ => PlayerEvent::Stopped,
     })
+}
+
+/// Where our album is: the track and the time into it, while it plays or is
+/// paused. `None` while the next track loads, when stopped, or not ours.
+fn place(entry: &StatusEntry, tracks: &[TrackInfo]) -> Option<Place> {
+    let playing_or_paused = matches!(
+        entry.player_state,
+        PlayerState::Playing | PlayerState::Buffering | PlayerState::Paused
+    );
+    if !playing_or_paused {
+        return None;
+    }
+    let track = track_index(entry, tracks)?;
+    // From the network: negative, NaN or huge values mean "unknown".
+    let seconds = |s: f32| Duration::try_from_secs_f32(s).ok();
+    Some(Place {
+        track,
+        position: seconds(entry.current_time?)?,
+        duration: entry
+            .media
+            .as_ref()
+            .and_then(|m| m.duration)
+            .and_then(seconds)
+            .filter(|d| !d.is_zero()),
+    })
+}
+
+/// The receiver played our last track to its end. Without `media` in the
+/// status the track is unknown, and this is false.
+fn finished(entry: &StatusEntry, tracks: &[TrackInfo]) -> bool {
+    matches!(entry.player_state, PlayerState::Idle)
+        && matches!(entry.idle_reason, Some(IdleReason::Finished))
+        && !loading(entry)
+        && track_index(entry, tracks).is_some_and(|t| t + 1 == tracks.len())
 }
 
 /// The track that Next (`forward`) or Prev loads; `None` when the media is

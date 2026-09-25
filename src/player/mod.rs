@@ -1,21 +1,24 @@
-//! Plays albums on the speaker, on a thread of its own. Two kinds of speaker
-//! are supported: Chromecast ([`cast`]) and Denon HEOS ([`heos`]). Both take
-//! [`PlayerCmd`]s and report [`PlayerEvent`]s, so the UI does not know which
-//! one it drives.
+//! Plays albums on the speaker, on a thread of its own. Three kinds of
+//! speaker are supported: Chromecast ([`cast`]), Denon HEOS ([`heos`]) and
+//! this computer's sound output ([`local`]). All take [`PlayerCmd`]s and
+//! report [`PlayerEvent`]s, so the UI does not know which one it drives.
+//! [`progress`] decides when an item reports how far it got.
 
 mod cast;
 pub mod heos;
 pub mod local;
+mod progress;
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::{debug, warn};
 
+use self::progress::Place;
 use crate::library::ItemId;
 
 #[derive(Debug)]
@@ -63,27 +66,45 @@ pub enum Content {
     /// Files the speaker plays one after the other.
     Tracks {
         tracks: Vec<TrackInfo>,
-        #[cfg_attr(
-            not(test),
-            expect(dead_code, reason = "every backend starts at the first track so far")
-        )]
+        /// A track out of range starts the first track from its beginning.
         start: Start,
-        /// Whether to report how far playback got, for items that resume.
-        #[cfg_attr(
-            not(test),
-            expect(dead_code, reason = "no backend reports progress yet")
-        )]
+        /// Whether to send [`PlayerEvent::Progress`] and
+        /// [`PlayerEvent::Finished`], for items that resume.
         progress: bool,
     },
     Stream(Station),
     Spotify(Playlist),
 }
 
+/// [`Content::Tracks`] taken apart; `start.track` is always one of `tracks`,
+/// unless there are none.
+#[derive(Debug)]
+struct TrackList {
+    tracks: Vec<TrackInfo>,
+    start: Start,
+    progress: bool,
+}
+
 impl Content {
-    /// The tracks to play from the first; a stream or a playlist is an error.
-    fn into_tracks(self) -> Result<Vec<TrackInfo>> {
+    /// The tracks to play; a stream or a playlist is an error.
+    fn into_tracks(self) -> Result<TrackList> {
         match self {
-            Content::Tracks { tracks, .. } => Ok(tracks),
+            Content::Tracks {
+                tracks,
+                start,
+                progress,
+            } => {
+                let start = if start.track < tracks.len() {
+                    start
+                } else {
+                    Start::default()
+                };
+                Ok(TrackList {
+                    tracks,
+                    start,
+                    progress,
+                })
+            }
             Content::Stream(station) => {
                 bail!("internet radio ({}) is not supported yet", station.name)
             }
@@ -121,6 +142,17 @@ pub enum PlayerEvent {
     Paused(ItemId),
     /// Nothing playing any more (album finished, stopped elsewhere, or failed).
     Stopped,
+    /// How far an item that asked for progress got: `track` indexes its
+    /// tracks, `duration` is that track's length when known.
+    Progress {
+        item: ItemId,
+        track: usize,
+        position: Duration,
+        duration: Option<Duration>,
+    },
+    /// An item that asked for progress played its last track to the end;
+    /// `Stopped` follows.
+    Finished(ItemId),
 }
 
 /// A speaker that fails this many status polls in a row is taken to be gone.
@@ -151,10 +183,7 @@ pub fn spawn(output: Output, events: Sender<PlayerEvent>) -> Sender<PlayerCmd> {
         Output::Heos { .. } => "heos",
         Output::Local { .. } => "local",
     };
-    let emitter = Emitter {
-        tx: events,
-        last: None,
-    };
+    let emitter = Emitter::new(events);
     thread::Builder::new()
         .name(name.into())
         // Built on the player thread: a sound card stream cannot move between
@@ -248,15 +277,66 @@ fn connect(host: &str, port: u16) -> Result<TcpStream> {
     Err(last_err)
 }
 
+/// Sends [`PlayerEvent`]s to the UI. Playing, paused and stopped drop
+/// repeats of the last one; progress reports follow [`progress::Policy`].
 struct Emitter {
     tx: Sender<PlayerEvent>,
     last: Option<PlayerEvent>,
+    progress: progress::Policy,
 }
 
 impl Emitter {
+    fn new(tx: Sender<PlayerEvent>) -> Emitter {
+        Emitter {
+            tx,
+            last: None,
+            progress: progress::Policy::new(),
+        }
+    }
+
+    /// A pause or a stop first reports the item's latest place.
     fn emit(&mut self, event: PlayerEvent) {
+        if matches!(event, PlayerEvent::Paused(_) | PlayerEvent::Stopped) {
+            let report = self.progress.flush(Instant::now());
+            self.send(report);
+        }
         if self.last != Some(event) {
             self.last = Some(event);
+            let _ = self.tx.send(event);
+        }
+    }
+
+    /// `item` starts; the item it replaces reports its latest place first.
+    fn begin(&mut self, item: ItemId, progress: bool) {
+        let report = self.progress.begin(item, progress, Instant::now());
+        self.send(report);
+    }
+
+    /// The item is at `at`; a `jump` is a track that started or moved.
+    fn place(&mut self, at: Place, jump: bool) {
+        let report = self.progress.offer(at, jump, Instant::now());
+        self.send(report);
+    }
+
+    /// The item's last track played to its end by itself.
+    fn finished(&mut self) {
+        let report = self.progress.finish();
+        self.send(report);
+    }
+
+    /// Where a restart of the item begins: its latest place if it resumes,
+    /// else the first track.
+    fn resume_point(&self) -> Start {
+        self.progress.resume_point().unwrap_or_default()
+    }
+
+    /// Whether the item playing asked for progress.
+    fn wants_progress(&self) -> bool {
+        self.progress.wanted()
+    }
+
+    fn send(&self, report: Option<PlayerEvent>) {
+        if let Some(event) = report {
             let _ = self.tx.send(event);
         }
     }
@@ -282,274 +362,4 @@ fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use super::*;
-
-    #[test]
-    fn every_failed_command_reports_stopped() {
-        // Nothing listens on this port, so every command fails at once.
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let host = String::from("127.0.0.1");
-        for output in [
-            Output::Cast {
-                host: host.clone(),
-                port,
-            },
-            Output::Heos { host, port },
-        ] {
-            let (tx, events) = mpsc::channel();
-            let player = spawn(output.clone(), tx);
-
-            for _ in 0..2 {
-                player.send(PlayerCmd::TogglePause).unwrap();
-                assert_eq!(
-                    events.recv_timeout(Duration::from_secs(5)),
-                    Ok(PlayerEvent::Stopped),
-                    "{output:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn connect_tries_every_address() {
-        // `localhost` resolves to ::1 first on macOS, and only IPv4 listens here.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        connect("localhost", port).unwrap();
-    }
-
-    #[test]
-    fn volumes_are_clamped_to_the_speaker_range() {
-        for (volume, expected) in [(-0.1, 0.0), (0.35, 0.35), (1.5, 1.0)] {
-            assert!(
-                (clamp_volume(volume) - expected).abs() < f32::EPSILON,
-                "{volume}"
-            );
-        }
-    }
-
-    fn album() -> PlayerCmd {
-        PlayerCmd::Play {
-            item: ItemId(0),
-            content: Content::Tracks {
-                tracks: vec![],
-                start: Start::default(),
-                progress: false,
-            },
-            volume: 0.2,
-        }
-    }
-
-    /// One [`Content`] of each kind that no backend plays yet.
-    pub(super) fn unsupported() -> [Content; 2] {
-        [
-            Content::Stream(Station {
-                url: "https://radio.example/kids.mp3".into(),
-                content_type: Some("audio/mpeg".into()),
-                name: "Kids Radio".into(),
-                cover_url: None,
-            }),
-            Content::Spotify(Playlist {
-                uri: "spotify:playlist:37i9dQZF1DX0XUsuxWHRQd".into(),
-                name: "Bedtime".into(),
-            }),
-        ]
-    }
-
-    #[test]
-    fn only_tracks_can_be_played_so_far() {
-        let tracks = Content::Tracks {
-            tracks: vec![],
-            start: Start::default(),
-            progress: false,
-        };
-        assert!(tracks.into_tracks().is_ok());
-        for content in unsupported() {
-            let err = content.into_tracks().unwrap_err();
-            assert!(err.to_string().contains("not supported yet"), "{err:#}");
-        }
-    }
-
-    #[test]
-    fn unsupported_content_reports_stopped() {
-        // A local player opens the sound card only for tracks, so this runs
-        // without one.
-        let (tx, events) = mpsc::channel();
-        let player = spawn(Output::Local { device: None }, tx);
-        for content in unsupported() {
-            let cmd = PlayerCmd::Play {
-                item: ItemId(1),
-                content,
-                volume: 0.2,
-            };
-            player.send(cmd).unwrap();
-            assert_eq!(
-                events.recv_timeout(Duration::from_secs(5)),
-                Ok(PlayerEvent::Stopped)
-            );
-        }
-    }
-
-    #[test]
-    fn keeps_the_last_album_and_only_the_last_volume_after_it() {
-        use PlayerCmd::{Next, Play, SetVolume, TogglePause};
-        let out = coalesce(vec![
-            SetVolume(0.1),
-            album(),
-            Next,
-            SetVolume(0.2),
-            album(),
-            Next,
-        ]);
-        assert!(matches!(out.as_slice(), [Play { .. }, Next]), "{out:?}");
-
-        let out = coalesce(vec![album(), SetVolume(0.3), SetVolume(0.4)]);
-        assert!(
-            matches!(out.as_slice(), [Play { .. }, SetVolume(v)] if (v - 0.4).abs() < f32::EPSILON),
-            "{out:?}"
-        );
-
-        let out = coalesce(vec![SetVolume(0.1), TogglePause, SetVolume(0.2)]);
-        assert!(
-            matches!(out.as_slice(), [TogglePause, SetVolume(v)] if (v - 0.2).abs() < f32::EPSILON),
-            "{out:?}"
-        );
-    }
-
-    enum Poll {
-        Answer,
-        Fail,
-        /// Fails, then has no album left to poll, so `run` waits for a command.
-        FailAndIdle,
-    }
-
-    /// A speaker that follows a script, to drive `run` without a network.
-    struct Scripted {
-        polls: VecDeque<Poll>,
-        active: bool,
-        fail_commands: bool,
-        handled: Arc<AtomicUsize>,
-        polled: Arc<AtomicUsize>,
-        /// Gets a message each time the script goes idle.
-        idle: Sender<()>,
-    }
-
-    impl Scripted {
-        fn new(polls: Vec<Poll>) -> (Scripted, Receiver<()>) {
-            let (idle, idle_rx) = mpsc::channel();
-            let speaker = Scripted {
-                polls: polls.into(),
-                active: true,
-                fail_commands: false,
-                handled: Arc::default(),
-                polled: Arc::default(),
-                idle,
-            };
-            (speaker, idle_rx)
-        }
-    }
-
-    impl Speaker for Scripted {
-        fn handle(&mut self, _: PlayerCmd, _: &mut Emitter) -> Result<()> {
-            self.handled.fetch_add(1, Ordering::SeqCst);
-            anyhow::ensure!(!self.fail_commands, "the speaker is off");
-            self.active = true;
-            Ok(())
-        }
-
-        fn poll(&mut self, _: &mut Emitter) -> Result<()> {
-            self.polled.fetch_add(1, Ordering::SeqCst);
-            match self.polls.pop_front() {
-                Some(Poll::Answer) => Ok(()),
-                Some(Poll::Fail) => anyhow::bail!("no answer"),
-                Some(Poll::FailAndIdle) | None => {
-                    self.active = false;
-                    self.idle.send(()).unwrap();
-                    anyhow::bail!("no answer")
-                }
-            }
-        }
-
-        fn poll_interval(&self) -> Option<Duration> {
-            self.active.then_some(Duration::from_millis(1))
-        }
-
-        fn reset(&mut self) {
-            self.active = false;
-        }
-    }
-
-    fn run_on_a_thread(
-        speaker: Scripted,
-    ) -> (
-        Sender<PlayerCmd>,
-        Receiver<PlayerEvent>,
-        thread::JoinHandle<()>,
-    ) {
-        let (cmds, rx) = mpsc::channel();
-        let (tx, events) = mpsc::channel();
-        let thread = thread::spawn(move || run(Box::new(speaker), &rx, Emitter { tx, last: None }));
-        (cmds, events, thread)
-    }
-
-    #[test]
-    fn three_failed_polls_in_a_row_stop_the_album() {
-        use Poll::{Answer, Fail};
-        let (speaker, _idle) = Scripted::new(vec![Fail, Fail, Answer, Fail, Fail, Fail]);
-        let polled = Arc::clone(&speaker.polled);
-        let (cmds, events, thread) = run_on_a_thread(speaker);
-        assert_eq!(
-            events.recv_timeout(Duration::from_secs(2)),
-            Ok(PlayerEvent::Stopped)
-        );
-        drop(cmds);
-        thread.join().unwrap();
-        assert_eq!(
-            polled.load(Ordering::SeqCst),
-            6,
-            "a poll that works restarts the count, and polling ends with the album"
-        );
-    }
-
-    #[test]
-    fn a_command_that_works_restarts_the_failed_poll_count() {
-        use Poll::{Fail, FailAndIdle};
-        let (speaker, idle) = Scripted::new(vec![Fail, FailAndIdle, Fail, FailAndIdle]);
-        let (cmds, events, thread) = run_on_a_thread(speaker);
-        idle.recv_timeout(Duration::from_secs(2)).unwrap();
-        cmds.send(PlayerCmd::Next).unwrap();
-        idle.recv_timeout(Duration::from_secs(2)).unwrap();
-        drop(cmds);
-        thread.join().unwrap();
-        assert_eq!(events.try_iter().collect::<Vec<_>>(), []);
-    }
-
-    #[test]
-    fn a_failed_command_drops_the_rest_of_its_batch() {
-        let (mut speaker, _idle) = Scripted::new(vec![]);
-        speaker.active = false;
-        speaker.fail_commands = true;
-        let handled = Arc::clone(&speaker.handled);
-        let (cmds, rx) = mpsc::channel();
-        for _ in 0..3 {
-            cmds.send(PlayerCmd::TogglePause).unwrap();
-        }
-        drop(cmds);
-        let (tx, events) = mpsc::channel();
-        run(Box::new(speaker), &rx, Emitter { tx, last: None });
-        assert_eq!(handled.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            events.try_iter().collect::<Vec<_>>(),
-            [PlayerEvent::Stopped]
-        );
-    }
-}
+mod tests;

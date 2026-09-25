@@ -11,6 +11,11 @@
 //! the stream still loading, for up to [`LOAD_TIMEOUT`]. This cannot tell a
 //! track that ended from a stop pressed in the HEOS app: both move to the
 //! next track.
+//!
+//! The CLI has no command that tells the place in a track. While an item
+//! that reports progress plays, change events are on and the place comes
+//! from `event/player_now_playing_progress`, which the speaker sends every
+//! few seconds.
 
 mod cli;
 
@@ -21,13 +26,17 @@ use anyhow::{Context, Result, anyhow, bail};
 use tracing::{debug, info, warn};
 
 pub use self::cli::players;
-use self::cli::{Cli, IO_TIMEOUT, Message};
+use self::cli::{Cli, IO_TIMEOUT, Message, NowPlaying};
+use super::progress::Place;
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
 use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// How long a new track may report `stop` before we give up on it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
+/// A last track that stops this close to its length has ended; earlier, it
+/// was stopped in the HEOS app. Progress events come every ~5 s.
+const END_MARGIN: Duration = Duration::from_secs(10);
 
 pub(super) struct HeosPlayer {
     host: String,
@@ -37,6 +46,8 @@ pub(super) struct HeosPlayer {
     item: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
+    /// Whether that album reports progress.
+    progress: bool,
     /// `None` while no album is active.
     current: Option<Current>,
     load_timeout: Duration,
@@ -48,6 +59,8 @@ pub(super) struct HeosPlayer {
 struct Current {
     track: usize,
     phase: Phase,
+    /// The latest progress event for this track.
+    seen: Option<NowPlaying>,
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +84,7 @@ impl HeosPlayer {
             conn: None,
             item: ItemId(0),
             tracks: Vec::new(),
+            progress: false,
             current: None,
             load_timeout: LOAD_TIMEOUT,
             io_timeout: IO_TIMEOUT,
@@ -86,12 +100,14 @@ impl Speaker for HeosPlayer {
                 content,
                 volume,
             } => {
-                let tracks = content.into_tracks()?;
+                let list = content.into_tracks()?;
+                events.begin(item, list.progress);
                 self.item = item;
-                self.tracks = tracks;
+                self.tracks = list.tracks;
+                self.progress = list.progress;
                 self.current = None;
                 self.set_volume(volume)?;
-                self.play_track(0, events)
+                self.play_track(list.start.track, events)
             }
             PlayerCmd::SetVolume(volume) => self.set_volume(volume),
             PlayerCmd::TogglePause => self.toggle_pause(events),
@@ -107,6 +123,11 @@ impl Speaker for HeosPlayer {
     }
 
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
+        if self.current.is_none() {
+            return Ok(());
+        }
+        let state = self.play_state()?;
+        self.report_place(events);
         let Some(current) = self.current else {
             return Ok(());
         };
@@ -114,7 +135,7 @@ impl Speaker for HeosPlayer {
             phase: Phase::Started,
             ..current
         });
-        match self.play_state()? {
+        match state {
             PlayState::Play => {
                 self.current = started;
                 events.emit(PlayerEvent::Playing(self.item));
@@ -135,7 +156,12 @@ impl Speaker for HeosPlayer {
                         return Err(err);
                     }
                 }
-                Phase::Started => self.end(events),
+                Phase::Started => {
+                    if ended(current.seen) {
+                        events.finished();
+                    }
+                    self.end(events);
+                }
             },
         }
         Ok(())
@@ -155,6 +181,7 @@ impl HeosPlayer {
     /// ours, so the album starts over instead of pausing it.
     fn toggle_pause(&mut self, events: &mut Emitter) -> Result<()> {
         let state = self.play_state()?;
+        self.report_place(events);
         match (self.current, state) {
             (Some(_), PlayState::Play) => {
                 self.set_play_state("pause")?;
@@ -173,7 +200,10 @@ impl HeosPlayer {
             ) if since.elapsed() < self.load_timeout => {
                 events.emit(PlayerEvent::Playing(self.item));
             }
-            _ if !self.tracks.is_empty() => self.play_track(0, events)?,
+            _ if !self.tracks.is_empty() => {
+                let start = events.resume_point();
+                self.play_track(start.track, events)?;
+            }
             _ => events.emit(PlayerEvent::Stopped),
         }
         Ok(())
@@ -197,23 +227,54 @@ impl HeosPlayer {
             Err(err) => return Err(err),
         }
         self.call("browse/play_stream", &[("url", &url)])?;
+        // Anything read up to this reply was about the stream before.
+        self.take_progress();
         let track = &self.tracks[index];
         info!(album = %track.album, track = %track.title, "playing");
         self.current = Some(Current {
             track: index,
             phase: Phase::Loading(Instant::now()),
+            seen: None,
         });
+        events.place(Place::start_of(index, Duration::ZERO), true);
         events.emit(PlayerEvent::Playing(self.item));
         Ok(())
+    }
+
+    /// Offers the place from the latest progress event, if one came.
+    fn report_place(&mut self, events: &mut Emitter) {
+        let Some(seen) = self.take_progress() else {
+            return;
+        };
+        let Some(current) = &mut self.current else {
+            return;
+        };
+        current.seen = Some(seen);
+        let at = Place {
+            track: current.track,
+            position: seen.position,
+            duration: seen.duration,
+        };
+        events.place(at, false);
+    }
+
+    fn take_progress(&mut self) -> Option<NowPlaying> {
+        self.conn.as_mut()?.cli.take_progress()
+    }
+
+    /// Change events carry the place, so they are on only while an album
+    /// that reports progress is active.
+    fn wants_events(&self) -> bool {
+        self.progress && self.current.is_some()
     }
 
     /// A Denon AVR-X1600H keeps retrying a finished URL stream, and sometimes
     /// plays it again, until it is told to stop.
     fn end(&mut self, events: &mut Emitter) {
+        self.current = None;
         if let Err(err) = self.set_play_state("stop") {
             warn!("cannot stop the speaker: {err:#}");
         }
-        self.current = None;
         events.emit(PlayerEvent::Stopped);
     }
 
@@ -260,6 +321,11 @@ impl HeosPlayer {
             Some(conn) => conn,
             None => Connection::open(&self.host, self.port, self.io_timeout)?,
         };
+        let events = self.wants_events();
+        if conn.events != events {
+            conn.cli.set_change_events(events)?;
+            conn.events = events;
+        }
         let pid = conn.pid.to_string();
         let args: Vec<(&str, &str)> = [("pid", pid.as_str())]
             .into_iter()
@@ -275,6 +341,8 @@ impl HeosPlayer {
 struct Connection {
     cli: Cli,
     pid: i64,
+    /// Whether change events are on.
+    events: bool,
 }
 
 impl Connection {
@@ -291,10 +359,25 @@ impl Connection {
             .or_else(|| players.first())
             .with_context(|| format!("the HEOS system at {host} has no players"))?;
         info!(pid = player.pid, name = %player.name, model = %player.model, "using HEOS player");
+        let pid = player.pid;
+        cli.follow(pid);
         Ok(Connection {
             cli,
-            pid: player.pid,
+            pid,
+            events: false,
         })
+    }
+}
+
+/// Whether the last track, stopped after `seen`, played to its end. With no
+/// length known, every stop counts as the end.
+fn ended(seen: Option<NowPlaying>) -> bool {
+    match seen {
+        Some(NowPlaying {
+            position,
+            duration: Some(duration),
+        }) => position + END_MARGIN >= duration,
+        _ => true,
     }
 }
 

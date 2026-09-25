@@ -7,7 +7,9 @@
 //! up, so a computer without one fails only when an album is pressed; a
 //! broken stream fails the next command or poll, and the next album opens
 //! the output again. A file that cannot be decoded (Opus, a broken file) is
-//! skipped with a warning. `docs/local-audio.md` has the details.
+//! skipped with a warning. The place in a track counts the samples the sound
+//! card took, not the ones decoded, which run ahead. `docs/local-audio.md`
+//! has the details.
 
 mod decode;
 mod engine;
@@ -21,6 +23,7 @@ use tracing::{debug, info, warn};
 use self::decode::Source;
 use self::output::OpenOutput;
 pub use self::output::output_devices;
+use super::progress::Place;
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
 use crate::library::ItemId;
 
@@ -44,6 +47,8 @@ pub(super) struct LocalPlayer {
     volume: f32,
     /// The track playing or paused; `None` while no album is active.
     current: Option<usize>,
+    /// The length of that track, when its file tells it.
+    duration: Option<Duration>,
     paused: bool,
 }
 
@@ -61,6 +66,7 @@ impl LocalPlayer {
             tracks: Vec::new(),
             volume: 1.0,
             current: None,
+            duration: None,
             paused: false,
         }
     }
@@ -74,9 +80,11 @@ impl Speaker for LocalPlayer {
                 content,
                 volume,
             } => {
-                let tracks = content.into_tracks()?;
+                let list = content.into_tracks()?;
+                self.report_place(events);
+                events.begin(item, list.progress);
                 self.item = item;
-                self.tracks = tracks;
+                self.tracks = list.tracks;
                 self.volume = super::clamp_volume(volume);
                 self.current = None;
                 // A new album is the moment to try a broken output again.
@@ -84,7 +92,7 @@ impl Speaker for LocalPlayer {
                     debug!("reopening the sound output: {err:#}");
                     self.output = None;
                 }
-                self.play_from(0, events)
+                self.play_from(list.start.track, events)
             }
             PlayerCmd::SetVolume(volume) => {
                 self.check()?;
@@ -133,7 +141,12 @@ impl Speaker for LocalPlayer {
         // A paused track may have ended just before the pause: it moves on
         // once resumed, not while paused.
         if !self.paused && output.engine.finished() {
-            self.play_from(track + 1, events)?;
+            if !self.start_track(track + 1, events)? {
+                events.finished();
+                self.end_album(events);
+            }
+        } else {
+            self.report_place(events);
         }
         Ok(())
     }
@@ -164,15 +177,20 @@ impl LocalPlayer {
             (Some(_), Some(output)) => {
                 self.paused = !self.paused;
                 output.engine.set_paused(self.paused);
-                events.emit(if self.paused {
-                    PlayerEvent::Paused(self.item)
+                if self.paused {
+                    self.report_place(events);
+                    events.emit(PlayerEvent::Paused(self.item));
                 } else {
-                    PlayerEvent::Playing(self.item)
-                });
+                    events.emit(PlayerEvent::Playing(self.item));
+                }
                 Ok(())
             }
-            // The album ended (or failed): start it again from the top.
-            _ if !self.tracks.is_empty() => self.play_from(0, events),
+            // The album ended (or failed): start it again, from the top or
+            // where a resuming item got to.
+            _ if !self.tracks.is_empty() => {
+                let start = events.resume_point();
+                self.play_from(start.track, events)
+            }
             _ => {
                 events.emit(PlayerEvent::Stopped);
                 Ok(())
@@ -183,6 +201,15 @@ impl LocalPlayer {
     /// Plays the first track from `start` on that can be decoded; with none
     /// left, the album is over.
     fn play_from(&mut self, start: usize, events: &mut Emitter) -> Result<()> {
+        if !self.start_track(start, events)? {
+            self.end_album(events);
+        }
+        Ok(())
+    }
+
+    /// Starts the first track from `start` on that can be decoded; false when
+    /// there is none.
+    fn start_track(&mut self, start: usize, events: &mut Emitter) -> Result<bool> {
         let output = match &mut self.output {
             Some(output) => output,
             empty @ None => empty.insert((self.open)()?),
@@ -191,22 +218,47 @@ impl LocalPlayer {
         for (index, track) in self.tracks.iter().enumerate().skip(start) {
             match Source::open(&track.path) {
                 Ok(source) => {
+                    let duration = source.duration();
                     output.engine.play(source)?;
                     info!(album = %track.album, track = %track.title, "playing");
                     self.current = Some(index);
+                    self.duration = duration;
                     self.paused = false;
+                    let at = Place {
+                        track: index,
+                        position: Duration::ZERO,
+                        duration,
+                    };
+                    events.place(at, true);
                     events.emit(PlayerEvent::Playing(self.item));
-                    return Ok(());
+                    return Ok(true);
                 }
                 Err(err) => warn!("skipping {}: {err:#}", track.path.display()),
             }
         }
-        output.engine.stop();
+        Ok(false)
+    }
+
+    fn end_album(&mut self, events: &mut Emitter) {
+        if let Some(output) = &mut self.output {
+            output.engine.stop();
+        }
         info!("end of the album");
         self.current = None;
         self.paused = false;
         events.emit(PlayerEvent::Stopped);
-        Ok(())
+    }
+
+    /// Offers the place in the current track, as far as the sound card got.
+    fn report_place(&self, events: &mut Emitter) {
+        if let (Some(track), Some(output)) = (self.current, &self.output) {
+            let at = Place {
+                track,
+                position: output.engine.position(),
+                duration: self.duration,
+            };
+            events.place(at, false);
+        }
     }
 }
 

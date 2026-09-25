@@ -7,9 +7,13 @@ kids-deck drives Denon / Marantz HEOS devices through the HEOS CLI, set by
   album walk.
 - [`src/player/heos/cli.rs`](../src/player/heos/cli.rs): the protocol.
 - [`src/player/heos/tests.rs`](../src/player/heos/tests.rs): a fake receiver
-  on 127.0.0.1 that records every command line kids-deck sends.
+  on 127.0.0.1 that records every command line kids-deck sends, and can
+  send progress events for
+  [`tests/progress.rs`](../src/player/heos/tests/progress.rs).
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
-  Cast, the `Speaker` trait and the `Emitter`.
+  Cast, the `Speaker` trait and the `Emitter`;
+  [`progress.rs`](../src/player/progress.rs): when an item reports its
+  place.
 - [`src/config.rs`](../src/config/mod.rs): `speaker_type`, and port 1255 as the
   default `speaker_port` for HEOS.
 
@@ -54,7 +58,12 @@ line):
   (`unspaced`, `unquote`).
 - Change events (`event/…` lines) are off on a new connection (spec
   §4.1.1). kids-deck still sends `enable=off`, as the start-up sequence in
-  spec §2.1.1 advises, and polls instead. `Cli::exchange` skips every line
+  spec §2.1.1 advises, and polls instead. The one exception is the place
+  in a track: no command returns it, only the change event
+  `event/player_now_playing_progress` (spec §5), with `pid`, `cur_pos` and
+  `duration` in milliseconds. So while an item that reports progress plays
+  (`progress: true`), events are on for that connection. `Cli::exchange`
+  keeps the latest progress event of our player and skips every other line
   that does not answer the command it sent.
 
 Error codes that matter here (spec §6.2):
@@ -72,6 +81,7 @@ Error codes that matter here (spec §6.2):
 | Command | Sent | kids-deck reads |
 |---|---|---|
 | `system/register_for_change_events?enable=off` | new connection | result |
+| `system/register_for_change_events?enable=on` | progress item | result |
 | `player/get_players` | new connection, `just doctor` | payload |
 | `player/set_volume?pid=P&level=L` | album start, volume key | result |
 | `player/clear_queue?pid=P` | before each `play_stream` | nothing |
@@ -85,6 +95,12 @@ Error codes that matter here (spec §6.2):
 - A `fail` reply to `clear_queue` (eid 4 on an empty queue) is logged at
   debug level and ignored. An I/O error (timeout, reset) ends the track
   change: no `play_stream` goes out without its `clear_queue`.
+- `enable=on` goes before the first command after a progress item's track
+  started (usually the first poll), and again after a reconnect. `enable=off`
+  goes before the next command once that item is no longer active: the
+  `set_play_state stop` at its end, or the next album. Albums that do not
+  report progress never turn events on, so their command lines are the ones
+  below.
 - kids-deck never sends `get_queue`, `get_now_playing_media`,
   `play_next`, `play_previous` or `heart_beat`.
 
@@ -124,9 +140,15 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    again and sends the command once more: the CLI resets idle connections
    when it recovers from a hang (item 6), and a restarted receiver has
    none. Every command it sends is safe to send twice.
-2. **Play an album** (`PlayerCmd::Play`): `set_volume`, then track 1:
-   `clear_queue`, `play_stream`. Emits `Playing`. The track is "loading".
+2. **Play an album** (`PlayerCmd::Play`): `set_volume`, then the start
+   track (`start.track`; track 1 when it is out of range): `clear_queue`,
+   `play_stream`. Emits `Playing`. The track is "loading". An item that
+   reports progress first gets `Progress` for the start of that track.
 3. **Poll** every 1 s while an album is active: `get_play_state`.
+   - For an item that reports progress, the latest
+     `player_now_playing_progress` read since the last poll gives the place
+     (`Progress`, at most every 5 s). `duration=0` means the length is
+     unknown.
    - `play`: the track is "started"; emits `Playing`. `pause`: "started";
      emits `Paused`.
    - `stop` or `unknown` while loading, for less than 15 s: wait. After
@@ -141,12 +163,16 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
 5. **Play/pause key:** `get_play_state` first. `play` → `set_play_state`
    `pause`; `pause` → `set_play_state` `play`. `stop` while the track loads
    (under 15 s) sends nothing more and reports `Playing`. In every other case
-   the album starts again from track 1: without an active album, what the
-   receiver plays is not known to be ours. No album ever started: emits
-   `Stopped`.
+   the album starts again from track 1 (an item that reports progress: from
+   the track it got to): without an active album, what the receiver plays
+   is not known to be ours. No album ever started: emits `Stopped`.
 6. **Volume key:** `set_volume`.
 7. **End of album:** `set_play_state?state=stop`, emits `Stopped`, polling
-   stops.
+   stops. For an item that reports progress, `Finished` comes before
+   `Stopped` when the last track stopped after it started, unless the last
+   progress event put it more than 10 s (`END_MARGIN`) before the track's
+   length: that was a stop pressed in the HEOS app, and the item keeps its
+   place. With the length unknown, every such stop counts as the end.
 8. **Errors:** a failed command (I/O error, timeout, `result: fail`) makes
    `player::run` log a warning, call `reset` (the album is no longer
    active), emit `Stopped` and drop the other key presses that came with
@@ -163,12 +189,18 @@ Written down in the module doc of `heos.rs`:
 
 - `play_stream` plays one URL and there is no queue for URLs, so kids-deck
   walks the album itself. It polls `get_play_state` every second instead of
-  listening to change events: one connection, no event parsing.
+  listening to change events: one connection, and the only event it parses
+  is the progress event.
 - There is a gap of about 1 s between tracks: the end shows up at the next
   poll, then the next stream loads.
 - A stop pressed in the HEOS app looks like the end of a track: the next
   track starts. The receiver cannot tell "our" stream from another one
-  (item 5 of "Seen on real hardware").
+  (item 5 of "Seen on real hardware"). On the last track of an item that
+  reports progress, a stop in its last 10 s, or with its length unknown,
+  counts as the end (`Finished`).
+- The place in a track is as old as the latest progress event, which comes
+  about every 5 s (item 5). Progress events were seen on the AVR-X1600H;
+  kids-deck's use of them is tested against the fake receiver only.
 - A track that does not start within 15 s (`LOAD_TIMEOUT`) ends the album.
 - One connection stays open. The spec (§2.1.1) says the CLI module sleeps
   until the first connection comes, and advises controllers that reconnect

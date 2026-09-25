@@ -137,7 +137,7 @@ fn radio_and_spotify_are_refused_before_connecting() {
         .port();
     let mut player = CastPlayer::new("127.0.0.1".into(), port);
     let (tx, _events) = std::sync::mpsc::channel();
-    let mut emitter = Emitter { tx, last: None };
+    let mut emitter = Emitter::new(tx);
     for content in crate::player::tests::unsupported() {
         let cmd = PlayerCmd::Play {
             item: ITEM,
@@ -147,4 +147,86 @@ fn radio_and_spotify_are_refused_before_connecting() {
         let err = player.handle(cmd, &mut emitter).unwrap_err();
         assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
     }
+}
+
+fn timed(state: PlayerState, track: usize, secs: f32, duration: Option<f32>) -> StatusEntry {
+    let mut e = entry(state, Some(&url(track)));
+    e.current_time = Some(secs);
+    e.media.as_mut().unwrap().duration = duration;
+    e
+}
+
+#[test]
+fn the_place_is_our_track_and_its_time_while_playing_or_paused() {
+    let tracks = tracks();
+    for state in [
+        PlayerState::Playing,
+        PlayerState::Buffering,
+        PlayerState::Paused,
+    ] {
+        let e = timed(state, 1, 42.5, Some(300.0));
+        assert_eq!(
+            place(&e, &tracks),
+            Some(Place {
+                track: 1,
+                position: Duration::from_secs_f32(42.5),
+                duration: Some(Duration::from_secs(300)),
+            })
+        );
+    }
+}
+
+#[test]
+fn no_place_when_idle_foreign_or_without_a_time() {
+    let tracks = tracks();
+    let mut idle = timed(PlayerState::Idle, 2, 10.0, None);
+    idle.idle_reason = Some(IdleReason::Finished);
+    assert_eq!(place(&idle, &tracks), None);
+    let mut foreign = entry(PlayerState::Playing, Some("http://example.com/radio.mp3"));
+    foreign.current_time = Some(10.0);
+    assert_eq!(place(&foreign, &tracks), None);
+    let untimed = entry(PlayerState::Playing, Some(&url(0)));
+    assert_eq!(place(&untimed, &tracks), None);
+    for bad in [-1.0, f32::NAN, f32::INFINITY] {
+        let e = timed(PlayerState::Playing, 0, bad, None);
+        assert_eq!(place(&e, &tracks), None, "{bad}");
+    }
+}
+
+#[test]
+fn a_length_of_zero_or_nonsense_is_unknown() {
+    let tracks = tracks();
+    for duration in [None, Some(0.0), Some(-3.0), Some(f32::NAN)] {
+        let e = timed(PlayerState::Playing, 0, 5.0, duration);
+        assert_eq!(place(&e, &tracks).unwrap().duration, None, "{duration:?}");
+    }
+}
+
+#[test]
+fn finished_is_the_last_track_idle_because_it_ended() {
+    let tracks = tracks();
+    let ended = |track: usize, reason| {
+        let mut e = entry(PlayerState::Idle, Some(&url(track)));
+        e.idle_reason = reason;
+        e
+    };
+    assert!(finished(&ended(2, Some(IdleReason::Finished)), &tracks));
+    assert!(!finished(&ended(1, Some(IdleReason::Finished)), &tracks));
+    for reason in [
+        None,
+        Some(IdleReason::Cancelled),
+        Some(IdleReason::Interrupted),
+        Some(IdleReason::Error),
+    ] {
+        assert!(!finished(&ended(2, reason), &tracks), "{reason:?}");
+    }
+
+    let mut next_loading = ended(2, Some(IdleReason::Finished));
+    next_loading.loading_item_id = Some(4);
+    assert!(!finished(&next_loading, &tracks));
+    let mut no_media = entry(PlayerState::Idle, None);
+    no_media.idle_reason = Some(IdleReason::Finished);
+    assert!(!finished(&no_media, &tracks), "the track is unknown");
+    let playing = entry(PlayerState::Playing, Some(&url(2)));
+    assert!(!finished(&playing, &tracks));
 }
