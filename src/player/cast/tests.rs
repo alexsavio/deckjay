@@ -4,7 +4,7 @@ use rust_cast::channels::media::{
 
 use super::*;
 
-const ALBUM: usize = 5;
+const ALBUM: ItemId = ItemId(5);
 
 fn url(track: usize) -> String {
     format!(

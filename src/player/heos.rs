@@ -23,6 +23,7 @@ use tracing::{debug, info, warn};
 pub use self::cli::players;
 use self::cli::{Cli, IO_TIMEOUT, Message};
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
+use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// How long a new track may report `stop` before we give up on it.
@@ -33,7 +34,7 @@ pub(super) struct HeosPlayer {
     port: u16,
     conn: Option<Connection>,
     /// Id of the album we started last.
-    album: usize,
+    album: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     /// `None` while no album is active.
@@ -68,7 +69,7 @@ impl HeosPlayer {
             host,
             port,
             conn: None,
-            album: 0,
+            album: ItemId(0),
             tracks: Vec::new(),
             current: None,
             load_timeout: LOAD_TIMEOUT,

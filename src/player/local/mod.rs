@@ -22,6 +22,7 @@ use self::decode::Source;
 use self::output::OpenOutput;
 pub use self::output::output_devices;
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
+use crate::library::ItemId;
 
 /// How often the player looks for the end of a track, which is also the
 /// longest gap between two tracks.
@@ -37,7 +38,7 @@ pub(super) struct LocalPlayer {
     /// `None` until the first album, and after a failure.
     output: Option<OpenOutput>,
     /// Id of the album we started last.
-    album: usize,
+    album: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     volume: f32,
@@ -56,7 +57,7 @@ impl LocalPlayer {
         LocalPlayer {
             open,
             output: None,
-            album: 0,
+            album: ItemId(0),
             tracks: Vec::new(),
             volume: 1.0,
             current: None,

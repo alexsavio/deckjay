@@ -18,6 +18,7 @@ use rust_cast::channels::receiver::{Application, CastDeviceApp};
 use tracing::info;
 
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
+use crate::library::ItemId;
 
 /// App id of Chromecast's built-in Default Media Receiver.
 const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
@@ -57,7 +58,7 @@ pub(super) struct CastPlayer {
     host: String,
     port: u16,
     /// Id of the album we started last.
-    album: usize,
+    album: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     /// True while we believe our album is loaded on the speaker.
@@ -75,7 +76,7 @@ impl CastPlayer {
         CastPlayer {
             host,
             port,
-            album: 0,
+            album: ItemId(0),
             tracks: Vec::new(),
             active: false,
         }
@@ -232,7 +233,7 @@ fn track_index(entry: &StatusEntry, tracks: &[TrackInfo]) -> Option<usize> {
 fn poll_event(
     entry: Option<&StatusEntry>,
     tracks: &[TrackInfo],
-    album: usize,
+    album: ItemId,
 ) -> Option<PlayerEvent> {
     let Some(entry) = entry else {
         return Some(PlayerEvent::Stopped);

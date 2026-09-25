@@ -39,6 +39,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::config::{Config, SpeakerType};
 use crate::deck::Deck;
+use crate::library::Library;
 use crate::simulator::Model;
 use crate::ui::Ui;
 
@@ -112,10 +113,10 @@ fn main() -> Result<()> {
     if advertise_host.is_some() {
         cfg.advertise_host = advertise_host;
     }
-    let albums = library::scan(&cfg.music_dir)?;
+    let library = Library::scan(&cfg.music_dir)?;
     info!(
         "found {} albums in {}",
-        albums.len(),
+        library.items().len(),
         cfg.music_dir.display()
     );
 
@@ -123,25 +124,26 @@ fn main() -> Result<()> {
         advertise_address(&cfg).map(|host| format!("http://{host}:{}/music", cfg.http_port));
 
     if let Some(path) = preview {
-        return write_preview(&cfg, albums, base_url?, &path);
+        return write_preview(&cfg, library, base_url?, &path);
     }
     if check {
-        return run_check(&cfg, &albums, base_url.as_deref(), simulator_url.as_deref());
+        return run_check(
+            &cfg,
+            &library,
+            base_url.as_deref(),
+            simulator_url.as_deref(),
+        );
     }
     let base_url = base_url?;
 
     if cfg.speaker_type != SpeakerType::Local {
-        server::spawn(
-            cfg.music_dir.clone(),
-            cfg.http_port,
-            library::served_files(&albums),
-        )?;
+        server::spawn(cfg.music_dir.clone(), cfg.http_port, library.served_files())?;
         info!("serving music at {base_url}/");
     }
 
     let (event_tx, event_rx) = mpsc::channel();
     let player = player::spawn(output(&cfg), event_tx);
-    let mut ui = Ui::new(&cfg, albums, base_url, player, event_rx);
+    let mut ui = Ui::new(&cfg, library, base_url, player, event_rx);
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
     let mut source = match simulator_url {
@@ -221,15 +223,10 @@ fn run_simulator(mut args: impl Iterator<Item = String>) -> Result<()> {
     simulator::run(port, model)
 }
 
-fn write_preview(
-    cfg: &Config,
-    albums: Vec<library::Album>,
-    base_url: String,
-    path: &Path,
-) -> Result<()> {
+fn write_preview(cfg: &Config, library: Library, base_url: String, path: &Path) -> Result<()> {
     let (tx, _) = mpsc::channel();
     let (_, rx) = mpsc::channel();
-    let mut ui = Ui::new(cfg, albums, base_url, tx, rx);
+    let mut ui = Ui::new(cfg, library, base_url, tx, rx);
     ui.preview(3, 5, 144, true)
         .save(path)
         .with_context(|| format!("cannot write {}", path.display()))?;
@@ -275,12 +272,12 @@ fn local_ip_towards(host: &str, port: u16) -> Result<String> {
 
 fn run_check(
     cfg: &Config,
-    albums: &[library::Album],
+    library: &Library,
     base_url: Result<&str, &anyhow::Error>,
     simulator_url: Option<&str>,
 ) -> Result<()> {
     println!("Albums in {}:", cfg.music_dir.display());
-    for album in albums {
+    for (_, album) in library.items() {
         let cover = if album.cover.is_some() {
             "cover ✓"
         } else {
@@ -289,12 +286,12 @@ fn run_check(
         println!(
             "  {:<40} {:>3} tracks, {cover}",
             album.name,
-            album.tracks.len()
+            album.tracks().len()
         );
     }
     match base_url {
         Ok(base_url) => {
-            if let Some(track) = albums.first().and_then(|a| a.tracks.first()) {
+            if let Some(track) = library.items().next().and_then(|(_, a)| a.tracks().first()) {
                 println!(
                     "\nExample URL the speaker will fetch:\n  {}",
                     library::url_for(base_url, &track.rel_path)

@@ -70,7 +70,7 @@ async fn only_listed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::{scan, served_files, url_for};
+    use crate::library::{Library, url_for};
 
     fn touch(path: &Path, body: &[u8]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -83,7 +83,7 @@ mod tests {
         serve(
             listener,
             root.to_path_buf(),
-            served_files(&scan(root).unwrap()),
+            Library::scan(root).unwrap().served_files(),
         )
         .unwrap();
         base
@@ -115,8 +115,7 @@ mod tests {
         }
         let base = start(root);
 
-        let albums = scan(root).unwrap();
-        let files = served_files(&albums);
+        let files = Library::scan(root).unwrap().served_files();
         assert_eq!(files.len(), 5);
         for rel in &files {
             let url = url_for(&base, rel);

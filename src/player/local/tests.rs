@@ -16,7 +16,7 @@ use super::*;
 /// The fake sound card's rate, also the rate of the test tracks, so their
 /// samples reach the card unchanged.
 const RATE: u32 = 8000;
-const ALBUM: usize = 4;
+const ALBUM: ItemId = ItemId(4);
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

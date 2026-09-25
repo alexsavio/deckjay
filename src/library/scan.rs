@@ -17,12 +17,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Album, Track};
+use super::{Item, ItemKey, Kind, MUSIC, Media, Track};
 
 /// Cover file names (without extension), best match first.
 const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
 
-pub fn scan(music_dir: &Path) -> Result<Vec<Album>> {
+/// One item per album folder, in name order.
+pub(super) fn scan(music_dir: &Path) -> Result<Vec<Item>> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(music_dir)
         .with_context(|| format!("cannot read music folder {}", music_dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -64,13 +65,16 @@ pub fn scan(music_dir: &Path) -> Result<Vec<Album>> {
         }
 
         let cover = find_cover(&files);
-        albums.push(Album {
-            name: dir
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
-            tracks,
+        let name = dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        albums.push(Item {
+            kind: Kind::Music,
+            key: ItemKey(format!("{MUSIC}/{name}")),
+            name,
+            media: Media::Tracks(tracks),
             cover_rel: cover
                 .as_ref()
                 .and_then(|c| c.strip_prefix(music_dir).ok().map(Path::to_path_buf)),
@@ -156,13 +160,17 @@ mod tests {
 
         let names: Vec<&str> = albums.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, ["01 Animals", "02 Bedtime"]);
-        let titles: Vec<&str> = albums[0].tracks.iter().map(|t| t.title.as_str()).collect();
+        let titles: Vec<&str> = albums[0]
+            .tracks()
+            .iter()
+            .map(|t| t.title.as_str())
+            .collect();
         assert_eq!(titles, ["01 Elephant", "02 Ducks"]);
         assert_eq!(
-            albums[0].tracks[1].rel_path,
+            albums[0].tracks()[1].rel_path,
             Path::new("01 Animals/02 Ducks.flac")
         );
-        assert_eq!(albums[0].tracks[1].content_type, "audio/flac");
+        assert_eq!(albums[0].tracks()[1].content_type, "audio/flac");
     }
 
     #[test]
@@ -178,7 +186,7 @@ mod tests {
 
         assert_eq!(albums.len(), 1);
         assert_eq!(albums[0].name, "Songs");
-        assert_eq!(albums[0].tracks.len(), 1);
+        assert_eq!(albums[0].tracks().len(), 1);
     }
 
     #[test]

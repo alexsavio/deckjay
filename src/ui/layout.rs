@@ -1,6 +1,8 @@
 //! Which key shows what: albums on top, controls in the bottom row, and a
 //! "more" key when the albums do not fit.
 
+use crate::library::ItemId;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Control {
     Prev,
@@ -12,7 +14,7 @@ pub(super) enum Control {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Action {
-    Album(usize),
+    Item(ItemId),
     More,
     Control(Control),
 }
@@ -24,11 +26,12 @@ pub(super) struct Layout {
     pub(super) pages: usize,
     pub(super) has_more_key: bool,
     controls: Vec<Option<Control>>,
-    album_count: usize,
+    /// The items in the order the album keys show them, page after page.
+    items: Vec<ItemId>,
 }
 
 impl Layout {
-    pub(super) fn new(rows: usize, cols: usize, album_count: usize) -> Layout {
+    pub(super) fn new(rows: usize, cols: usize, items: &[ItemId]) -> Layout {
         // With one album key, paging would turn it into the "more" key and
         // hide every album; the deck backends only open bigger grids.
         debug_assert!(
@@ -36,13 +39,13 @@ impl Layout {
             "no room for albums on a {rows}x{cols} deck"
         );
         let album_slots = (rows - 1) * cols;
-        let has_more_key = album_count > album_slots;
+        let has_more_key = items.len() > album_slots;
         let albums_per_page = if has_more_key {
             album_slots - 1
         } else {
             album_slots
         };
-        let pages = album_count.div_ceil(albums_per_page.max(1)).max(1);
+        let pages = items.len().div_ceil(albums_per_page.max(1)).max(1);
         Layout {
             cols,
             album_slots,
@@ -50,7 +53,7 @@ impl Layout {
             pages,
             has_more_key,
             controls: control_row(cols),
-            album_count,
+            items: items.to_vec(),
         }
     }
 
@@ -67,7 +70,7 @@ impl Layout {
             return Some(Action::More);
         }
         let index = page * self.albums_per_page + key;
-        (index < self.album_count).then_some(Action::Album(index))
+        self.items.get(index).copied().map(Action::Item)
     }
 }
 

@@ -16,6 +16,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use tracing::{debug, warn};
 
+use crate::library::ItemId;
+
 #[derive(Debug)]
 pub struct TrackInfo {
     /// Where the speaker downloads the track from.
@@ -32,7 +34,7 @@ pub struct TrackInfo {
 pub enum PlayerCmd {
     /// `album` is an id chosen by the caller; it is echoed back in events.
     PlayAlbum {
-        album: usize,
+        album: ItemId,
         tracks: Vec<TrackInfo>,
         /// The current volume: it replaces any `SetVolume` sent before.
         volume: f32,
@@ -51,8 +53,8 @@ pub enum PlayerCmd {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerEvent {
     /// The album with this id is playing.
-    Playing(usize),
-    Paused(usize),
+    Playing(ItemId),
+    Paused(ItemId),
     /// Nothing playing any more (album finished, stopped elsewhere, or failed).
     Stopped,
 }
@@ -273,7 +275,7 @@ mod tests {
 
     fn album() -> PlayerCmd {
         PlayerCmd::PlayAlbum {
-            album: 0,
+            album: ItemId(0),
             tracks: vec![],
             volume: 0.2,
         }
