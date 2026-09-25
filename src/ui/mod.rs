@@ -27,7 +27,7 @@ use crate::config::Config;
 use crate::deck::Deck;
 use crate::icons;
 use crate::library::{self, ItemId, Library};
-use crate::player::{PlayerCmd, PlayerEvent, TrackInfo};
+use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
 
 /// Volume bar resolution; keeps the number of distinct cached key images small.
 const VOLUME_LEVELS: f32 = 20.0;
@@ -145,10 +145,14 @@ impl Ui {
             }
             Action::Item(id) => {
                 info!(album = %self.library.item(id).name, "album pressed");
-                let tracks = self.tracks(id);
-                self.send(PlayerCmd::PlayAlbum {
-                    album: id,
-                    tracks,
+                let content = player::Content::Tracks {
+                    tracks: self.tracks(id),
+                    start: Start::default(),
+                    progress: false,
+                };
+                self.send(PlayerCmd::Play {
+                    item: id,
+                    content,
                     volume: self.volume,
                 });
                 self.current = Some(id);

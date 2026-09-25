@@ -4,7 +4,7 @@ use rust_cast::channels::media::{
 
 use super::*;
 
-const ALBUM: ItemId = ItemId(5);
+const ITEM: ItemId = ItemId(5);
 
 fn url(track: usize) -> String {
     format!(
@@ -50,21 +50,21 @@ fn entry(state: PlayerState, content_id: Option<&str>) -> StatusEntry {
 }
 
 fn poll(entry: Option<&StatusEntry>) -> Option<PlayerEvent> {
-    poll_event(entry, &tracks(), ALBUM)
+    poll_event(entry, &tracks(), ITEM)
 }
 
 #[test]
 fn our_track_playing_or_buffering_is_playing() {
     for state in [PlayerState::Playing, PlayerState::Buffering] {
         let e = entry(state, Some(&url(1)));
-        assert_eq!(poll(Some(&e)), Some(PlayerEvent::Playing(ALBUM)));
+        assert_eq!(poll(Some(&e)), Some(PlayerEvent::Playing(ITEM)));
     }
 }
 
 #[test]
 fn our_track_paused_is_paused() {
     let e = entry(PlayerState::Paused, Some(&url(0)));
-    assert_eq!(poll(Some(&e)), Some(PlayerEvent::Paused(ALBUM)));
+    assert_eq!(poll(Some(&e)), Some(PlayerEvent::Paused(ITEM)));
 }
 
 #[test]
@@ -124,4 +124,27 @@ fn skipping_someone_elses_media_does_nothing() {
     let e = entry(PlayerState::Playing, Some("http://example.com/radio.mp3"));
     assert_eq!(skip_target(&e, &tracks, true), None);
     assert_eq!(skip_target(&e, &tracks, false), None);
+}
+
+#[test]
+fn radio_and_spotify_are_refused_before_connecting() {
+    // Nothing listens on this port, so a connection attempt would fail with
+    // another error.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut player = CastPlayer::new("127.0.0.1".into(), port);
+    let (tx, _events) = std::sync::mpsc::channel();
+    let mut emitter = Emitter { tx, last: None };
+    for content in crate::player::tests::unsupported() {
+        let cmd = PlayerCmd::Play {
+            item: ITEM,
+            content,
+            volume: 0.2,
+        };
+        let err = player.handle(cmd, &mut emitter).unwrap_err();
+        assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
+    }
 }

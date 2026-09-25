@@ -13,7 +13,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use tracing::{debug, warn};
 
 use crate::library::ItemId;
@@ -30,12 +30,75 @@ pub struct TrackInfo {
     pub cover_url: Option<String>,
 }
 
+/// Where playback begins: a track, and a position inside it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Start {
+    pub track: usize,
+    pub position: Duration,
+}
+
+/// An internet radio station.
+#[derive(Clone, Debug)]
+#[expect(dead_code, reason = "no backend plays radio yet")]
+pub struct Station {
+    pub url: String,
+    /// The MIME type of the stream, when known.
+    pub content_type: Option<String>,
+    pub name: String,
+    pub cover_url: Option<String>,
+}
+
+/// A Spotify playlist, played through Spotify Connect.
+#[derive(Clone, Debug)]
+#[expect(dead_code, reason = "no backend plays Spotify yet")]
+pub struct Playlist {
+    /// `spotify:playlist:<id>`
+    pub uri: String,
+    pub name: String,
+}
+
+/// What [`PlayerCmd::Play`] plays.
+#[derive(Debug)]
+pub enum Content {
+    /// Files the speaker plays one after the other.
+    Tracks {
+        tracks: Vec<TrackInfo>,
+        #[expect(dead_code, reason = "every backend starts at the first track so far")]
+        start: Start,
+        /// Whether to report how far playback got, for items that resume.
+        #[expect(dead_code, reason = "no backend reports progress yet")]
+        progress: bool,
+    },
+    #[cfg_attr(not(test), expect(dead_code, reason = "radio items do not exist yet"))]
+    Stream(Station),
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Spotify items do not exist yet")
+    )]
+    Spotify(Playlist),
+}
+
+impl Content {
+    /// The tracks to play from the first; a stream or a playlist is an error.
+    fn into_tracks(self) -> Result<Vec<TrackInfo>> {
+        match self {
+            Content::Tracks { tracks, .. } => Ok(tracks),
+            Content::Stream(station) => {
+                bail!("internet radio ({}) is not supported yet", station.name)
+            }
+            Content::Spotify(playlist) => {
+                bail!("Spotify ({}) is not supported yet", playlist.name)
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum PlayerCmd {
-    /// `album` is an id chosen by the caller; it is echoed back in events.
-    PlayAlbum {
-        album: ItemId,
-        tracks: Vec<TrackInfo>,
+    /// `item` is an id chosen by the caller; it is echoed back in events.
+    Play {
+        item: ItemId,
+        content: Content,
         /// The current volume: it replaces any `SetVolume` sent before.
         volume: f32,
     },
@@ -52,7 +115,7 @@ pub enum PlayerCmd {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerEvent {
-    /// The album with this id is playing.
+    /// The item with this id is playing.
     Playing(ItemId),
     Paused(ItemId),
     /// Nothing playing any more (album finished, stopped elsewhere, or failed).
@@ -203,7 +266,7 @@ impl Emitter {
 fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
     let last_play = cmds
         .iter()
-        .rposition(|c| matches!(c, PlayerCmd::PlayAlbum { .. }));
+        .rposition(|c| matches!(c, PlayerCmd::Play { .. }));
     let last_volume = cmds
         .iter()
         .rposition(|c| matches!(c, PlayerCmd::SetVolume(_)));
@@ -274,16 +337,70 @@ mod tests {
     }
 
     fn album() -> PlayerCmd {
-        PlayerCmd::PlayAlbum {
-            album: ItemId(0),
-            tracks: vec![],
+        PlayerCmd::Play {
+            item: ItemId(0),
+            content: Content::Tracks {
+                tracks: vec![],
+                start: Start::default(),
+                progress: false,
+            },
             volume: 0.2,
+        }
+    }
+
+    /// One [`Content`] of each kind that no backend plays yet.
+    pub(super) fn unsupported() -> [Content; 2] {
+        [
+            Content::Stream(Station {
+                url: "https://radio.example/kids.mp3".into(),
+                content_type: Some("audio/mpeg".into()),
+                name: "Kids Radio".into(),
+                cover_url: None,
+            }),
+            Content::Spotify(Playlist {
+                uri: "spotify:playlist:37i9dQZF1DX0XUsuxWHRQd".into(),
+                name: "Bedtime".into(),
+            }),
+        ]
+    }
+
+    #[test]
+    fn only_tracks_can_be_played_so_far() {
+        let tracks = Content::Tracks {
+            tracks: vec![],
+            start: Start::default(),
+            progress: false,
+        };
+        assert!(tracks.into_tracks().is_ok());
+        for content in unsupported() {
+            let err = content.into_tracks().unwrap_err();
+            assert!(err.to_string().contains("not supported yet"), "{err:#}");
+        }
+    }
+
+    #[test]
+    fn unsupported_content_reports_stopped() {
+        // A local player opens the sound card only for tracks, so this runs
+        // without one.
+        let (tx, events) = mpsc::channel();
+        let player = spawn(Output::Local { device: None }, tx);
+        for content in unsupported() {
+            let cmd = PlayerCmd::Play {
+                item: ItemId(1),
+                content,
+                volume: 0.2,
+            };
+            player.send(cmd).unwrap();
+            assert_eq!(
+                events.recv_timeout(Duration::from_secs(5)),
+                Ok(PlayerEvent::Stopped)
+            );
         }
     }
 
     #[test]
     fn keeps_the_last_album_and_only_the_last_volume_after_it() {
-        use PlayerCmd::{Next, PlayAlbum, SetVolume, TogglePause};
+        use PlayerCmd::{Next, Play, SetVolume, TogglePause};
         let out = coalesce(vec![
             SetVolume(0.1),
             album(),
@@ -292,14 +409,11 @@ mod tests {
             album(),
             Next,
         ]);
-        assert!(
-            matches!(out.as_slice(), [PlayAlbum { .. }, Next]),
-            "{out:?}"
-        );
+        assert!(matches!(out.as_slice(), [Play { .. }, Next]), "{out:?}");
 
         let out = coalesce(vec![album(), SetVolume(0.3), SetVolume(0.4)]);
         assert!(
-            matches!(out.as_slice(), [PlayAlbum { .. }, SetVolume(v)] if (v - 0.4).abs() < f32::EPSILON),
+            matches!(out.as_slice(), [Play { .. }, SetVolume(v)] if (v - 0.4).abs() < f32::EPSILON),
             "{out:?}"
         );
 

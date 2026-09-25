@@ -57,8 +57,8 @@ impl TrackInfo {
 pub(super) struct CastPlayer {
     host: String,
     port: u16,
-    /// Id of the album we started last.
-    album: ItemId,
+    /// Id of the item we started last.
+    item: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     /// True while we believe our album is loaded on the speaker.
@@ -76,7 +76,7 @@ impl CastPlayer {
         CastPlayer {
             host,
             port,
-            album: ItemId(0),
+            item: ItemId(0),
             tracks: Vec::new(),
             active: false,
         }
@@ -86,12 +86,13 @@ impl CastPlayer {
 impl Speaker for CastPlayer {
     fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::PlayAlbum {
-                album,
-                tracks,
+            PlayerCmd::Play {
+                item,
+                content,
                 volume,
             } => {
-                self.album = album;
+                let tracks = content.into_tracks()?;
+                self.item = item;
                 self.tracks = tracks;
                 let s = self.open()?;
                 s.device.receiver.set_volume(super::clamp_volume(volume))?;
@@ -106,7 +107,7 @@ impl Speaker for CastPlayer {
                 let s = self.open()?;
                 match media_status(&s)? {
                     // Keep the track that is about to start, as HEOS does.
-                    Some((_, e)) if loading(&e) => events.emit(PlayerEvent::Playing(self.album)),
+                    Some((_, e)) if loading(&e) => events.emit(PlayerEvent::Playing(self.item)),
                     Some((tid, e))
                         if matches!(
                             e.player_state,
@@ -114,11 +115,11 @@ impl Speaker for CastPlayer {
                         ) =>
                     {
                         s.device.media.pause(tid, e.media_session_id)?;
-                        events.emit(PlayerEvent::Paused(self.album));
+                        events.emit(PlayerEvent::Paused(self.item));
                     }
                     Some((tid, e)) if matches!(e.player_state, PlayerState::Paused) => {
                         s.device.media.play(tid, e.media_session_id)?;
-                        events.emit(PlayerEvent::Playing(self.album));
+                        events.emit(PlayerEvent::Playing(self.item));
                     }
                     // Finished or nothing loaded: start our album again from the top.
                     _ if !self.tracks.is_empty() => self.load(s, 0, events)?,
@@ -142,7 +143,7 @@ impl Speaker for CastPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         let s = self.open()?;
         let entry = media_status(&s)?.map(|(_, e)| e);
-        let Some(event) = poll_event(entry.as_ref(), &self.tracks, self.album) else {
+        let Some(event) = poll_event(entry.as_ref(), &self.tracks, self.item) else {
             return Ok(());
         };
         if event == PlayerEvent::Stopped {
@@ -197,7 +198,7 @@ impl CastPlayer {
         )?;
         info!(album = %track.album, track = %track.title, "playing");
         self.active = true;
-        events.emit(PlayerEvent::Playing(self.album));
+        events.emit(PlayerEvent::Playing(self.item));
         Ok(())
     }
 
@@ -233,7 +234,7 @@ fn track_index(entry: &StatusEntry, tracks: &[TrackInfo]) -> Option<usize> {
 fn poll_event(
     entry: Option<&StatusEntry>,
     tracks: &[TrackInfo],
-    album: ItemId,
+    item: ItemId,
 ) -> Option<PlayerEvent> {
     let Some(entry) = entry else {
         return Some(PlayerEvent::Stopped);
@@ -243,8 +244,8 @@ fn poll_event(
     }
     let ours = track_index(entry, tracks).is_some();
     Some(match entry.player_state {
-        PlayerState::Playing | PlayerState::Buffering if ours => PlayerEvent::Playing(album),
-        PlayerState::Paused if ours => PlayerEvent::Paused(album),
+        PlayerState::Playing | PlayerState::Buffering if ours => PlayerEvent::Playing(item),
+        PlayerState::Paused if ours => PlayerEvent::Paused(item),
         _ => PlayerEvent::Stopped,
     })
 }

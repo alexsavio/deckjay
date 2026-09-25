@@ -33,8 +33,8 @@ pub(super) struct HeosPlayer {
     host: String,
     port: u16,
     conn: Option<Connection>,
-    /// Id of the album we started last.
-    album: ItemId,
+    /// Id of the item we started last.
+    item: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     /// `None` while no album is active.
@@ -69,7 +69,7 @@ impl HeosPlayer {
             host,
             port,
             conn: None,
-            album: ItemId(0),
+            item: ItemId(0),
             tracks: Vec::new(),
             current: None,
             load_timeout: LOAD_TIMEOUT,
@@ -81,12 +81,13 @@ impl HeosPlayer {
 impl Speaker for HeosPlayer {
     fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::PlayAlbum {
-                album,
-                tracks,
+            PlayerCmd::Play {
+                item,
+                content,
                 volume,
             } => {
-                self.album = album;
+                let tracks = content.into_tracks()?;
+                self.item = item;
                 self.tracks = tracks;
                 self.current = None;
                 self.set_volume(volume)?;
@@ -116,11 +117,11 @@ impl Speaker for HeosPlayer {
         match self.play_state()? {
             PlayState::Play => {
                 self.current = started;
-                events.emit(PlayerEvent::Playing(self.album));
+                events.emit(PlayerEvent::Playing(self.item));
             }
             PlayState::Pause => {
                 self.current = started;
-                events.emit(PlayerEvent::Paused(self.album));
+                events.emit(PlayerEvent::Paused(self.item));
             }
             PlayState::Stop => match current.phase {
                 Phase::Loading(since) if since.elapsed() < self.load_timeout => {}
@@ -157,11 +158,11 @@ impl HeosPlayer {
         match (self.current, state) {
             (Some(_), PlayState::Play) => {
                 self.set_play_state("pause")?;
-                events.emit(PlayerEvent::Paused(self.album));
+                events.emit(PlayerEvent::Paused(self.item));
             }
             (Some(_), PlayState::Pause) => {
                 self.set_play_state("play")?;
-                events.emit(PlayerEvent::Playing(self.album));
+                events.emit(PlayerEvent::Playing(self.item));
             }
             (
                 Some(Current {
@@ -170,7 +171,7 @@ impl HeosPlayer {
                 }),
                 PlayState::Stop,
             ) if since.elapsed() < self.load_timeout => {
-                events.emit(PlayerEvent::Playing(self.album));
+                events.emit(PlayerEvent::Playing(self.item));
             }
             _ if !self.tracks.is_empty() => self.play_track(0, events)?,
             _ => events.emit(PlayerEvent::Stopped),
@@ -202,7 +203,7 @@ impl HeosPlayer {
             track: index,
             phase: Phase::Loading(Instant::now()),
         });
-        events.emit(PlayerEvent::Playing(self.album));
+        events.emit(PlayerEvent::Playing(self.item));
         Ok(())
     }
 

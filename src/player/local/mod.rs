@@ -37,8 +37,8 @@ pub(super) struct LocalPlayer {
     open: Open,
     /// `None` until the first album, and after a failure.
     output: Option<OpenOutput>,
-    /// Id of the album we started last.
-    album: ItemId,
+    /// Id of the item we started last.
+    item: ItemId,
     /// Tracks of the album we started last.
     tracks: Vec<TrackInfo>,
     volume: f32,
@@ -57,7 +57,7 @@ impl LocalPlayer {
         LocalPlayer {
             open,
             output: None,
-            album: ItemId(0),
+            item: ItemId(0),
             tracks: Vec::new(),
             volume: 1.0,
             current: None,
@@ -69,12 +69,13 @@ impl LocalPlayer {
 impl Speaker for LocalPlayer {
     fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::PlayAlbum {
-                album,
-                tracks,
+            PlayerCmd::Play {
+                item,
+                content,
                 volume,
             } => {
-                self.album = album;
+                let tracks = content.into_tracks()?;
+                self.item = item;
                 self.tracks = tracks;
                 self.volume = super::clamp_volume(volume);
                 self.current = None;
@@ -164,9 +165,9 @@ impl LocalPlayer {
                 self.paused = !self.paused;
                 output.engine.set_paused(self.paused);
                 events.emit(if self.paused {
-                    PlayerEvent::Paused(self.album)
+                    PlayerEvent::Paused(self.item)
                 } else {
-                    PlayerEvent::Playing(self.album)
+                    PlayerEvent::Playing(self.item)
                 });
                 Ok(())
             }
@@ -194,7 +195,7 @@ impl LocalPlayer {
                     info!(album = %track.album, track = %track.title, "playing");
                     self.current = Some(index);
                     self.paused = false;
-                    events.emit(PlayerEvent::Playing(self.album));
+                    events.emit(PlayerEvent::Playing(self.item));
                     return Ok(());
                 }
                 Err(err) => warn!("skipping {}: {err:#}", track.path.display()),

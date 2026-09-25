@@ -12,11 +12,12 @@ use super::decode::Converter;
 use super::engine::{Engine, Format, Sink};
 use super::output::pick;
 use super::*;
+use crate::player::{Content, Start};
 
 /// The fake sound card's rate, also the rate of the test tracks, so their
 /// samples reach the card unchanged.
 const RATE: u32 = 8000;
-const ALBUM: ItemId = ItemId(4);
+const ITEM: ItemId = ItemId(4);
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -228,9 +229,13 @@ impl Rig {
     }
 
     fn play_album(&mut self, tracks: Vec<TrackInfo>, volume: f32) -> Result<()> {
-        self.send(PlayerCmd::PlayAlbum {
-            album: ALBUM,
-            tracks,
+        self.send(PlayerCmd::Play {
+            item: ITEM,
+            content: Content::Tracks {
+                tracks,
+                start: Start::default(),
+                progress: false,
+            },
             volume,
         })
     }
@@ -326,7 +331,7 @@ fn plays_the_album_track_by_track_then_stops() {
         rig.track("3.wav", 0.2, 3000),
     ];
     rig.play_album(tracks, 1.0).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Playing(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
     assert_eq!(rig.player.poll_interval(), Some(POLL_INTERVAL));
 
     let heard = rig.finish_track();
@@ -353,7 +358,7 @@ fn next_cuts_to_the_next_track_at_once_and_does_nothing_on_the_last() {
     rig.events();
 
     rig.send(PlayerCmd::Next).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Playing(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
     // The rest of track 1 waits in the buffer by now; none of it is heard.
     assert_eq!(levels(&rig.listen(0.3), 1.0), [2000]);
 
@@ -401,7 +406,7 @@ fn toggle_pause_pauses_resumes_and_restarts_a_finished_album() {
     rig.events();
 
     rig.send(PlayerCmd::TogglePause).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Paused(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Paused(ITEM)]);
     let at = rig.engine().position();
     for _ in 0..5 {
         assert!(levels(&rig.fill(), 1.0).is_empty());
@@ -410,12 +415,12 @@ fn toggle_pause_pauses_resumes_and_restarts_a_finished_album() {
     assert_eq!(rig.engine().position(), at, "a pause keeps the place");
 
     rig.send(PlayerCmd::TogglePause).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Playing(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
     assert_eq!(levels(&rig.finish_track(), 1.0), [1000]);
     assert_eq!(rig.events(), [PlayerEvent::Stopped]);
 
     rig.send(PlayerCmd::TogglePause).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Playing(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
     assert_eq!(rig.player.current, Some(0));
     assert_eq!(levels(&rig.listen(0.1), 1.0), [1000]);
 }
@@ -444,7 +449,7 @@ fn an_undecodable_track_is_skipped() {
         track_info(fixture("tone.opus")),
     ];
     rig.play_album(tracks, 1.0).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Playing(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
     assert_eq!(rig.player.current, Some(1));
     assert_eq!(levels(&rig.finish_track(), 1.0), [2000]);
     assert_eq!(rig.events(), [PlayerEvent::Stopped]);
@@ -465,7 +470,7 @@ fn without_a_sound_card_an_album_fails_until_there_is_one() {
     rig.no_sound_card.set(false);
     let tracks = vec![rig.track("1.wav", 0.2, 1000)];
     rig.play_album(tracks, 1.0).unwrap();
-    assert_eq!(rig.events(), [PlayerEvent::Playing(ALBUM)]);
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
     assert_eq!(rig.opened.get(), 2);
 }
 
@@ -501,4 +506,20 @@ fn a_broken_stream_fails_the_next_command_and_poll_and_an_album_reopens_it() {
     rig.play_album(tracks, 1.0).unwrap();
     assert_eq!(rig.opened.get(), 3);
     assert_eq!(levels(&rig.listen(0.1), 1.0), [1000]);
+}
+
+#[test]
+fn radio_and_spotify_do_not_open_the_sound_card() {
+    let mut rig = Rig::new();
+    for content in crate::player::tests::unsupported() {
+        let cmd = PlayerCmd::Play {
+            item: ITEM,
+            content,
+            volume: 1.0,
+        };
+        let err = rig.send(cmd).unwrap_err();
+        assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
+    }
+    assert_eq!(rig.opened.get(), 0);
+    assert_eq!(rig.events(), []);
 }

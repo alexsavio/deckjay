@@ -6,6 +6,7 @@ use std::thread;
 
 use super::cli::{PlayerInfo, Reply, command_line};
 use super::*;
+use crate::player::{Content, Start};
 
 const ONE_PLAYER: &str = r#"[{"name": "Kitchen", "pid": 7, "model": "HEOS 1", "version": "1.583.147", "network": "wifi", "ip": "10.0.0.9"}]"#;
 /// String pids; the second player's ip is the host the tests connect to.
@@ -168,12 +169,16 @@ fn tracks(n: usize) -> Vec<TrackInfo> {
         .collect()
 }
 
-const ALBUM: ItemId = ItemId(3);
+const ITEM: ItemId = ItemId(3);
 
 fn play_album(n: usize) -> PlayerCmd {
-    PlayerCmd::PlayAlbum {
-        album: ALBUM,
-        tracks: tracks(n),
+    PlayerCmd::Play {
+        item: ITEM,
+        content: Content::Tracks {
+            tracks: tracks(n),
+            start: Start::default(),
+            progress: false,
+        },
         volume: 0.2,
     }
 }
@@ -229,7 +234,7 @@ fn play_album_sets_the_volume_then_streams_the_first_track() {
             format!("browse/play_stream?pid=7&url={}", track_url(0)).as_str(),
         ]
     );
-    assert_eq!(rig.events(), [Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM)]);
     assert_eq!(rig.player.poll_interval(), Some(POLL_INTERVAL));
 }
 
@@ -240,7 +245,7 @@ fn a_track_that_ended_starts_the_next() {
     rig.poll_with("play");
     rig.poll_with("stop");
     assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
-    assert_eq!(rig.events(), [Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM)]);
     assert_eq!(rig.player.poll_interval(), Some(POLL_INTERVAL));
 }
 
@@ -250,7 +255,7 @@ fn a_stop_while_the_track_loads_waits_then_gives_up() {
     rig.send(play_album(3)).unwrap();
     rig.poll_with("stop");
     assert_eq!(rig.fake.streamed(), [track_url(0)]);
-    assert_eq!(rig.events(), [Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM)]);
 
     rig.player.load_timeout = Duration::ZERO;
     rig.poll_with("stop");
@@ -267,7 +272,7 @@ fn the_last_track_ending_stops_the_album() {
     rig.poll_with("play");
     rig.poll_with("stop");
     assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
-    assert_eq!(rig.events(), [Playing(ALBUM), Playing(ALBUM), Stopped]);
+    assert_eq!(rig.events(), [Playing(ITEM), Playing(ITEM), Stopped]);
     assert_eq!(rig.player.poll_interval(), None);
     // Otherwise the speaker keeps retrying the finished stream.
     assert_eq!(
@@ -287,7 +292,7 @@ fn unknown_counts_as_not_playing() {
     rig.poll_with("play");
     rig.poll_with("unknown");
     assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
-    assert_eq!(rig.events(), [Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM)]);
 }
 
 #[test]
@@ -306,10 +311,7 @@ fn toggle_pause_pauses_and_resumes() {
         rig.fake.last_command(),
         "player/set_play_state?pid=7&state=play"
     );
-    assert_eq!(
-        rig.events(),
-        [Playing(ALBUM), Paused(ALBUM), Playing(ALBUM)]
-    );
+    assert_eq!(rig.events(), [Playing(ITEM), Paused(ITEM), Playing(ITEM)]);
 }
 
 #[test]
@@ -323,7 +325,7 @@ fn toggle_pause_restarts_an_album_that_ended() {
     rig.poll_with("stop");
     rig.send(PlayerCmd::TogglePause).unwrap();
     assert_eq!(rig.fake.streamed(), [track_url(0), track_url(0)]);
-    assert_eq!(rig.events(), [Playing(ALBUM), Stopped, Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM), Stopped, Playing(ITEM)]);
 }
 
 #[test]
@@ -334,10 +336,7 @@ fn toggle_pause_while_a_track_loads_keeps_it() {
     rig.send(PlayerCmd::TogglePause).unwrap();
     assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
     assert_eq!(rig.fake.last_command(), "player/get_play_state?pid=7");
-    assert_eq!(
-        rig.events(),
-        [Playing(ALBUM), Playing(ALBUM), Playing(ALBUM)]
-    );
+    assert_eq!(rig.events(), [Playing(ITEM), Playing(ITEM), Playing(ITEM)]);
 }
 
 #[test]
@@ -371,7 +370,7 @@ fn an_empty_queue_does_not_stop_playback() {
     rig.fake.script().fail = Some("player/clear_queue");
     rig.send(play_album(3)).unwrap();
     assert_eq!(rig.fake.streamed(), [track_url(0)]);
-    assert_eq!(rig.events(), [Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM)]);
 }
 
 #[test]
@@ -471,10 +470,7 @@ fn a_poll_that_sees_pause_reports_it_and_counts_the_track_as_started() {
     rig.poll_with("pause");
     rig.poll_with("stop");
     assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
-    assert_eq!(
-        rig.events(),
-        [Playing(ALBUM), Paused(ALBUM), Playing(ALBUM)]
-    );
+    assert_eq!(rig.events(), [Playing(ITEM), Paused(ITEM), Playing(ITEM)]);
 }
 
 #[test]
@@ -485,12 +481,28 @@ fn a_failed_play_stream_from_a_poll_ends_the_album() {
     rig.fake.script().fail = Some("browse/play_stream");
     rig.fake.script().state = "stop";
     assert!(rig.player.poll(&mut rig.emitter).is_err());
-    assert_eq!(rig.events(), [Playing(ALBUM), Stopped]);
+    assert_eq!(rig.events(), [Playing(ITEM), Stopped]);
     assert_eq!(rig.player.poll_interval(), None);
     assert_eq!(
         rig.fake.last_command(),
         "player/set_play_state?pid=7&state=stop"
     );
+}
+
+#[test]
+fn radio_and_spotify_are_refused_before_anything_is_sent() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    for content in crate::player::tests::unsupported() {
+        let cmd = PlayerCmd::Play {
+            item: ITEM,
+            content,
+            volume: 0.2,
+        };
+        let err = rig.send(cmd).unwrap_err();
+        assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
+    }
+    assert_eq!(rig.fake.commands(), Vec::<String>::new());
+    assert_eq!(rig.events(), []);
 }
 
 #[test]
@@ -518,7 +530,7 @@ fn events_and_under_process_notes_before_a_reply_are_skipped() {
     // The event line says "pause"; only the real reply counts.
     rig.poll_with("play");
     assert_eq!(rig.fake.streamed(), [track_url(0)]);
-    assert_eq!(rig.events(), [Playing(ALBUM)]);
+    assert_eq!(rig.events(), [Playing(ITEM)]);
 }
 
 #[test]
