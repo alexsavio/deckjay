@@ -76,10 +76,6 @@ pub enum Content {
         progress: bool,
     },
     Stream(Station),
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Spotify items do not exist yet")
-    )]
     Spotify(Playlist),
 }
 

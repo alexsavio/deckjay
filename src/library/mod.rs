@@ -24,7 +24,6 @@ pub struct Track {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[expect(dead_code, reason = "Spotify sources come later")]
 pub enum Kind {
     Music,
     Audiobook,
@@ -51,6 +50,8 @@ pub enum Media {
     Tracks(Vec<Track>),
     /// An internet radio station: a stream, or a playlist that names one.
     Stream { url: String },
+    /// A Spotify playlist: `spotify:playlist:<id>`.
+    Spotify { uri: String },
 }
 
 /// One thing a key plays, e.g. an album folder or a story file.
@@ -79,7 +80,7 @@ impl Item {
     pub fn tracks(&self) -> &[Track] {
         match &self.media {
             Media::Tracks(tracks) => tracks,
-            Media::Stream { .. } => &[],
+            Media::Stream { .. } | Media::Spotify { .. } => &[],
         }
     }
 }
@@ -117,6 +118,7 @@ impl From<SourceKind> for Kind {
             SourceKind::Story => Kind::Story,
             SourceKind::Podcast => Kind::Podcast,
             SourceKind::Radio => Kind::Radio,
+            SourceKind::Spotify => Kind::Spotify,
         }
     }
 }
@@ -135,6 +137,8 @@ impl Library {
                 podcast::items(source, &crate::podcasts::load_cached(&settings))
             } else if source.kind == SourceKind::Radio {
                 stations(source)
+            } else if source.kind == SourceKind::Spotify {
+                playlists(source)
             } else {
                 scan::scan(source).unwrap_or_else(|err| {
                     tracing::warn!("{err:#}");
@@ -259,6 +263,26 @@ fn stations(source: &Source) -> Vec<Item> {
             cover_rel: None,
             picture: station.picture.clone(),
             color: station.color,
+        })
+        .collect()
+}
+
+/// One item per playlist of a Spotify source.
+fn playlists(source: &Source) -> Vec<Item> {
+    source
+        .playlists
+        .iter()
+        .map(|playlist| Item {
+            kind: Kind::Spotify,
+            key: ItemKey(format!("{}/{}", source.name, playlist.name)),
+            name: playlist.name.clone(),
+            media: Media::Spotify {
+                uri: playlist.uri.clone(),
+            },
+            cover: None,
+            cover_rel: None,
+            picture: playlist.picture.clone(),
+            color: playlist.color,
         })
         .collect()
 }
@@ -409,5 +433,26 @@ mod tests {
         );
         assert!(item.tracks().is_empty());
         assert!(library.served_files().is_empty());
+    }
+
+    #[test]
+    fn every_playlist_of_a_spotify_source_is_an_item() {
+        use crate::config::Playlist;
+        let mut spotify = Source::plain("spotify", SourceKind::Spotify, Path::new(""));
+        spotify.playlists = vec![Playlist {
+            name: "Bedtime".into(),
+            uri: "spotify:playlist:abc".into(),
+            picture: None,
+            color: None,
+        }];
+
+        let library = Library::scan(&[spotify]);
+
+        let item = library.item(ItemId(0));
+        assert_eq!(
+            (item.kind, item.key.0.as_str()),
+            (Kind::Spotify, "spotify/Bedtime")
+        );
+        assert!(matches!(&item.media, Media::Spotify { uri } if uri == "spotify:playlist:abc"));
     }
 }

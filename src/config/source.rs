@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
+use super::playlist::{Playlist, RawSpotify};
 use super::podcast::{Podcast, RawPodcast};
 use super::radio::{RawRadio, Station};
 
@@ -29,6 +30,8 @@ pub struct Source {
     pub podcast: Option<Podcast>,
     /// For `type = "radio"`.
     pub stations: Vec<Station>,
+    /// For `type = "spotify"`.
+    pub playlists: Vec<Playlist>,
 }
 
 /// A picture or a colour for a key; pictures are resolved like `path`.
@@ -69,6 +72,12 @@ impl TryFrom<String> for Color {
 }
 
 impl Source {
+    /// Whether the web server serves files from `path`: not for radio and
+    /// Spotify, which have no folder.
+    pub fn serves_files(&self) -> bool {
+        !matches!(self.kind, SourceKind::Radio | SourceKind::Spotify)
+    }
+
     /// A source with no pictures or colours.
     #[cfg(test)]
     pub fn plain(name: &str, kind: SourceKind, path: &Path) -> Source {
@@ -80,6 +89,7 @@ impl Source {
             items: BTreeMap::new(),
             podcast: None,
             stations: Vec::new(),
+            playlists: Vec::new(),
         }
     }
 }
@@ -92,6 +102,7 @@ pub enum SourceKind {
     Story,
     Podcast,
     Radio,
+    Spotify,
 }
 
 impl SourceKind {
@@ -102,6 +113,7 @@ impl SourceKind {
             SourceKind::Story => "story",
             SourceKind::Podcast => "podcast",
             SourceKind::Radio => "radio",
+            SourceKind::Spotify => "spotify",
         }
     }
 }
@@ -115,6 +127,7 @@ pub(super) enum RawSource {
     Story(Folder),
     Podcast(RawPodcast),
     Radio(RawRadio),
+    Spotify(RawSpotify),
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,6 +182,24 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                         path: PathBuf::new(),
                         items: BTreeMap::new(),
                         podcast: None,
+                        playlists: Vec::new(),
+                    });
+                }
+                RawSource::Spotify(s) => {
+                    let name = s
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| SourceKind::Spotify.name().into());
+                    check_unique(&name, &mut names)?;
+                    return Ok(Source {
+                        playlists: s.playlists(&name, base)?,
+                        look: s.look().resolve(base),
+                        name,
+                        kind: SourceKind::Spotify,
+                        path: PathBuf::new(),
+                        items: BTreeMap::new(),
+                        podcast: None,
+                        stations: Vec::new(),
                     });
                 }
             };
@@ -190,6 +221,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                     .collect(),
                 podcast: None,
                 stations: Vec::new(),
+                playlists: Vec::new(),
             })
         })
         .collect()
@@ -218,6 +250,7 @@ fn podcast_source(
         path,
         items: BTreeMap::new(),
         stations: Vec::new(),
+        playlists: Vec::new(),
     })
 }
 
@@ -281,6 +314,7 @@ mod tests {
                     items: BTreeMap::new(),
                     podcast: None,
                     stations: Vec::new(),
+                    playlists: Vec::new(),
                 },
                 Source {
                     name: "books".into(),
@@ -290,6 +324,7 @@ mod tests {
                     items: BTreeMap::new(),
                     podcast: None,
                     stations: Vec::new(),
+                    playlists: Vec::new(),
                 },
                 Source {
                     name: "story".into(),
@@ -299,6 +334,7 @@ mod tests {
                     items: BTreeMap::new(),
                     podcast: None,
                     stations: Vec::new(),
+                    playlists: Vec::new(),
                 },
             ]
         );

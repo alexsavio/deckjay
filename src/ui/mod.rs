@@ -290,6 +290,13 @@ impl Ui {
     /// resumes, or its stream.
     fn content(&self, id: ItemId) -> player::Content {
         let item = self.library.item(id);
+        if let Media::Spotify { uri } = &item.media {
+            info!(item = %item.name, "playlist pressed");
+            return player::Content::Spotify(player::Playlist {
+                uri: uri.clone(),
+                name: item.name.clone(),
+            });
+        }
         if let Media::Stream { url } = &item.media {
             info!(item = %item.name, "station pressed");
             return player::Content::Stream(player::Station {

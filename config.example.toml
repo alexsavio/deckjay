@@ -58,7 +58,7 @@ brightness = 60
 # part of that source. Each source is one shelf on the deck.
 #
 # type  "music", "audiobook", "story" (stories and sound effects),
-#       "radio" or "podcast" (see the end of this file).
+#       "radio", "podcast" or "spotify" (see the end of this file).
 # name  Optional; the default is the type. Letters, digits, - and _ only.
 #       Two sources of one type need different names.
 # path  The folder, relative to this file or absolute (any drive). Every
@@ -106,6 +106,15 @@ path = "music"
 # name = "Kinderradio"
 # url = "https://example.org/kinder.mp3"
 # picture = "pictures/kinder.png"
+
+# A spotify source is a shelf of Spotify playlists, one key each; it needs
+# the [spotify] table above, with device. The uri is spotify:playlist:... or
+# a share link (https://open.spotify.com/playlist/...).
+# [[source]]
+# type = "spotify"
+# [[source.playlist]]
+# name = "Bedtime"
+# uri = "https://open.spotify.com/playlist/37i9dQZF1DX0XUsuxWHRQd"
 
 # A podcast source downloads the newest episodes of its feeds and shows them
 # on one shelf; episodes play on from where they stopped, and a red dot

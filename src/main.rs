@@ -234,7 +234,7 @@ fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
     let roots = cfg
         .sources
         .iter()
-        .filter(|s| s.kind != config::SourceKind::Radio)
+        .filter(|s| s.serves_files())
         .map(|s| (s.name.clone(), s.path.clone()))
         .collect();
     server::spawn(roots, cfg.http_port, served)

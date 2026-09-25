@@ -1,5 +1,6 @@
 //! See `config.example.toml` for every key.
 
+mod playlist;
 mod podcast;
 mod radio;
 mod source;
@@ -9,6 +10,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+#[cfg(test)]
+pub use self::playlist::Playlist;
 pub use self::podcast::Order as FeedOrder;
 #[cfg(test)]
 pub use self::podcast::{Feed as PodcastFeed, Podcast};
@@ -150,6 +153,13 @@ impl Config {
         }
         cfg.state_dir = base.join(&cfg.state_dir);
         cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base, &cfg.state_dir)?;
+        let plays_spotify = cfg.sources.iter().any(|s| s.kind == SourceKind::Spotify);
+        if plays_spotify && cfg.spotify.as_ref().is_none_or(|s| s.device.is_none()) {
+            bail!(
+                "a spotify source needs a [spotify] table with client_id and device, \
+                 the Connect device that plays"
+            );
+        }
         if let Some(spotify) = &cfg.spotify {
             let id = &spotify.client_id;
             if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -404,6 +414,22 @@ mod tests {
         ] {
             assert!(parse(&format!("[spotify]\n{table}\n")).is_err(), "{table}");
         }
+    }
+
+    #[test]
+    fn a_spotify_source_needs_a_spotify_device() {
+        let source = "[[source]]\ntype = \"spotify\"\n\
+                      [[source.playlist]]\nname = \"A\"\nuri = \"spotify:playlist:abc\"\n";
+        for spotify in ["", "[spotify]\nclient_id = \"abc\"\n"] {
+            let err = parse(&format!("{spotify}{source}")).unwrap_err();
+            assert!(err.to_string().contains("device"), "{spotify}: {err:#}");
+        }
+        let cfg = parse(&format!(
+            "[spotify]\nclient_id = \"abc\"\ndevice = \"Den\"\n{source}"
+        ))
+        .unwrap();
+        assert_eq!(cfg.sources[0].kind, SourceKind::Spotify);
+        assert!(!cfg.sources[0].serves_files());
     }
 
     #[test]
