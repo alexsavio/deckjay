@@ -101,6 +101,22 @@ impl Deck {
         Ok(())
     }
 
+    /// Forgets the cached images of every face that fails `keep`, e.g. of
+    /// items no longer in the library. Keys that show such a face are sent
+    /// again on their next [`Deck::show`].
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the library does not change at runtime yet")
+    )]
+    pub fn retain(&mut self, keep: impl Fn(&Face) -> bool) {
+        self.encoded.retain(|face, _| keep(face));
+        for shown in &mut self.shown {
+            if shown.as_ref().is_some_and(|face| !keep(face)) {
+                *shown = None;
+            }
+        }
+    }
+
     /// Sends all queued images to the device.
     pub fn flush(&self) -> Result<()> {
         self.backend.flush()
@@ -120,6 +136,7 @@ mod tests {
     use anyhow::bail;
 
     use super::*;
+    use crate::library::ItemId;
 
     #[derive(Default)]
     struct Log {
@@ -210,5 +227,28 @@ mod tests {
         log.borrow_mut().unplugged = false;
         deck.show(5, &Face::Play, tile).unwrap();
         assert_eq!(log.borrow().writes, [5]);
+    }
+
+    #[test]
+    fn retain_forgets_dropped_faces_and_sends_their_keys_again() {
+        let (mut deck, log) = fake_deck();
+        let gone = Face::Item {
+            id: ItemId(7),
+            current: false,
+        };
+        deck.show(0, &gone, tile).unwrap();
+        deck.show(1, &Face::Play, tile).unwrap();
+
+        deck.retain(|face| *face != gone);
+
+        deck.show(1, &Face::Play, || panic!("Play was dropped"))
+            .unwrap();
+        deck.show(0, &gone, tile).unwrap();
+        assert_eq!(
+            log.borrow().encodes,
+            3,
+            "only the dropped face is encoded again"
+        );
+        assert_eq!(log.borrow().writes, [0, 1, 0]);
     }
 }
