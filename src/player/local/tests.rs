@@ -523,3 +523,4 @@ fn spotify_does_not_open_the_sound_card() {
 }
 
 mod resume;
+mod stream;

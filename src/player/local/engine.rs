@@ -21,6 +21,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use tracing::warn;
 
 use super::decode::{Converter, Source};
+use super::netread::Cancel;
 
 /// Samples in one [`Chunk`], for all channels together.
 const CHUNK_SAMPLES: usize = 1024;
@@ -98,6 +99,9 @@ pub(super) struct Engine {
     generation: u32,
     /// Where the current track's audio begins: zero, or where a seek landed.
     offset: Duration,
+    /// The current radio stream's: a decoder thread waiting for the network
+    /// would not see the next job.
+    cancel: Option<Cancel>,
 }
 
 /// The sound card's end: see [`Sink::fill`].
@@ -154,6 +158,7 @@ impl Engine {
             rate: format.rate,
             generation: 0,
             offset: Duration::ZERO,
+            cancel: None,
         };
         let sink = Sink {
             ring: consumer,
@@ -170,6 +175,7 @@ impl Engine {
     pub(super) fn play(&mut self, source: Source) -> Result<()> {
         self.next_generation();
         self.offset = source.start();
+        self.cancel = source.cancel_handle();
         self.shared.paused.store(false, Ordering::Release);
         self.jobs
             .send(Job::Play(self.generation, source))
@@ -191,6 +197,13 @@ impl Engine {
         self.shared
             .generation
             .store(self.generation, Ordering::Release);
+        self.end_stream();
+    }
+
+    fn end_stream(&mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            cancel.cancel();
+        }
     }
 
     pub(super) fn set_paused(&self, paused: bool) {
@@ -241,6 +254,12 @@ impl Engine {
 
     pub(super) fn failures(&self) -> Failures {
         Failures(Arc::clone(&self.shared))
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.end_stream();
     }
 }
 

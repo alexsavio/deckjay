@@ -1,5 +1,5 @@
-//! Reads a music file into plain samples ([`Source`]) and fits them to the
-//! sound output ([`Converter`]).
+//! Reads a music file or a radio stream into plain samples ([`Source`]) and
+//! fits them to the sound output ([`Converter`]).
 
 use std::fs::File;
 use std::io::ErrorKind;
@@ -12,10 +12,14 @@ use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track, TrackType};
-use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
+use symphonia::core::io::{
+    MediaSource, MediaSourceStream, MediaSourceStreamOptions, ReadOnlySource,
+};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::{Time, TimeBase};
 use tracing::{debug, warn};
+
+use super::netread::{Cancel, NetRead};
 
 /// One audio file, open and ready to decode.
 pub(super) struct Source {
@@ -26,6 +30,8 @@ pub(super) struct Source {
     duration: Option<Duration>,
     /// Where decoding begins: zero, or where a seek landed.
     start: Duration,
+    /// Set for a radio station: ends a read that waits for the network.
+    cancel: Option<Cancel>,
 }
 
 impl Source {
@@ -37,10 +43,26 @@ impl Source {
         if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
             hint.with_extension(extension);
         }
-        let stream = MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
+        Source::probe(Box::new(file), &hint)
+    }
+
+    /// A radio station's stream: it cannot seek and has no length.
+    pub(super) fn open_stream(stream: NetRead, content_type: Option<&str>) -> Result<Source> {
+        let cancel = stream.cancel_handle();
+        let mut hint = Hint::new();
+        if let Some(content_type) = content_type {
+            hint.mime_type(content_type);
+        }
+        let mut source = Source::probe(Box::new(ReadOnlySource::new(stream)), &hint)?;
+        source.cancel = Some(cancel);
+        Ok(source)
+    }
+
+    fn probe(media: Box<dyn MediaSource>, hint: &Hint) -> Result<Source> {
+        let stream = MediaSourceStream::new(media, MediaSourceStreamOptions::default());
         let reader = symphonia::default::get_probe()
             .probe(
-                &hint,
+                hint,
                 stream,
                 FormatOptions::default(),
                 MetadataOptions::default(),
@@ -67,7 +89,12 @@ impl Source {
             time_base,
             duration,
             start: Duration::ZERO,
+            cancel: None,
         })
+    }
+
+    pub(super) fn cancel_handle(&self) -> Option<Cancel> {
+        self.cancel.clone()
     }
 
     /// The track's length, when the file tells it.

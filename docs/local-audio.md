@@ -10,23 +10,28 @@ speaker, no `speaker_host` and no music web server. The code:
 - [`src/player/local/engine.rs`](../src/player/local/engine.rs): the
   decoder thread, the ring buffer and `Sink::fill`, which the sound card
   calls. No sound card needed, so the tests drive it.
-- [`src/player/local/decode.rs`](../src/player/local/decode.rs): file
-  decoding (symphonia) and the rate and channel conversion.
+- [`src/player/local/decode.rs`](../src/player/local/decode.rs): file and
+  stream decoding (symphonia) and the rate and channel conversion.
+- [`src/player/local/netread.rs`](../src/player/local/netread.rs): a radio
+  station's stream as a `Read` for symphonia.
 - [`src/player/local/output.rs`](../src/player/local/output.rs): the sound
   card (cpal): picking the output, opening the stream, `--check`'s list.
 - [`src/player/local/tests.rs`](../src/player/local/tests.rs): decoding of
   WAV, MP3 and AAC files, the converter, and the player with a fake sound
   card; [`tests/resume.rs`](../src/player/local/tests/resume.rs): the start
   track, seeking in every format (the `fixtures/steps.*` files), the
-  reported place and the end of a book.
+  reported place and the end of a book;
+  [`tests/stream.rs`](../src/player/local/tests/stream.rs): `netread`
+  against local web servers, and stations on the fake sound card.
 - [`src/player/progress.rs`](../src/player/progress.rs): when an item
   reports its place, shared with Cast and HEOS.
 
 Tested on a Mac, with a USB DAC as the default output and the web simulator
 as the deck: MP3 and AAC tracks, the end of a track and of the album, Next,
 Prev, pause, volume and a wrong `audio_device`. Not tested on a Raspberry Pi
-yet. Progress reports and resuming inside a track are tested with the fake
-sound card only.
+yet. Progress reports, resuming inside a track and radio stations are
+tested with the fake sound card only; two real MP3 stations were decoded
+through `netread` by an ignored test (`decodes_real_stations`).
 
 ## Configuration
 
@@ -113,6 +118,48 @@ the end.
 - **Play/pause after the album ended:** starts the album again from the
   first track (an item that reports progress and did not finish: from the
   track it got to).
+
+## Radio
+
+A station (`Content::Stream`) plays like a track that never ends. How the
+station's URL becomes the stream URL is in [radio.md](radio.md).
+
+1. **Play:** on the player thread, resolve the station, refuse what
+   symphonia cannot decode, connect to the stream (`NetRead::open`: a reply
+   that is not 2xx fails at once) and probe it (`Source::open_stream`, with
+   the content type as the hint). Only then does the sound card open, so a
+   station that fails any of these leaves it closed. Emits `Playing`; no
+   `Progress`, no `Finished`.
+2. **Reading:** a `radio` thread reads the HTTP body in 16 KiB chunks into
+   a bounded channel of 16 chunks (256 KiB, 16 s at 128 kbit/s); the
+   decoder thread reads from it. When the body ends or breaks, or nothing
+   comes for 10 s, `netread` connects again, at most 3 times in a row
+   (`Limits`); a connection that delivered for 30 s resets the count. MP3
+   decoding goes on across a new connection (tested); ADTS should too.
+   When the reconnects are used up, the stream ends like a track, and the
+   next poll ends the station with `Stopped`.
+3. **Pause:** the engine stops the stream (silence; the connection
+   closes), the sound card stays open. **Play/pause** again connects anew,
+   so the station goes on live. **Next / previous** do nothing.
+4. **Leaving the station** (another item, a pause, a failure): the engine
+   cancels the stream's reads. Without that, a decoder thread waiting for
+   a silent station would not see the next item for up to 40 s (10 s idle,
+   3 reconnects).
+
+ureq has no timeout between two reads of a body. On a connection that stays
+open but sends nothing, the `radio` thread stays blocked in its read until
+the server or the network drops the connection; `netread` goes on with a
+new thread and connection after 10 s, and the old thread exits at its next
+read. The 10 s also cover the new connection itself, so a server that takes
+longer than that to answer uses up the reconnects; stations answer in well
+under a second.
+
+Formats: MP3 streams (tested, also against two real stations); AAC-LC in
+ADTS, Ogg Vorbis and FLAC streams should work but are not tried.
+HLS and `audio/aacp` (HE-AAC) are refused at once, before the sound card
+opens: "this station sends HE-AAC / HLS, which local playback cannot
+decode; pick its MP3 stream". An HE-AAC stream sent as `audio/aac` fails or
+sounds wrong only while decoding.
 
 ## The output
 

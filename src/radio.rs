@@ -1,10 +1,6 @@
 //! Internet radio: turns a station's URL into the stream a speaker can play.
 //! Station lists often give a `.pls` or `.m3u` playlist that names the
 //! stream; speakers want the stream itself and its content type.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used once the speakers play radio")
-)]
 
 use anyhow::{Context, Result, bail};
 use ureq::Agent;
