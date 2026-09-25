@@ -57,7 +57,8 @@ brightness = 60
 # at the end of the file: TOML reads every key after a [[source]] line as
 # part of that source. Each source is one shelf on the deck.
 #
-# type  "music", "audiobook" or "story" (stories and sound effects).
+# type  "music", "audiobook", "story" (stories and sound effects) or
+#       "podcast" (see the end of this file).
 # name  Optional; the default is the type. Letters, digits, - and _ only.
 #       Two sources of one type need different names.
 # path  The folder, relative to this file or absolute (any drive). Every
@@ -96,3 +97,23 @@ path = "music"
 # [[source]]
 # type = "story"
 # path = "/mnt/nas/kids/sounds"
+
+# A podcast source downloads the newest episodes of its feeds and shows them
+# on one shelf; episodes play on from where they stopped, and a red dot
+# marks the ones not heard yet. Use one source per podcast for one shelf
+# each. Every key is optional except the feeds:
+#   cache_dir       writable folder for the episodes (default:
+#                   <state_dir>/podcasts/<name>)
+#   keep            newest episodes kept per feed (default 5, at most 50)
+#   refresh_hours   how often the feeds are read (default 6)
+#   max_cache_mb    room for all episodes of the source (default 4000)
+#   max_episode_mb  bigger episodes are skipped (default 500)
+#   order           per feed: "newest" first (default) or "oldest", for
+#                   stories told in parts
+# [[source]]
+# type = "podcast"
+# name = "maus"
+# keep = 3
+# [[source.feed]]
+# name = "Die Maus"
+# url = "https://example.org/maus.xml"

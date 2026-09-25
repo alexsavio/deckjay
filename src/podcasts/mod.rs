@@ -6,10 +6,6 @@
 //! of the plan are deleted [`Timing::sweep_grace`] later, never while their
 //! episode plays ([`NowPlaying`]), and only then [`Publisher::remove`]d.
 //! [`load_cached`] reads the manifests alone, for a start without network.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired in with the podcast milestone")
-)]
 
 mod cache;
 mod download;
@@ -150,6 +146,14 @@ pub trait Publisher: Send {
 /// until another one plays.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NowPlaying(pub Option<String>);
+
+/// Fetches and reads the feed at `url`: its title and how many playable
+/// episodes it lists.
+pub fn check_feed(url: &str) -> Result<(String, usize)> {
+    let agent = crate::net::api_agent(download::FEED_TIMEOUT);
+    let feed = feed::parse(&download::fetch_feed(&agent, url)?)?;
+    Ok((feed.title, feed.episodes.len()))
+}
 
 /// What the cache holds, from the manifests alone: no network.
 pub fn load_cached(settings: &Settings) -> Snapshot {

@@ -1,5 +1,6 @@
 //! See `config.example.toml` for every key.
 
+mod podcast;
 mod source;
 
 use std::path::{Path, PathBuf};
@@ -7,6 +8,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+pub use self::podcast::Order as FeedOrder;
+#[cfg(test)]
+pub use self::podcast::{Feed as PodcastFeed, Podcast};
 #[cfg(test)]
 pub use self::source::Look;
 use self::source::RawSource;
@@ -141,7 +145,8 @@ impl Config {
                  [[source]]\ntype = \"music\"\npath = \"music\""
             );
         }
-        cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base)?;
+        cfg.state_dir = base.join(&cfg.state_dir);
+        cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base, &cfg.state_dir)?;
         if let Some(spotify) = &cfg.spotify {
             let id = &spotify.client_id;
             if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -155,7 +160,6 @@ impl Config {
                 bail!("spotify.device is empty; leave it out or name the speaker");
             }
         }
-        cfg.state_dir = base.join(&cfg.state_dir);
 
         if cfg.speaker_type != SpeakerType::Local && cfg.speaker_host.trim().is_empty() {
             bail!("speaker_host is empty; it is needed for speaker_type cast and heos");

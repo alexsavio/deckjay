@@ -17,6 +17,10 @@
 //! ```
 
 mod layout;
+mod podcasts;
+mod tiles;
+
+pub use self::podcasts::PodcastThread;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -28,10 +32,10 @@ use image::{Rgb, RgbImage};
 use tracing::{info, warn};
 
 use self::layout::{Action, Control, Layout};
-use crate::config::{Color, Config};
+use crate::config::Config;
 use crate::deck::Deck;
 use crate::icons::{self, Decor};
-use crate::library::{self, Item, ItemId, Kind, Library};
+use crate::library::{self, ItemId, Kind, Library};
 use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
 use crate::state::Store;
 
@@ -43,10 +47,12 @@ const VOLUME_LEVELS: f32 = 20.0;
 pub enum Face {
     Blank,
     /// `progress`: how much of an item that resumes is done, in tenths.
+    /// `new`: a podcast episode that never played.
     Item {
         id: ItemId,
         current: bool,
         progress: Option<u8>,
+        new: bool,
     },
     More {
         page: usize,
@@ -98,6 +104,11 @@ pub struct Ui {
 
     tiles: HashMap<ItemId, RgbImage>,
     tile_size: u32,
+    /// Whether the tiles carry kind badges.
+    badges: bool,
+
+    /// One per podcast source.
+    podcasts: Vec<podcasts::PodcastThread>,
 }
 
 impl Ui {
@@ -110,12 +121,7 @@ impl Ui {
         store: Store,
     ) -> Ui {
         let shelves = library.shelves();
-        let deck_shelves: Vec<usize> = shelves
-            .iter()
-            .enumerate()
-            .filter(|(_, shelf)| !shelf.items.is_empty())
-            .map(|(i, _)| i)
-            .collect();
+        let deck_shelves = non_empty(&library);
         let mut pages: Vec<usize> = deck_shelves
             .iter()
             .map(|&i| store.page(&shelves[i].name))
@@ -143,6 +149,8 @@ impl Ui {
             playing: false,
             tiles: HashMap::new(),
             tile_size: 0,
+            badges: false,
+            podcasts: Vec::new(),
         }
     }
 
@@ -150,14 +158,31 @@ impl Ui {
     pub fn run(&mut self, deck: &mut Deck, brightness: u8) -> Result<()> {
         deck.set_brightness(brightness)?;
         let (rows, cols) = deck.layout();
-        let layout = self.layout(rows, cols);
+        let mut layout = self.layout(rows, cols);
         self.fit(&layout);
         self.prepare_tiles(deck.key_size());
         self.draw(deck, &layout)?;
 
         loop {
             let keys = deck.pressed_keys(Duration::from_millis(100))?;
-            if self.update(&layout, &keys) {
+            let mut changed = self.update(&layout, &keys);
+            if self.take_snapshots() {
+                layout = self.layout(rows, cols);
+                self.fit(&layout);
+                let remade = self.prepare_tiles(deck.key_size());
+                let shown: HashSet<ItemId> = self
+                    .deck_shelves
+                    .iter()
+                    .flat_map(|&shelf| self.library.shelves()[shelf].items.iter().copied())
+                    .collect();
+                // The deck caches images by face, and a remade tile keeps its face.
+                deck.retain(|face| match face {
+                    Face::Item { id, .. } => !remade && shown.contains(id),
+                    _ => true,
+                });
+                changed = true;
+            }
+            if changed {
                 self.draw(deck, &layout)?;
             }
         }
@@ -172,6 +197,7 @@ impl Ui {
             self.press(layout, key);
             changed = true;
         }
+        self.pin_playing();
         changed
     }
 
@@ -293,6 +319,35 @@ impl Ui {
         Some((progress.done(item.tracks().len()) * 10.0).round() as u8)
     }
 
+    fn is_new(&self, id: ItemId) -> bool {
+        let item = self.library.item(id);
+        item.kind == Kind::Podcast && self.store.progress(&item.key.0).is_none()
+    }
+
+    /// Recomputes the shelves on the deck after the library changed; the
+    /// shelf on the deck and the pages stay where they were.
+    fn reshelve(&mut self) {
+        let current = self.deck_shelves.get(self.shelf).copied();
+        let pages: HashMap<usize, usize> = self
+            .deck_shelves
+            .iter()
+            .copied()
+            .zip(self.pages.iter().copied())
+            .collect();
+        self.deck_shelves = non_empty(&self.library);
+        self.pages = self
+            .deck_shelves
+            .iter()
+            .map(|shelf| pages.get(shelf).copied().unwrap_or(0))
+            .collect();
+        if self.pages.is_empty() {
+            self.pages.push(0);
+        }
+        self.shelf = current
+            .and_then(|current| self.deck_shelves.iter().position(|&s| s == current))
+            .unwrap_or(0);
+    }
+
     /// Saves the shelf on the deck and its page.
     fn remember_place(&mut self) {
         if let Some(&shelf) = self.deck_shelves.get(self.shelf) {
@@ -337,6 +392,7 @@ impl Ui {
                     id,
                     current: self.current == Some(id),
                     progress: self.progress_steps(id),
+                    new: self.is_new(id),
                 },
                 Some(Action::More) => Face::More {
                     page: self.page(),
@@ -376,17 +432,20 @@ impl Ui {
                 id,
                 current: false,
                 progress: None,
+                new: false,
             } => self.tiles[id].clone(),
             Face::Item {
                 id,
                 current,
                 progress,
+                new,
             } => icons::decorate(
                 &self.tiles[id],
                 Decor {
                     current: *current,
                     progress: *progress,
-                    ..Decor::default()
+                    new: *new,
+                    badge: None,
                 },
             ),
             Face::More { page, pages } => icons::more(size, *page, *pages),
@@ -437,39 +496,6 @@ impl Ui {
         self.pages[self.shelf]
     }
 
-    /// The picture of a shelf key: the shelf's picture, else the glyph of
-    /// its kind on its colour.
-    fn shelf_tile(&self, shelf: usize, size: u32) -> RgbImage {
-        let shelf = &self.library.shelves()[shelf];
-        shelf
-            .picture
-            .as_deref()
-            .and_then(|path| load_tile(path, size))
-            .unwrap_or_else(|| {
-                icons::glyph_placeholder(glyph(shelf.kind), color(shelf.color, &shelf.name), size)
-            })
-    }
-
-    /// Loads and shrinks all pictures once, so drawing stays fast on a Pi.
-    fn prepare_tiles(&mut self, size: u32) {
-        if self.tile_size == size && self.tiles.len() == self.library.items().len() {
-            return;
-        }
-        // Badges tell the shelves apart; with one kind there is nothing to tell.
-        let kinds: HashSet<Kind> = self
-            .deck_shelves
-            .iter()
-            .map(|&shelf| self.library.shelves()[shelf].kind)
-            .collect();
-        let badges = kinds.len() > 1;
-        self.tiles = self
-            .library
-            .items()
-            .map(|(id, item)| (id, item_tile(item, size, badges)))
-            .collect();
-        self.tile_size = size;
-    }
-
     /// Renders what a deck would show, one panel per shelf from top to
     /// bottom, as one picture (for `--preview`).
     pub fn preview(&mut self, rows: usize, cols: usize, size: u32, demo_state: bool) -> RgbImage {
@@ -507,50 +533,15 @@ impl Ui {
     }
 }
 
-/// The item's picture, else its cover (with a badge for its kind when
-/// `badges`), else the glyph of its kind on its colour.
-fn item_tile(item: &Item, size: u32, badges: bool) -> RgbImage {
-    let picture = [&item.picture, &item.cover]
-        .into_iter()
-        .flatten()
-        .find_map(|path| load_tile(path, size));
-    match picture {
-        Some(tile) if badges => icons::decorate(
-            &tile,
-            Decor {
-                badge: Some(glyph(item.kind)),
-                ..Decor::default()
-            },
-        ),
-        Some(tile) => tile,
-        None => icons::glyph_placeholder(glyph(item.kind), color(item.color, &item.name), size),
-    }
-}
-
-fn load_tile(path: &Path, size: u32) -> Option<RgbImage> {
-    match image::open(path) {
-        Ok(img) => Some(icons::thumbnail(&img, size)),
-        Err(err) => {
-            warn!("cannot read picture {}: {err}", path.display());
-            None
-        }
-    }
-}
-
-/// The configured colour, else one derived from `name`.
-fn color(configured: Option<Color>, name: &str) -> Rgb<u8> {
-    configured.map_or_else(|| icons::name_color(name), |Color(rgb)| Rgb(rgb))
-}
-
-fn glyph(kind: Kind) -> icons::Glyph {
-    match kind {
-        Kind::Music => icons::Glyph::Note,
-        Kind::Audiobook => icons::Glyph::Book,
-        Kind::Story => icons::Glyph::Star,
-        Kind::Radio => icons::Glyph::Waves,
-        Kind::Podcast => icons::Glyph::Mic,
-        Kind::Spotify => icons::Glyph::Spotify,
-    }
+/// The library shelves with items: the ones the deck shows.
+fn non_empty(library: &Library) -> Vec<usize> {
+    library
+        .shelves()
+        .iter()
+        .enumerate()
+        .filter(|(_, shelf)| !shelf.items.is_empty())
+        .map(|(i, _)| i)
+        .collect()
 }
 
 #[cfg(test)]

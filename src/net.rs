@@ -1,11 +1,4 @@
 //! Outgoing HTTP(S) for podcast feeds, internet radio and Spotify.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "used once radio, podcasts and Spotify are wired in"
-    )
-)]
 
 use std::sync::Arc;
 use std::time::Duration;

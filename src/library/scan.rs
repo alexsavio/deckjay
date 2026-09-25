@@ -194,7 +194,7 @@ fn extension(p: &Path) -> String {
 }
 
 /// Formats the Chromecast default receiver can play.
-fn content_type(p: &Path) -> Option<&'static str> {
+pub(super) fn content_type(p: &Path) -> Option<&'static str> {
     Some(match extension(p).as_str() {
         "mp3" => "audio/mpeg",
         "m4a" | "m4b" | "mp4" => "audio/mp4",

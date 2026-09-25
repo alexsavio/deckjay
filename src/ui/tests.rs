@@ -326,7 +326,8 @@ fn an_audiobook_key_shows_how_much_is_done() {
         Face::Item {
             id: ItemId(0),
             current: false,
-            progress: Some(5)
+            progress: Some(5),
+            new: false
         }
     );
     assert_eq!(
@@ -334,7 +335,8 @@ fn an_audiobook_key_shows_how_much_is_done() {
         Face::Item {
             id: ItemId(1),
             current: false,
-            progress: None
+            progress: None,
+            new: false
         }
     );
 }
@@ -356,4 +358,134 @@ fn the_deck_comes_back_to_the_saved_shelf_and_pages() {
 
     let (again, _cmds, _events) = ui_with_store(library(), "", Store::open(dir.path()));
     assert_eq!((again.shelf, again.pages.clone()), (1, vec![1, 0]));
+}
+
+mod podcasts {
+    use super::*;
+    use crate::config::{Source, SourceKind};
+    use crate::podcasts::{Episode, FeedState, NowPlaying, Snapshot};
+
+    fn snapshot(ids: &[&str]) -> Snapshot {
+        Snapshot {
+            feeds: vec![FeedState {
+                slug: "maus".into(),
+                title: "Maus".into(),
+                picture: None,
+                episodes: ids
+                    .iter()
+                    .map(|id| Episode {
+                        id: (*id).into(),
+                        title: format!("Episode {id}"),
+                        published: None,
+                        file: format!("/cache/maus/{id}.mp3").into(),
+                        rel: format!("maus/{id}.mp3").into(),
+                        content_type: "audio/mpeg".into(),
+                        bytes: 1,
+                        picture: None,
+                    })
+                    .collect(),
+            }],
+        }
+    }
+
+    /// A music shelf of one album and an empty podcast shelf, fed by the
+    /// returned sender; the receiver gets the pins.
+    fn podcast_ui() -> (
+        Ui,
+        Receiver<PlayerCmd>,
+        Sender<PlayerEvent>,
+        Sender<Snapshot>,
+        Receiver<NowPlaying>,
+    ) {
+        let (mut ui, cmds, events) = ui_with(
+            Library::with_shelves(vec![
+                ("music", Kind::Music, items(Kind::Music, 0..1)),
+                ("pod", Kind::Podcast, Vec::new()),
+            ]),
+            "",
+        );
+        let (snapshot_tx, snapshots) = mpsc::channel();
+        let (pin_tx, pins) = mpsc::channel();
+        let source = Source::plain("pod", SourceKind::Podcast, Path::new("/cache"));
+        ui.set_podcasts(vec![PodcastThread::new(1, source, snapshots, pin_tx)]);
+        (ui, cmds, events, snapshot_tx, pins)
+    }
+
+    #[test]
+    fn a_snapshot_fills_the_shelf_and_new_episodes_get_a_dot() {
+        let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
+        assert_eq!(ui.deck_shelves, [0]);
+        assert!(!ui.take_snapshots(), "nothing sent yet");
+
+        snapshots.send(snapshot(&["old"])).unwrap();
+        snapshots.send(snapshot(&["new", "old"])).unwrap();
+        assert!(ui.take_snapshots());
+
+        assert_eq!(ui.deck_shelves, [0, 1]);
+        ui.shelf = 1;
+        ui.store.set_progress(
+            "pod/maus/old",
+            0,
+            Path::new("pod/maus/old.mp3"),
+            Duration::from_secs(1),
+            None,
+        );
+        let faces = ui.faces(&ui.layout(3, 5));
+        let marks: Vec<(String, bool)> = faces[..2]
+            .iter()
+            .map(|face| match face {
+                Face::Item { id, new, .. } => (ui.library.item(*id).name.clone(), *new),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                ("Episode new".to_string(), true),
+                ("Episode old".to_string(), false)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_shelf_on_the_deck_stays_when_a_podcast_shelf_appears() {
+        let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
+        snapshots.send(snapshot(&["a"])).unwrap();
+        ui.take_snapshots();
+        ui.shelf = 1;
+        snapshots.send(snapshot(&[])).unwrap();
+        assert!(ui.take_snapshots());
+        assert_eq!((ui.deck_shelves.clone(), ui.shelf), (vec![0], 0));
+        snapshots.send(snapshot(&["b"])).unwrap();
+        ui.take_snapshots();
+        assert_eq!(ui.shelf, 0, "the music shelf stays on the deck");
+    }
+
+    #[test]
+    fn the_playing_episode_is_pinned_until_it_stops() {
+        let (mut ui, _cmds, events, snapshots, pins) = podcast_ui();
+        snapshots.send(snapshot(&["a1"])).unwrap();
+        ui.take_snapshots();
+        let layout = ui.layout(3, 5);
+        ui.update(&layout, &[9]);
+        ui.update(&layout, &[0]);
+        assert_eq!(pins.try_recv(), Ok(NowPlaying(Some("a1".into()))));
+
+        events.send(PlayerEvent::Stopped).unwrap();
+        ui.update(&layout, &[]);
+        assert_eq!(pins.try_recv(), Ok(NowPlaying(None)));
+        ui.update(&layout, &[]);
+        assert!(pins.try_recv().is_err(), "the same pin is not sent twice");
+    }
+
+    #[test]
+    fn tiles_are_remade_when_a_second_kind_brings_badges() {
+        let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
+        assert!(ui.prepare_tiles(8), "the first tiles");
+        assert!(!ui.prepare_tiles(8));
+        snapshots.send(snapshot(&["a1"])).unwrap();
+        ui.take_snapshots();
+        assert!(ui.prepare_tiles(8), "music and podcasts: badges on");
+        assert_eq!(ui.tiles.len(), 2);
+    }
 }

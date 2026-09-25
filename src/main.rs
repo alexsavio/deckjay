@@ -143,8 +143,9 @@ fn main() -> Result<()> {
     }
     let base_url = base_url?;
 
+    let served = server::Served::new(library.served_files());
     if cfg.speaker_type != SpeakerType::Local {
-        serve_music(&cfg, &library)?;
+        serve_music(&cfg, served.clone())?;
         info!("serving music at {base_url}/");
     }
 
@@ -152,6 +153,7 @@ fn main() -> Result<()> {
     let player = player::spawn(output(&cfg), event_tx);
     let store = state::Store::open(&cfg.state_dir);
     let mut ui = Ui::new(&cfg, library, base_url, player, event_rx, store);
+    ui.set_podcasts(start_podcasts(&cfg, &served));
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
     let mut source = match simulator_url {
@@ -176,6 +178,7 @@ fn main() -> Result<()> {
             Err(err) => warn!("cannot open the deck: {err:#}"),
         }
         ui.handle_events();
+        ui.take_snapshots();
         std::thread::sleep(Duration::from_secs(2));
     }
 }
@@ -193,13 +196,47 @@ fn scan_sources(cfg: &Config) -> Library {
     library
 }
 
-fn serve_music(cfg: &Config, library: &Library) -> Result<()> {
+/// One `podcasts` thread per podcast source; a source that cannot start
+/// keeps the episodes already in its cache.
+fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThread> {
+    cfg.sources
+        .iter()
+        .enumerate()
+        .filter_map(|(shelf, source)| {
+            let settings = library::podcast::settings(source)?;
+            let (snapshot_tx, snapshots) = mpsc::channel();
+            let files = server::PodcastFiles {
+                source: source.name.clone(),
+                served: served.clone(),
+            };
+            match podcasts::spawn(
+                settings.clone(),
+                settings.timing(),
+                Box::new(files),
+                snapshot_tx,
+            ) {
+                Ok(now_playing) => Some(ui::PodcastThread::new(
+                    shelf,
+                    source.clone(),
+                    snapshots,
+                    now_playing,
+                )),
+                Err(err) => {
+                    warn!("podcast source {}: {err:#}", source.name);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
     let roots = cfg
         .sources
         .iter()
         .map(|s| (s.name.clone(), s.path.clone()))
         .collect();
-    server::spawn(roots, cfg.http_port, library.served_files())
+    server::spawn(roots, cfg.http_port, served)
 }
 
 enum DeckSource {
@@ -348,6 +385,16 @@ fn run_check(
             source.kind,
             source.path.display()
         );
+        if let Some(podcast) = &source.podcast {
+            for feed in &podcast.feeds {
+                match podcasts::check_feed(&feed.url) {
+                    Ok((title, episodes)) => {
+                        println!("  feed {}: {title:?}, {episodes} episodes ✓", feed.name);
+                    }
+                    Err(err) => println!("  feed {}: NOT readable: {err:#}", feed.name),
+                }
+            }
+        }
         if shelf.items.is_empty() {
             println!("  nothing to play");
         }

@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use anyhow::{Context, Result};
 use axum::Router;
@@ -16,21 +16,63 @@ use percent_encoding::percent_decode_str;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
-/// `roots` maps source names to their folders; `files` holds the paths below
-/// `/music/` that the speaker may download.
-pub fn spawn(roots: Vec<(String, PathBuf)>, port: u16, files: HashSet<PathBuf>) -> Result<()> {
+/// The paths below `/music/` that the speaker may download. Podcast threads
+/// add and remove episodes while the server runs.
+#[derive(Clone, Default)]
+pub struct Served(Arc<RwLock<HashSet<PathBuf>>>);
+
+impl Served {
+    pub fn new(files: HashSet<PathBuf>) -> Served {
+        Served(Arc::new(RwLock::new(files)))
+    }
+
+    pub fn add(&self, paths: impl IntoIterator<Item = PathBuf>) {
+        let mut files = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        files.extend(paths);
+    }
+
+    pub fn remove<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
+        let mut files = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        for path in paths {
+            files.remove(path);
+        }
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        let files = self.0.read().unwrap_or_else(PoisonError::into_inner);
+        files.contains(path)
+    }
+}
+
+/// Publishes the cache files of the podcast source `source` in [`Served`].
+pub struct PodcastFiles {
+    pub source: String,
+    pub served: Served,
+}
+
+impl crate::podcasts::Publisher for PodcastFiles {
+    fn add(&self, rel_paths: &[PathBuf]) {
+        let source = Path::new(&self.source);
+        self.served.add(rel_paths.iter().map(|p| source.join(p)));
+    }
+
+    fn remove(&self, rel_paths: &[PathBuf]) {
+        let source = Path::new(&self.source);
+        let paths: Vec<PathBuf> = rel_paths.iter().map(|p| source.join(p)).collect();
+        self.served.remove(&paths);
+    }
+}
+
+/// `roots` maps source names to their folders.
+pub fn spawn(roots: Vec<(String, PathBuf)>, port: u16, served: Served) -> Result<()> {
     // Bind here, so a port that is already in use is reported at startup.
     let listener = TcpListener::bind(("0.0.0.0", port))
         .with_context(|| format!("cannot listen on port {port} (in use?)"))?;
-    serve(listener, roots, files)
+    serve(listener, roots, served)
 }
 
 /// Serves on an already bound listener from a new `http` thread.
-fn serve(
-    listener: TcpListener,
-    roots: Vec<(String, PathBuf)>,
-    files: HashSet<PathBuf>,
-) -> Result<()> {
+fn serve(listener: TcpListener, roots: Vec<(String, PathBuf)>, served: Served) -> Result<()> {
     listener.set_nonblocking(true)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -44,7 +86,7 @@ fn serve(
         .fold(Router::new(), |app, (name, root)| {
             app.nest_service(&format!("/music/{name}"), ServeDir::new(root))
         })
-        .layer(middleware::from_fn_with_state(Arc::new(files), only_listed))
+        .layer(middleware::from_fn_with_state(served, only_listed))
         .layer(TraceLayer::new_for_http());
     std::thread::Builder::new()
         .name("http".into())
@@ -58,17 +100,13 @@ fn serve(
 
 /// `ServeDir` alone would also serve dotfiles, other files, and files behind
 /// symlinks that lead out of a source folder.
-async fn only_listed(
-    State(files): State<Arc<HashSet<PathBuf>>>,
-    req: Request,
-    next: Next,
-) -> Response {
+async fn only_listed(State(served): State<Served>, req: Request, next: Next) -> Response {
     let listed = req
         .uri()
         .path()
         .strip_prefix("/music/")
         .and_then(|path| percent_decode_str(path).decode_utf8().ok())
-        .is_some_and(|path| files.contains(Path::new(&*path)));
+        .is_some_and(|path| served.contains(Path::new(&*path)));
     if listed {
         next.run(req).await
     } else {
@@ -99,7 +137,8 @@ mod tests {
             .iter()
             .map(|s| (s.name.clone(), s.path.clone()))
             .collect();
-        serve(listener, roots, Library::scan(sources).served_files()).unwrap();
+        let served = Served::new(Library::scan(sources).served_files());
+        serve(listener, roots, served).unwrap();
         base
     }
 
@@ -199,5 +238,33 @@ mod tests {
         assert_eq!(reply.status().as_u16(), 206);
         assert_eq!(reply.body_mut().read_to_string().unwrap(), "234");
         assert_eq!(agent().head(&url).call().unwrap().status().as_u16(), 200);
+    }
+
+    #[test]
+    fn podcast_files_are_served_while_published() {
+        use crate::podcasts::Publisher;
+        let music = tempfile::tempdir().unwrap();
+        touch(&music.path().join("Album/01.mp3"), b"x");
+        let cache = tempfile::tempdir().unwrap();
+        touch(&cache.path().join("die-maus/a1.mp3"), b"episode");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/music", listener.local_addr().unwrap());
+        let served = Served::new(Library::scan(&[source("music", music.path())]).served_files());
+        let roots = vec![
+            ("music".into(), music.path().to_path_buf()),
+            ("maus".into(), cache.path().to_path_buf()),
+        ];
+        serve(listener, roots, served.clone()).unwrap();
+        let url = format!("{base}/maus/die-maus/a1.mp3");
+        let files = PodcastFiles {
+            source: "maus".into(),
+            served,
+        };
+
+        assert_eq!(status(&url), 404);
+        files.add(&[PathBuf::from("die-maus/a1.mp3")]);
+        assert_eq!(status(&url), 200);
+        files.remove(&[PathBuf::from("die-maus/a1.mp3")]);
+        assert_eq!(status(&url), 404);
     }
 }

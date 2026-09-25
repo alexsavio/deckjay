@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
+use super::podcast::{Podcast, RawPodcast};
+
 /// One `[[source]]` table, checked and with its path resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source {
@@ -13,14 +15,17 @@ pub struct Source {
     /// and `_` only. Defaults to the type (`music`, `audiobook`, `story`).
     pub name: String,
     pub kind: SourceKind,
-    /// The folder to scan. Relative paths are resolved against the folder
-    /// the config file lives in.
+    /// The folder to scan, or for a podcast source its cache folder.
+    /// Relative paths are resolved against the folder the config file lives
+    /// in.
     pub path: PathBuf,
     /// How the shelf key looks.
     pub look: Look,
     /// How single items look, by their name in the folder (with or without
     /// the file extension).
     pub items: BTreeMap<String, Look>,
+    /// For `type = "podcast"`.
+    pub podcast: Option<Podcast>,
 }
 
 /// A picture or a colour for a key; pictures are resolved like `path`.
@@ -70,6 +75,7 @@ impl Source {
             path: path.into(),
             look: Look::default(),
             items: BTreeMap::new(),
+            podcast: None,
         }
     }
 }
@@ -80,6 +86,7 @@ pub enum SourceKind {
     Audiobook,
     /// Stories and sound effects.
     Story,
+    Podcast,
 }
 
 impl SourceKind {
@@ -88,6 +95,7 @@ impl SourceKind {
             SourceKind::Music => "music",
             SourceKind::Audiobook => "audiobook",
             SourceKind::Story => "story",
+            SourceKind::Podcast => "podcast",
         }
     }
 }
@@ -99,6 +107,7 @@ pub(super) enum RawSource {
     Music(Folder),
     Audiobook(Folder),
     Story(Folder),
+    Podcast(RawPodcast),
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,8 +121,9 @@ pub(super) struct Folder {
     item: BTreeMap<String, Look>,
 }
 
-/// Checks names and resolves relative paths against `base`.
-pub(super) fn resolve(raw: Vec<RawSource>, base: &Path) -> Result<Vec<Source>> {
+/// Checks names and resolves relative paths against `base`; podcast caches
+/// default to `<state_dir>/podcasts/<name>`.
+pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Result<Vec<Source>> {
     if raw.is_empty() {
         bail!(
             "there is no [[source]] table; add one after the other keys, e.g.\n\n\
@@ -121,21 +131,26 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path) -> Result<Vec<Source>> {
         );
     }
     let mut names = HashSet::new();
+    let mut caches = HashSet::new();
     raw.into_iter()
         .map(|raw| {
             let (kind, folder) = match raw {
                 RawSource::Music(f) => (SourceKind::Music, f),
                 RawSource::Audiobook(f) => (SourceKind::Audiobook, f),
                 RawSource::Story(f) => (SourceKind::Story, f),
+                RawSource::Podcast(p) => {
+                    let source = podcast_source(&p, base, state_dir, &mut names)?;
+                    if !caches.insert(source.path.clone()) {
+                        bail!(
+                            "two podcast sources use the cache_dir {}",
+                            source.path.display()
+                        );
+                    }
+                    return Ok(source);
+                }
             };
             let name = folder.name.unwrap_or_else(|| kind.name().into());
-            check_name(&name)?;
-            if !names.insert(name.clone()) {
-                bail!(
-                    "two sources are named {name:?}; give each one a different \
-                     `name = \"...\"`"
-                );
-            }
+            check_unique(&name, &mut names)?;
             Ok(Source {
                 name,
                 kind,
@@ -150,9 +165,46 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path) -> Result<Vec<Source>> {
                     .into_iter()
                     .map(|(name, look)| (name, look.resolve(base)))
                     .collect(),
+                podcast: None,
             })
         })
         .collect()
+}
+
+fn podcast_source(
+    raw: &RawPodcast,
+    base: &Path,
+    state_dir: &Path,
+    names: &mut HashSet<String>,
+) -> Result<Source> {
+    let name = raw
+        .name
+        .clone()
+        .unwrap_or_else(|| SourceKind::Podcast.name().into());
+    check_unique(&name, names)?;
+    let path = match &raw.cache_dir {
+        Some(dir) => base.join(dir),
+        None => state_dir.join("podcasts").join(&name),
+    };
+    Ok(Source {
+        podcast: Some(raw.check(&name)?),
+        look: raw.look().resolve(base),
+        name,
+        kind: SourceKind::Podcast,
+        path,
+        items: BTreeMap::new(),
+    })
+}
+
+fn check_unique(name: &str, names: &mut HashSet<String>) -> Result<()> {
+    check_name(name)?;
+    if !names.insert(name.into()) {
+        bail!(
+            "two sources are named {name:?}; give each one a different \
+             `name = \"...\"`"
+        );
+    }
+    Ok(())
 }
 
 /// The name goes into URL paths and into the keys of saved progress.
@@ -178,7 +230,11 @@ mod tests {
 
     fn sources(text: &str) -> Result<Vec<Source>> {
         let raw: Sources = toml::from_str(text)?;
-        resolve(raw.source, Path::new("/srv/deck"))
+        resolve(
+            raw.source,
+            Path::new("/srv/deck"),
+            Path::new("/srv/deck/state"),
+        )
     }
 
     #[test]
@@ -198,6 +254,7 @@ mod tests {
                     path: "/srv/deck/music".into(),
                     look: Look::default(),
                     items: BTreeMap::new(),
+                    podcast: None,
                 },
                 Source {
                     name: "books".into(),
@@ -205,6 +262,7 @@ mod tests {
                     path: "/mnt/usb/books".into(),
                     look: Look::default(),
                     items: BTreeMap::new(),
+                    podcast: None,
                 },
                 Source {
                     name: "story".into(),
@@ -212,6 +270,7 @@ mod tests {
                     path: "/srv/deck/sounds".into(),
                     look: Look::default(),
                     items: BTreeMap::new(),
+                    podcast: None,
                 },
             ]
         );
@@ -256,7 +315,7 @@ mod tests {
 
     #[test]
     fn no_source_is_an_error() {
-        let err = resolve(Vec::new(), Path::new("/")).unwrap_err();
+        let err = resolve(Vec::new(), Path::new("/"), Path::new("/state")).unwrap_err();
         assert!(err.to_string().contains("[[source]]"), "{err:#}");
     }
 
@@ -300,5 +359,36 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("colour"), "{err:#}");
+    }
+
+    #[test]
+    fn a_podcast_source_caches_in_the_state_folder_unless_told_otherwise() {
+        let feed = "[[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n";
+        let got = sources(&format!(
+            "[[source]]\ntype = \"podcast\"\n{feed}\
+             [[source]]\ntype = \"podcast\"\nname = \"news\"\ncache_dir = \"/mnt/usb/news\"\n{feed}"
+        ))
+        .unwrap();
+        assert_eq!(
+            (got[0].name.as_str(), got[0].kind, got[0].path.as_path()),
+            (
+                "podcast",
+                SourceKind::Podcast,
+                Path::new("/srv/deck/state/podcasts/podcast")
+            )
+        );
+        assert_eq!(got[0].podcast.as_ref().unwrap().feeds[0].name, "Maus");
+        assert_eq!(got[1].path, Path::new("/mnt/usb/news"));
+    }
+
+    #[test]
+    fn two_podcast_sources_cannot_share_a_cache() {
+        let feed = "[[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n";
+        let err = sources(&format!(
+            "[[source]]\ntype = \"podcast\"\nname = \"a\"\ncache_dir = \"c\"\n{feed}\
+             [[source]]\ntype = \"podcast\"\nname = \"b\"\ncache_dir = \"c\"\n{feed}"
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("cache_dir"), "{err:#}");
     }
 }

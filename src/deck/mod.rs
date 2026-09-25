@@ -104,10 +104,6 @@ impl Deck {
     /// Forgets the cached images of every face that fails `keep`, e.g. of
     /// items no longer in the library. Keys that show such a face are sent
     /// again on their next [`Deck::show`].
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the library does not change at runtime yet")
-    )]
     pub fn retain(&mut self, keep: impl Fn(&Face) -> bool) {
         self.encoded.retain(|face, _| keep(face));
         for shown in &mut self.shown {
@@ -236,6 +232,7 @@ mod tests {
             id: ItemId(7),
             current: false,
             progress: None,
+            new: false,
         };
         deck.show(0, &gone, tile).unwrap();
         deck.show(1, &Face::Play, tile).unwrap();

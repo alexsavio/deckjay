@@ -1,9 +1,10 @@
 //! What the deck plays: items on shelves (one shelf per `[[source]]`), the
 //! files the speaker may download, and the URLs it downloads them from.
 
+pub mod podcast;
 mod scan;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
@@ -23,7 +24,7 @@ pub struct Track {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[expect(dead_code, reason = "radio, podcast and Spotify sources come later")]
+#[expect(dead_code, reason = "radio and Spotify sources come later")]
 pub enum Kind {
     Music,
     Audiobook,
@@ -109,6 +110,7 @@ impl From<SourceKind> for Kind {
             SourceKind::Music => Kind::Music,
             SourceKind::Audiobook => Kind::Audiobook,
             SourceKind::Story => Kind::Story,
+            SourceKind::Podcast => Kind::Podcast,
         }
     }
 }
@@ -116,16 +118,21 @@ impl From<SourceKind> for Kind {
 impl Library {
     /// One shelf per source, in config order. A source whose folder cannot
     /// be read gets an empty shelf and a warning, so the others still play.
+    /// Podcast shelves start with the episodes in their cache.
     pub fn scan(sources: &[Source]) -> Library {
         let mut library = Library {
             items: Vec::new(),
             shelves: Vec::new(),
         };
         for source in sources {
-            let items = scan::scan(source).unwrap_or_else(|err| {
-                tracing::warn!("{err:#}");
-                Vec::new()
-            });
+            let items = if let Some(settings) = podcast::settings(source) {
+                podcast::items(source, &crate::podcasts::load_cached(&settings))
+            } else {
+                scan::scan(source).unwrap_or_else(|err| {
+                    tracing::warn!("{err:#}");
+                    Vec::new()
+                })
+            };
             let shelf = Shelf {
                 name: source.name.clone(),
                 kind: source.kind.into(),
@@ -162,6 +169,31 @@ impl Library {
             library.add_shelf(shelf, items);
         }
         library
+    }
+
+    /// Puts `items` on shelf `shelf` in this order. Items with a known key
+    /// keep their id (their data is updated); new ones get new ids. Returns
+    /// whether the shelf's list changed.
+    pub fn refill(&mut self, shelf: usize, items: Vec<Item>) -> bool {
+        let known: HashMap<ItemKey, ItemId> = self
+            .items()
+            .map(|(id, item)| (item.key.clone(), id))
+            .collect();
+        let ids: Vec<ItemId> = items
+            .into_iter()
+            .map(|item| {
+                if let Some(&id) = known.get(&item.key) {
+                    self.items[id.0 as usize] = item;
+                    id
+                } else {
+                    self.items.push(item);
+                    ItemId((self.items.len() - 1) as u32)
+                }
+            })
+            .collect();
+        let changed = self.shelves[shelf].items != ids;
+        self.shelves[shelf].items = ids;
+        changed
     }
 
     /// Adds `shelf` with `items` (its own item list is replaced).

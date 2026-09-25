@@ -12,11 +12,13 @@ jack, HDMI or USB sound card of the Raspberry Pi.
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume
 ```
 
-Music, audiobooks and stories can come from several folders, each one a
-`[[source]]` in `config.toml`. Each source is a shelf: the last item key
-shows the next shelf and switches to it. Audiobooks play on from where they
-stopped, and their keys show a progress bar. The deck also remembers the
-shelf and page it showed, in the `state` folder.
+Music, audiobooks, stories and podcasts can come from several places, each
+one a `[[source]]` in `config.toml`. Podcast sources download the newest
+episodes of their feeds in the background. Each source is a shelf: the last
+item key shows the next shelf and switches to it. Audiobooks and podcast
+episodes play on from where they stopped, and their keys show a progress
+bar. The deck also remembers the shelf and page it showed, in the `state`
+folder.
 
 The program serves your music folders over HTTP and tells the speaker which
 file to play. The speaker downloads the files itself, so playback keeps going

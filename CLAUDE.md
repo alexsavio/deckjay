@@ -177,6 +177,20 @@ Rendering:
   glyph on its colour. Covers get a kind badge when the deck has shelves of
   more than one kind.
 
+Podcasts (`podcasts/`, `library/podcast.rs`, `ui/podcasts.rs`): each podcast
+source has a `podcasts` thread (`podcasts::spawn`) that refreshes its feeds,
+downloads into the source's cache folder, adds and removes the files in the
+server's live allowlist (`server::Served` via `server::PodcastFiles`), and
+sends a `Snapshot` after every refresh. `Library::scan` starts podcast
+shelves from `podcasts::load_cached` (no network). The UI takes the newest
+snapshot in its loop (`Ui::take_snapshots`), refills the shelf with
+`Library::refill` (known `ItemKey`s keep their `ItemId`; items are never
+removed from the table), recomputes the shelves on the deck, and drops
+cached key images with `Deck::retain`. `Ui::pin_playing` sends the playing
+episode's id (`NowPlaying`) so the thread does not delete its file. Episode
+keys are `<source>/<feed folder>/<episode id>`; a podcast item without
+saved progress shows the "new" dot.
+
 State (`state.rs`): `Store` keeps `<state_dir>/state.json`: the shelf on the
 deck, the page of each shelf (by shelf name) and the progress of each item
 that resumes (by `ItemKey`). It writes a temp file and renames it, at most
