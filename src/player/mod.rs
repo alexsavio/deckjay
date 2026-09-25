@@ -8,6 +8,8 @@ mod cast;
 pub mod heos;
 pub mod local;
 mod progress;
+mod router;
+pub mod spotify;
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -53,7 +55,6 @@ pub struct Station {
 
 /// A Spotify playlist, played through Spotify Connect.
 #[derive(Clone, Debug)]
-#[expect(dead_code, reason = "no backend plays Spotify yet")]
 pub struct Playlist {
     /// `spotify:playlist:<id>`
     pub uri: String,
@@ -176,7 +177,17 @@ pub enum Output {
     },
 }
 
+#[cfg(test)]
 pub fn spawn(output: Output, events: Sender<PlayerEvent>) -> Sender<PlayerCmd> {
+    spawn_with(output, None, events)
+}
+
+/// `spotify` plays Spotify playlists; without it they fail.
+pub fn spawn_with(
+    output: Output,
+    spotify: Option<spotify::Connect>,
+    events: Sender<PlayerEvent>,
+) -> Sender<PlayerCmd> {
     let (tx, rx) = mpsc::channel();
     let name = match &output {
         Output::Cast { .. } => "cast",
@@ -194,7 +205,17 @@ pub fn spawn(output: Output, events: Sender<PlayerEvent>) -> Sender<PlayerCmd> {
                 Output::Heos { host, port } => Box::new(heos::HeosPlayer::new(host, port)),
                 Output::Local { device } => Box::new(local::LocalPlayer::new(device)),
             };
-            run(speaker, &rx, emitter);
+            let spotify = spotify.map(|connect| -> Box<dyn Speaker> {
+                Box::new(spotify::SpotifyPlayer::new(
+                    connect,
+                    crate::spotify::api::Endpoints::default(),
+                ))
+            });
+            run(
+                Box::new(router::Router::new(speaker, spotify)),
+                &rx,
+                emitter,
+            );
         })
         .expect("failed to start the player thread");
     tx
@@ -210,7 +231,6 @@ trait Speaker {
     /// Forgets the album after a failed command.
     fn reset(&mut self);
     /// Stops what plays and forgets it, before another speaker takes over.
-    #[expect(dead_code, reason = "called once Spotify can take over")]
     fn stop(&mut self, _events: &mut Emitter) -> Result<()> {
         self.reset();
         Ok(())

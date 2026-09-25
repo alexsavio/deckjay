@@ -10,7 +10,7 @@
 //! - main: finds the deck, draws the keys and reacts to key presses
 //!   ([`ui::Ui`], [`deck::Deck`]).
 //! - `cast` or `heos`: sends commands to the speaker and reports its state
-//!   ([`player::spawn`]).
+//!   ([`player::spawn_with`]).
 //! - `http`: serves the music files to the speaker ([`server::spawn`]).
 //!
 //! `kids-deck simulator` runs something else: [`simulator`], a web page that
@@ -151,10 +151,11 @@ fn main() -> Result<()> {
     }
 
     let (event_tx, event_rx) = mpsc::channel();
-    let player = player::spawn(output(&cfg), event_tx);
+    let player = player::spawn_with(output(&cfg), spotify_output(&cfg), event_tx);
     let store = state::Store::open(&cfg.state_dir);
     let mut ui = Ui::new(&cfg, library, base_url, player, event_rx, store);
     ui.set_podcasts(start_podcasts(&cfg, &served));
+    fetch_playlist_covers(&cfg);
 
     // Keep looking for a deck; survive it being unplugged and plugged back in.
     let mut source = match simulator_url {
@@ -347,6 +348,37 @@ fn output(cfg: &Config) -> player::Output {
             device: cfg.audio_device.clone(),
         },
     }
+}
+
+/// In the background: new covers show from the next start.
+fn fetch_playlist_covers(cfg: &Config) {
+    for source in cfg.sources.iter().filter(|s| !s.playlists.is_empty()) {
+        let uris: Vec<String> = source.playlists.iter().map(|p| p.uri.clone()).collect();
+        let (state_dir, folder) = (cfg.state_dir.clone(), source.path.clone());
+        let fetch = move || {
+            spotify::covers::fetch_missing(
+                &state_dir,
+                &folder,
+                &uris,
+                spotify::api::Endpoints::default(),
+            );
+        };
+        if let Err(err) = std::thread::Builder::new()
+            .name("covers".into())
+            .spawn(fetch)
+        {
+            warn!("cannot fetch playlist covers: {err}");
+        }
+    }
+}
+
+/// Spotify plays only with a device to play on.
+fn spotify_output(cfg: &Config) -> Option<player::spotify::Connect> {
+    let device = cfg.spotify.as_ref()?.device.clone()?;
+    Some(player::spotify::Connect {
+        state_dir: cfg.state_dir.clone(),
+        device,
+    })
 }
 
 fn advertise_address(cfg: &Config) -> Result<String> {

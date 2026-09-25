@@ -17,8 +17,9 @@ pub struct Source {
     /// and `_` only. Defaults to the type (`music`, `audiobook`, `story`).
     pub name: String,
     pub kind: SourceKind,
-    /// The folder to scan, or for a podcast source its cache folder; empty
-    /// for a radio source. Relative paths are resolved against the folder
+    /// The folder to scan; for a podcast source its cache folder, for a
+    /// Spotify source the folder of its playlist covers; empty for a radio
+    /// source. Relative paths are resolved against the folder
     /// the config file lives in.
     pub path: PathBuf,
     /// How the shelf key looks.
@@ -196,7 +197,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                         look: s.look().resolve(base),
                         name,
                         kind: SourceKind::Spotify,
-                        path: PathBuf::new(),
+                        path: state_dir.join("spotify-covers"),
                         items: BTreeMap::new(),
                         podcast: None,
                         stations: Vec::new(),

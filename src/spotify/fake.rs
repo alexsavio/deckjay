@@ -16,13 +16,13 @@ use serde_json::{Value, json};
 
 use super::api::Endpoints;
 
-pub(super) const CLIENT_ID: &str = "client-1";
-pub(super) const CODE: &str = "the-code";
-pub(super) const REFRESH_TOKEN: &str = "refresh-1";
+pub(crate) const CLIENT_ID: &str = "client-1";
+pub(crate) const CODE: &str = "the-code";
+pub(crate) const REFRESH_TOKEN: &str = "refresh-1";
 
 /// One request as the fake saw it.
 #[derive(Debug, Clone)]
-pub(super) struct Request {
+pub(crate) struct Request {
     pub method: String,
     pub path: String,
     pub query: String,
@@ -48,14 +48,14 @@ impl Request {
 }
 
 /// A canned answer that replaces the normal one.
-pub(super) struct Canned {
+pub(crate) struct Canned {
     pub status: u16,
     pub retry_after: Option<u64>,
     pub body: String,
 }
 
 /// What the fake answers and what it was sent.
-pub(super) struct Script {
+pub(crate) struct Script {
     pub requests: Vec<Request>,
     /// The only refresh token the accounts service accepts.
     pub refresh_token: String,
@@ -108,7 +108,7 @@ impl Default for Script {
     }
 }
 
-pub(super) struct Fake {
+pub(crate) struct Fake {
     pub url: String,
     script: Arc<Mutex<Script>>,
 }
@@ -323,7 +323,7 @@ fn oauth_error(error: &str, description: &str) -> Canned {
     )
 }
 
-pub(super) fn form(text: &str) -> HashMap<String, String> {
+pub(crate) fn form(text: &str) -> HashMap<String, String> {
     text.split('&')
         .filter(|pair| !pair.is_empty())
         .map(|pair| {

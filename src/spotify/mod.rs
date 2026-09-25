@@ -4,15 +4,12 @@
 //! device (a speaker, receiver or Chromecast) through the Web API, which needs
 //! Premium. `login` signs in once and saves the refresh token (`token`);
 //! `api::Client` then keeps an access token fresh.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired in when Spotify playback lands")
-)]
 
 pub mod api;
 pub mod auth;
+pub mod covers;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 pub mod login;
 pub mod token;
 

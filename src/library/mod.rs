@@ -267,7 +267,8 @@ fn stations(source: &Source) -> Vec<Item> {
         .collect()
 }
 
-/// One item per playlist of a Spotify source.
+/// One item per playlist of a Spotify source, with the covers kept in its
+/// folder.
 fn playlists(source: &Source) -> Vec<Item> {
     source
         .playlists
@@ -279,7 +280,8 @@ fn playlists(source: &Source) -> Vec<Item> {
             media: Media::Spotify {
                 uri: playlist.uri.clone(),
             },
-            cover: None,
+            cover: Some(crate::spotify::covers::path(&source.path, &playlist.uri))
+                .filter(|cover| cover.is_file()),
             cover_rel: None,
             picture: playlist.picture.clone(),
             color: playlist.color,
