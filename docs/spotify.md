@@ -107,10 +107,24 @@ it: at start, a background thread saves missing covers in
 start; until then its key shows the Spotify glyph. `picture` in the
 `[[source.playlist]]` table replaces the cover.
 
+## Pick a device that stays listed
+
+Spotify lists a Google Cast device (a Chromecast, a Lenovo smart display,
+a TV with Chromecast built-in) only while Spotify is the app that plays on
+it. When kids-deck plays an album, a book, a podcast or radio on the same
+Cast device, Spotify loses it, and the next playlist press fails with "no
+Spotify Connect device matches" until someone casts Spotify to it again
+from the phone. So for Spotify pick a device with Spotify Connect built in
+that stays listed: the Denon or other HEOS receivers (with Network Control
+"Always On"), speakers such as the JBL Authentics, or a TV or streaming box
+that runs the Spotify app.
+
 ## Limits
 
-- Tested against a fake Web API only, not yet with a real account and
-  device.
+- Tested with a real account on a Lenovo smart display (Chromecast
+  built-in): sign-in, token refresh, the
+  cover, play, next, pause, resume, and the switch to a Cast album. The
+  Denon is not tested yet.
 - When a playlist ends, Spotify may go on with similar songs (autoplay).
   Turn autoplay off in the Spotify app settings.
 - Playlists that Spotify itself made may have no cover through the API.
