@@ -7,10 +7,16 @@ with Denon / Marantz HEOS receivers and speakers, and with the headphone
 jack, HDMI or USB sound card of the Raspberry Pi.
 
 ```text
- [A][A][A][A][A]     A = album cover, press to play (press again to pause)
+ [A][A][A][A][⏻]     A = album cover, press to play (press again to pause)
  [A][A][A][A][>]     > = more albums (only if they don't fit on one page)
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume
+                     ⏻ = power: stops everything and dims the deck
 ```
+
+The power key stops what plays (a book keeps its place), puts a Denon or
+Marantz receiver in standby, and dims the deck. The next press only lights
+the deck again. It sits top right on 15-key decks and in the control row on
+the XL; the Mini, Neo and Plus have no room for it.
 
 Music, audiobooks, stories and podcasts can come from several places, each
 one a `[[source]]` in `config.toml`. Podcast sources download the newest

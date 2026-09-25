@@ -10,10 +10,14 @@
 //!
 //! ```text
 //!  one shelf (MK.2)       several shelves (MK.2)    several shelves (Mini)
-//!  [A][A][A][A][A]        [A][A][A][A][A]           [A][A][F]
+//!  [A][A][A][A][P]        [A][A][A][A][P]           [A][A][F]
 //!  [A][A][A][A][>]        [A][A][A][>][S]           [⏯][-][+]
 //!  [⏮][⏯][⏭][-][+]        [⏮][⏯][⏭][-][+]
-//!                         > = more, S = shelf        F = flip
+//!  P = power              > = more, S = shelf        F = flip
+//!
+//! The power key takes a free control key (XL), else the top-right item key
+//! (MK.2); the Mini, Neo and Plus have none. It stops everything and dims
+//! the deck; the next press only lights it again.
 //! ```
 
 mod layout;
@@ -78,6 +82,7 @@ pub enum Face {
         up: bool,
         level: u8,
     },
+    Power,
 }
 
 pub struct Ui {
@@ -112,6 +117,8 @@ pub struct Ui {
     badges: bool,
     /// Items whose look changed since the deck last drew them.
     restyled: HashSet<ItemId>,
+    /// The power key dimmed the deck.
+    asleep: bool,
 
     /// One per podcast source.
     podcasts: Vec<podcasts::PodcastThread>,
@@ -165,13 +172,15 @@ impl Ui {
             tile_size: 0,
             badges: false,
             restyled: HashSet::new(),
+            asleep: false,
             podcasts: Vec::new(),
         }
     }
 
     /// Drives a connected deck until it is unplugged (returns the error then).
     pub fn run(&mut self, deck: &mut Deck, brightness: u8) -> Result<()> {
-        deck.set_brightness(brightness)?;
+        let mut dimmed = self.asleep;
+        deck.set_brightness(if dimmed { 0 } else { brightness })?;
         let (rows, cols) = deck.layout();
         let mut layout = self.layout(rows, cols);
         self.fit(&layout);
@@ -179,7 +188,8 @@ impl Ui {
         self.draw(deck, &layout)?;
 
         loop {
-            let keys = deck.pressed_keys(Duration::from_millis(100))?;
+            let mut keys = deck.pressed_keys(Duration::from_millis(100))?;
+            self.wake(&mut keys);
             let mut changed = self.update(&layout, &keys);
             if self.take_snapshots() {
                 layout = self.layout(rows, cols);
@@ -202,6 +212,10 @@ impl Ui {
             }
             if changed {
                 self.draw(deck, &layout)?;
+            }
+            if self.asleep != dimmed {
+                dimmed = self.asleep;
+                deck.set_brightness(if dimmed { 0 } else { brightness })?;
             }
         }
     }
@@ -296,6 +310,7 @@ impl Ui {
     fn control(&mut self, control: Control) {
         let active = self.current.is_some();
         match control {
+            Control::Power => self.power_off(),
             Control::PlayPause if active => {
                 self.send(PlayerCmd::TogglePause);
                 self.playing = !self.playing;
@@ -352,6 +367,25 @@ impl Ui {
             tracks: self.tracks(id),
             start,
             progress: resumes,
+        }
+    }
+
+    /// Stops everything and dims the deck; the next press only wakes it.
+    fn power_off(&mut self) {
+        info!("power key: everything stops");
+        self.send(PlayerCmd::Off);
+        self.current = None;
+        self.playing = false;
+        self.store.save_now(Instant::now());
+        self.asleep = true;
+    }
+
+    /// The press that wakes a dimmed deck does nothing else: a child sees
+    /// the keys before they choose.
+    fn wake(&mut self, keys: &mut Vec<usize>) {
+        if self.asleep && !keys.is_empty() {
+            self.asleep = false;
+            keys.clear();
         }
     }
 
@@ -511,6 +545,7 @@ impl Ui {
                     Control::PlayPause => Face::Play,
                     Control::Prev => Face::Prev,
                     Control::Next => Face::Next,
+                    Control::Power => Face::Power,
                     Control::VolumeDown | Control::VolumeUp => Face::Volume {
                         up: c == Control::VolumeUp,
                         level: (self.volume / self.max_volume.max(f32::EPSILON) * VOLUME_LEVELS)
@@ -558,6 +593,7 @@ impl Ui {
             Face::Volume { up, level } => {
                 icons::volume(size, *up, f32::from(*level) / VOLUME_LEVELS)
             }
+            Face::Power => icons::power(size),
         }
     }
 

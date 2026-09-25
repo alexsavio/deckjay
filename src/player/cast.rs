@@ -213,6 +213,7 @@ impl Speaker for CastPlayer {
                 }
                 Ok(())
             }
+            PlayerCmd::Off => Speaker::stop(self, events),
             PlayerCmd::Next | PlayerCmd::Prev if self.live.is_some() => Ok(()),
             PlayerCmd::Next | PlayerCmd::Prev => {
                 let s = self.open()?;

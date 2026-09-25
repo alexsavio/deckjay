@@ -17,6 +17,7 @@ const BG_SKIP: Rgb<u8> = Rgb([90, 70, 190]);
 const BG_VOLUME: Rgb<u8> = Rgb([30, 110, 210]);
 const BG_MORE: Rgb<u8> = Rgb([235, 120, 20]);
 const BG_BLANK: Rgb<u8> = Rgb([0, 0, 0]);
+const BG_POWER: Rgb<u8> = Rgb([175, 35, 45]);
 /// Background for a badge chip and a progress track: dark enough to read on
 /// any cover.
 const DECOR_DARK: Rgb<u8> = Rgb([20, 20, 24]);
@@ -187,6 +188,16 @@ pub fn more(size: u32, page: usize, pages: usize) -> RgbImage {
 fn page_dots(page: usize, pages: usize) -> (usize, usize) {
     let dots = pages.clamp(1, 8);
     (dots, page * dots / pages.max(1))
+}
+
+/// The power sign: a ring open at the top, with a bar through the gap.
+pub fn power(size: u32) -> RgbImage {
+    let mut c = Canvas::new(size, BG_POWER);
+    c.circle(0.5, 0.54, 0.29, WHITE);
+    c.circle(0.5, 0.54, 0.21, BG_POWER);
+    c.rect(0.39, 0.18, 0.61, 0.46, BG_POWER);
+    c.rect(0.455, 0.2, 0.545, 0.56, WHITE);
+    c.finish(size)
 }
 
 pub fn blank(size: u32) -> RgbImage {

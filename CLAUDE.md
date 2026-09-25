@@ -187,8 +187,13 @@ Rendering:
   the items do not fit. Several shelves: the last item key is the shelf key
   (it shows the next shelf) with "more" just before it; decks with fewer
   than 6 item keys (Mini, Neo, Plus) get one flip key instead, which pages
-  and then moves to the next shelf. Decks with fewer than 2 rows are
-  ignored.
+  and then moves to the next shelf. The power key (`Control::Power`) takes
+  a free control key (XL), else the top-right item key when more than 6
+  item keys remain (MK.2), else none; `Layout::slots` lists the item keys
+  left for items and navigation. It sends `PlayerCmd::Off` (the player loop
+  calls `Speaker::stop`, then `Speaker::standby`: HEOS sends `PWSTANDBY` to
+  the receiver's control port 23) and dims the deck; `Ui::wake` swallows
+  the next press. Decks with fewer than 2 rows are ignored.
 - `icons/` draws every icon procedurally (4x supersampling); there are no
   image or font assets. `glyphs.rs` has the kind glyphs (note, book, star,
   waves, mic, Spotify); `decorate` adds the "playing" frame, the kind badge,

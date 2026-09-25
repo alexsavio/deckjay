@@ -44,8 +44,11 @@ fn fifteen_keys_without_paging() {
     let l = layout(3, 5, 7);
     assert_eq!(l.pages(0), 1);
     assert_eq!(l.action(0, 0, 0), item(0));
-    assert_eq!(l.action(6, 0, 0), item(6));
-    assert_eq!(l.action(7, 0, 0), None);
+    assert_eq!(l.action(3, 0, 0), item(3));
+    assert_eq!(l.action(4, 0, 0), Some(Action::Control(Control::Power)));
+    assert_eq!(l.action(5, 0, 0), item(4));
+    assert_eq!(l.action(7, 0, 0), item(6));
+    assert_eq!(l.action(8, 0, 0), None);
     assert_eq!(l.action(10, 0, 0), Some(Action::Control(Control::Prev)));
     assert_eq!(l.action(14, 0, 0), Some(Action::Control(Control::VolumeUp)));
 }
@@ -53,11 +56,11 @@ fn fifteen_keys_without_paging() {
 #[test]
 fn fifteen_keys_with_paging() {
     let l = layout(3, 5, 20);
-    assert_eq!(l.pages(0), 3); // 9 items per page
+    assert_eq!(l.pages(0), 3); // 8 items per page, the power key and "more"
     assert_eq!(l.action(9, 0, 0), Some(Action::More));
-    assert_eq!(l.action(0, 0, 1), item(9));
-    assert_eq!(l.action(1, 0, 2), item(19));
-    assert_eq!(l.action(2, 0, 2), None);
+    assert_eq!(l.action(0, 0, 1), item(8));
+    assert_eq!(l.action(3, 0, 2), item(19));
+    assert_eq!(l.action(5, 0, 2), None);
 }
 
 #[test]
@@ -66,14 +69,14 @@ fn fifteen_keys_at_the_paging_edges() {
     assert_eq!(l.pages(0), 1);
     assert_eq!(l.action(0, 0, 0), None);
 
-    let l = layout(3, 5, 10);
-    assert_eq!((l.pages(0), l.page_size(0)), (1, (10, false)));
-    assert_eq!(l.action(9, 0, 0), item(9));
+    let l = layout(3, 5, 9);
+    assert_eq!((l.pages(0), l.page_size(0)), (1, (9, false)));
+    assert_eq!(l.action(9, 0, 0), item(8));
 
-    let l = layout(3, 5, 11);
+    let l = layout(3, 5, 10);
     assert_eq!(l.pages(0), 2);
-    assert_eq!(l.action(0, 0, 1), item(9));
-    assert_eq!(l.action(1, 0, 1), item(10));
+    assert_eq!(l.action(0, 0, 1), item(8));
+    assert_eq!(l.action(1, 0, 1), item(9));
     assert_eq!(l.action(2, 0, 1), None);
     assert_eq!(l.action(15, 0, 0), None);
 }
@@ -125,7 +128,7 @@ fn eight_keys_neo_and_plus() {
 
 #[test]
 fn thirty_two_keys_with_paging() {
-    use Control::{Next, PlayPause, Prev, VolumeDown, VolumeUp};
+    use Control::{Next, PlayPause, Power, Prev, VolumeDown, VolumeUp};
     let l = layout(4, 8, 30);
     assert_eq!(
         (l.item_keys, l.page_size(0), l.pages(0)),
@@ -143,7 +146,7 @@ fn thirty_two_keys_with_paging() {
             Some(Next),
             None,
             None,
-            None,
+            Some(Power),
             Some(VolumeDown),
             Some(VolumeUp)
         ]
@@ -174,19 +177,20 @@ fn several_shelves_put_the_shelf_key_last() {
 
 #[test]
 fn a_full_shelf_gets_more_just_before_the_shelf_key() {
-    let l = shelves(3, 5, &[9, 10, 20]);
-    assert_eq!((l.page_size(0), l.pages(0)), ((9, false), 1));
-    assert_eq!(l.action(8, 0, 0), item(8));
+    let l = shelves(3, 5, &[8, 9, 20]);
+    assert_eq!((l.page_size(0), l.pages(0)), ((8, false), 1));
+    assert_eq!(l.action(8, 0, 0), item(7));
 
-    assert_eq!((l.page_size(1), l.pages(1)), ((8, true), 2));
+    assert_eq!((l.page_size(1), l.pages(1)), ((7, true), 2));
     assert_eq!(l.action(8, 1, 0), Some(Action::More));
     assert_eq!(l.action(9, 1, 0), Some(Action::Shelf));
-    assert_eq!(l.action(1, 1, 1), item(18));
+    assert_eq!(l.action(0, 1, 1), item(15));
+    assert_eq!(l.action(1, 1, 1), item(16));
     assert_eq!(l.action(2, 1, 1), None);
 
     assert_eq!(l.pages(2), 3);
-    assert_eq!(l.action(3, 2, 2), item(38));
-    assert_eq!(l.action(4, 2, 2), None);
+    assert_eq!(l.action(6, 2, 2), item(36));
+    assert_eq!(l.action(7, 2, 2), None);
 }
 
 #[test]
@@ -224,4 +228,21 @@ fn small_decks_flip_through_pages_then_shelves() {
 fn one_shelf_on_a_small_deck_keeps_the_more_key() {
     let l = shelves(2, 3, &[5]);
     assert_eq!(l.action(2, 0, 0), Some(Action::More));
+}
+
+#[test]
+fn the_power_key_takes_a_free_control_key_else_the_top_right_item_key() {
+    let power = Some(Action::Control(Control::Power));
+    let keys_with_power = |l: &Layout, keys: usize| -> Vec<usize> {
+        (0..keys).filter(|&k| l.action(k, 0, 0) == power).collect()
+    };
+    assert_eq!(keys_with_power(&layout(3, 5, 20), 15), [4], "MK.2");
+    assert_eq!(keys_with_power(&layout(4, 8, 40), 32), [29], "XL");
+    assert_eq!(keys_with_power(&layout(2, 3, 9), 6), [0; 0], "Mini");
+    assert_eq!(keys_with_power(&layout(2, 4, 9), 8), [0; 0], "Neo");
+    assert_eq!(
+        keys_with_power(&shelves(3, 5, &[20, 3]), 15),
+        [4],
+        "MK.2 with shelves"
+    );
 }

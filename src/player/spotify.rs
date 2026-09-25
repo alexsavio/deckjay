@@ -138,6 +138,7 @@ impl Speaker for SpotifyPlayer {
             } => self.play(item, playlist, volume, events),
             PlayerCmd::Play { .. } => bail!("Spotify plays playlists only"),
             PlayerCmd::TogglePause => self.toggle(events),
+            PlayerCmd::Off => Speaker::stop(self, events),
             PlayerCmd::Next => match self.device_id() {
                 Some(id) => self.client()?.next(&id),
                 None => Ok(()),

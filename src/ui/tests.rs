@@ -174,7 +174,7 @@ fn the_shelf_key_shows_the_next_shelf_and_each_shelf_keeps_its_page() {
     );
 
     ui.press(&layout, 8);
-    assert_eq!(first_item(&ui, &layout), Some(ItemId(8)));
+    assert_eq!(first_item(&ui, &layout), Some(ItemId(7)));
     ui.press(&layout, 9);
     assert_eq!(first_item(&ui, &layout), Some(ItemId(20)));
     assert_eq!(
@@ -186,7 +186,7 @@ fn the_shelf_key_shows_the_next_shelf_and_each_shelf_keeps_its_page() {
         }
     );
     ui.press(&layout, 9);
-    assert_eq!(first_item(&ui, &layout), Some(ItemId(8)));
+    assert_eq!(first_item(&ui, &layout), Some(ItemId(7)));
 }
 
 #[test]
@@ -647,4 +647,24 @@ fn progress_of_an_item_that_does_not_resume_is_ignored() {
         .unwrap();
     ui.update(&layout, &[]);
     assert!(ui.store.progress("music/album 0").is_none());
+}
+
+#[test]
+fn the_power_key_stops_everything_and_the_next_press_only_wakes() {
+    let (mut ui, cmds, _events) = test_ui(3, "");
+    let layout = ui.layout(3, 5);
+    assert_eq!(ui.faces(&layout)[4], Face::Power);
+    ui.press(&layout, 0);
+    ui.press(&layout, 4);
+
+    assert!(matches!(cmds.try_iter().last(), Some(PlayerCmd::Off)));
+    assert_eq!((ui.current, ui.playing, ui.asleep), (None, false, true));
+
+    let mut keys = vec![0];
+    ui.wake(&mut keys);
+    assert!(keys.is_empty(), "the waking press does not play");
+    assert!(!ui.asleep);
+    let mut keys = vec![0];
+    ui.wake(&mut keys);
+    assert_eq!(keys, [0]);
 }

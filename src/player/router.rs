@@ -69,6 +69,12 @@ impl Speaker for Router {
     fn stop(&mut self, events: &mut Emitter) -> Result<()> {
         self.active().stop(events)
     }
+
+    /// The speaker's box goes to standby even after Spotify played, since
+    /// Spotify often plays on that same box.
+    fn standby(&mut self) -> Result<()> {
+        self.output.standby()
+    }
 }
 
 #[cfg(test)]
@@ -79,6 +85,7 @@ mod tests {
 
     use super::*;
     use crate::library::ItemId;
+    use crate::player::power_off;
     use crate::player::{Playlist, Start};
 
     /// Records what it was asked to do, as `"<name> <call>"`.
@@ -95,6 +102,7 @@ mod tests {
                 PlayerCmd::Next => "next",
                 PlayerCmd::Prev => "prev",
                 PlayerCmd::SetVolume(_) => "volume",
+                PlayerCmd::Off => "off",
             };
             self.log.borrow_mut().push(format!("{} {what}", self.name));
             Ok(())
@@ -112,6 +120,11 @@ mod tests {
 
         fn stop(&mut self, _: &mut Emitter) -> Result<()> {
             self.log.borrow_mut().push(format!("{} stop", self.name));
+            Ok(())
+        }
+
+        fn standby(&mut self) -> Result<()> {
+            self.log.borrow_mut().push(format!("{} standby", self.name));
             Ok(())
         }
     }
@@ -189,5 +202,27 @@ mod tests {
         assert!(err.to_string().contains("[spotify]"), "{err:#}");
         router.handle(PlayerCmd::Next, &mut events).unwrap();
         assert_eq!(*log.borrow(), ["output play", "output next"]);
+    }
+
+    #[test]
+    fn power_off_stops_spotify_and_puts_the_speaker_box_in_standby() {
+        let (mut router, log) = router(true);
+        let (tx, events) = mpsc::channel();
+        let mut emitter = Emitter::new(tx);
+        router.handle(playlist(), &mut emitter).unwrap();
+        power_off(&mut router, &mut emitter).unwrap();
+        assert_eq!(
+            *log.borrow(),
+            [
+                "output stop",
+                "spotify play",
+                "spotify stop",
+                "output standby"
+            ]
+        );
+        assert_eq!(
+            events.try_iter().last(),
+            Some(crate::player::PlayerEvent::Stopped)
+        );
     }
 }

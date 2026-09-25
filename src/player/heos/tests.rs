@@ -628,5 +628,6 @@ fn command_lines_encode_values_but_put_the_url_last_and_raw() {
     );
 }
 
+mod power;
 mod progress;
 mod radio;

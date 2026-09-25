@@ -115,6 +115,7 @@ impl Speaker for LocalPlayer {
                 self.check()?;
                 self.toggle_pause(events)
             }
+            PlayerCmd::Off => Speaker::stop(self, events),
             PlayerCmd::Next => {
                 self.check()?;
                 match self.current {

@@ -133,6 +133,9 @@ pub enum PlayerCmd {
     Prev,
     /// 0.0 to 1.0.
     SetVolume(f32),
+    /// The power key: stops what plays (an audiobook reports its place
+    /// first) and puts the speaker in standby where its protocol allows.
+    Off,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +237,10 @@ trait Speaker {
         self.reset();
         Ok(())
     }
+    /// Puts the device in standby, where its protocol has a command for it.
+    fn standby(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
@@ -251,7 +258,11 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
                 events.last = None;
                 for cmd in coalesce(pending) {
                     debug!(?cmd, "speaker command");
-                    if let Err(err) = speaker.handle(cmd, &mut events) {
+                    let done = match cmd {
+                        PlayerCmd::Off => power_off(speaker.as_mut(), &mut events),
+                        cmd => speaker.handle(cmd, &mut events),
+                    };
+                    if let Err(err) = done {
                         warn!("speaker command failed: {err:#}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
@@ -278,6 +289,16 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
             Err(RecvTimeoutError::Disconnected) => return,
         }
     }
+}
+
+/// A failed standby still leaves the speaker stopped, so it is only logged.
+fn power_off(speaker: &mut dyn Speaker, events: &mut Emitter) -> Result<()> {
+    speaker.stop(events)?;
+    if let Err(err) = speaker.standby() {
+        warn!("cannot put the speaker in standby: {err:#}");
+    }
+    events.emit(PlayerEvent::Stopped);
+    Ok(())
 }
 
 /// Both speaker protocols take 0.0 to 1.0.

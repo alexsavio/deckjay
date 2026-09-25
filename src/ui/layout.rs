@@ -14,6 +14,8 @@ pub(super) enum Control {
     Next,
     VolumeDown,
     VolumeUp,
+    /// Stops everything and dims the deck until the next press.
+    Power,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,6 +43,11 @@ pub(super) struct Layout {
     pub(super) cols: usize,
     /// Keys above the control row.
     pub(super) item_keys: usize,
+    /// The item keys that show items and the navigation keys, in order; all
+    /// item keys but the power key.
+    slots: Vec<usize>,
+    /// The power key, when it sits among the item keys.
+    power: Option<usize>,
     nav: Nav,
     controls: Vec<Option<Control>>,
     /// The items of each shelf, in the order the keys show them.
@@ -62,9 +69,21 @@ impl Layout {
         } else {
             shelves
         };
+        let mut controls = control_row(cols);
+        // A free control key first; else the top-right item key, where it
+        // stays in one place on every page and shelf, if enough keys remain.
+        let power = match controls.iter().rposition(Option::is_none) {
+            Some(free) => {
+                controls[free] = Some(Control::Power);
+                None
+            }
+            None if item_keys > MIN_ITEM_KEYS_FOR_SHELF_KEY => Some(cols - 1),
+            None => None,
+        };
+        let slots: Vec<usize> = (0..item_keys).filter(|&key| Some(key) != power).collect();
         let nav = if shelves.len() == 1 {
             Nav::Items
-        } else if item_keys < MIN_ITEM_KEYS_FOR_SHELF_KEY {
+        } else if slots.len() < MIN_ITEM_KEYS_FOR_SHELF_KEY {
             Nav::Flip
         } else {
             Nav::Shelf
@@ -72,8 +91,10 @@ impl Layout {
         Layout {
             cols,
             item_keys,
+            slots,
+            power,
             nav,
-            controls: control_row(cols),
+            controls,
             shelves,
         }
     }
@@ -86,8 +107,8 @@ impl Layout {
     /// "more" key (right after the items).
     fn page_size(&self, shelf: usize) -> (usize, bool) {
         let free = match self.nav {
-            Nav::Items => self.item_keys,
-            Nav::Shelf | Nav::Flip => self.item_keys - 1,
+            Nav::Items => self.slots.len(),
+            Nav::Shelf | Nav::Flip => self.slots.len() - 1,
         };
         if self.nav != Nav::Flip && self.shelves[shelf].len() > free {
             (free - 1, true)
@@ -110,7 +131,11 @@ impl Layout {
                 .flatten()
                 .map(Action::Control);
         }
-        if key == self.item_keys - 1 {
+        if self.power == Some(key) {
+            return Some(Action::Control(Control::Power));
+        }
+        let slot = self.slots.iter().position(|&k| k == key)?;
+        if slot == self.slots.len() - 1 {
             match self.nav {
                 Nav::Shelf => return Some(Action::Shelf),
                 Nav::Flip => return Some(Action::Flip),
@@ -118,14 +143,14 @@ impl Layout {
             }
         }
         let (size, more) = self.page_size(shelf);
-        if more && key == size {
+        if more && slot == size {
             return Some(Action::More);
         }
-        if key >= size {
+        if slot >= size {
             return None;
         }
         self.shelves[shelf]
-            .get(page * size + key)
+            .get(page * size + slot)
             .copied()
             .map(Action::Item)
     }

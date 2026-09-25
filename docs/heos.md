@@ -244,6 +244,22 @@ Not tried on the receiver: the retry after a drop, pausing a live stream,
 and the `stop` fallback. A stop pressed in the HEOS app within 10 s of the
 start looks like a drop, and the station starts again.
 
+## Power key
+
+HEOS has no power command. The deck's power key first stops playback as a
+switch to another speaker does (`set_play_state stop`), then connects to
+the receiver's own control port, 23, and sends `PWSTANDBY` followed by a
+carriage return: the Denon and Marantz text protocol for "standby". That
+port answers only with **Network Control** set to **Always On** (Setup,
+Network). A HEOS speaker without that port refuses the connection; the
+power key then only stops it, and the log has a warning.
+
+Not tested on the AVR-X1600H yet. By hand:
+
+```sh
+printf 'PWSTANDBY\r' | nc -w 2 192.168.1.40 23
+```
+
 ## Limits of the design
 
 Written down in the module doc of `heos.rs`:

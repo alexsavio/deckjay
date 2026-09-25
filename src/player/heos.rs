@@ -23,7 +23,7 @@
 
 mod cli;
 
-use std::io::{self, ErrorKind};
+use std::io::{self, ErrorKind, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -36,6 +36,9 @@ use super::{Content, Emitter, PlayerCmd, PlayerEvent, Speaker, Station, TrackInf
 use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// HEOS has no power command; Denon and Marantz receivers take their own
+/// plain-text control commands on this port (with network control on).
+const CONTROL_PORT: u16 = 23;
 /// How long a new track may report `stop` before we give up on it. A
 /// station takes 1.5 to 10 s to start.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
@@ -48,6 +51,8 @@ const MAX_TRIES: u32 = 3;
 pub(super) struct HeosPlayer {
     host: String,
     port: u16,
+    /// The receiver's control port, for standby.
+    control_port: u16,
     conn: Option<Connection>,
     /// Id of the item we started last.
     item: ItemId,
@@ -96,6 +101,7 @@ impl HeosPlayer {
         HeosPlayer {
             host,
             port,
+            control_port: CONTROL_PORT,
             conn: None,
             item: ItemId(0),
             tracks: Vec::new(),
@@ -143,6 +149,7 @@ impl Speaker for HeosPlayer {
             PlayerCmd::SetVolume(volume) => self.set_volume(volume),
             PlayerCmd::TogglePause => self.toggle_pause(events),
             PlayerCmd::Next | PlayerCmd::Prev if self.stream.is_some() => Ok(()),
+            PlayerCmd::Off => Speaker::stop(self, events),
             PlayerCmd::Next => match self.current {
                 Some(c) if c.track + 1 < self.tracks.len() => self.play_track(c.track + 1, events),
                 _ => Ok(()),
@@ -215,6 +222,15 @@ impl Speaker for HeosPlayer {
 
     fn stop(&mut self, events: &mut Emitter) -> Result<()> {
         self.halt(events);
+        Ok(())
+    }
+
+    /// Plain HEOS speakers have no control port; the connection is refused
+    /// and the power key only stops them.
+    fn standby(&mut self) -> Result<()> {
+        let mut control = super::connect(&self.host, self.control_port)?;
+        control.write_all(b"PWSTANDBY\r")?;
+        info!("put the receiver in standby");
         Ok(())
     }
 }
