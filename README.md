@@ -12,7 +12,7 @@ jack, HDMI or USB sound card of the Raspberry Pi.
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume
 ```
 
-The program serves your music folder over HTTP and tells the speaker which
+The program serves your music folders over HTTP and tells the speaker which
 file to play. The speaker downloads the files itself, so playback keeps going
 even if the computer is busy. A Chromecast gets the whole album as a queue. A
 HEOS device plays one file at a time, so the program starts the next track
@@ -36,15 +36,18 @@ program natively. Docker is only used to build the Raspberry Pi image.
    to the device.
 3. Run `just setup`. It creates `config.toml` from `config.example.toml`.
    Set `speaker_host` to the speaker's IP.
-4. Put music in `music/<album>/` with a `cover.jpg` per album.
+4. Put music in `music/<album>/` with a `cover.jpg` per album. For
+   audiobooks or stories, or music in other folders or on other drives, add
+   a `[[source]]` table per folder at the end of `config.toml` (see
+   `config.example.toml`).
 5. Check everything:
 
    ```sh
    just doctor
    ```
 
-   It lists your albums, the Stream Decks it sees, and whether the speaker
-   answers. `just preview` draws the key layout into `layout.png`.
+   It lists your sources and what is in them, the Stream Decks it sees, and
+   whether the speaker answers. `just preview` draws the key layout into `layout.png`.
 6. Run it:
 
    ```sh
@@ -67,7 +70,7 @@ Run `just` to list every recipe. The ones you need most:
 | Command | What it does |
 |---|---|
 | `just run` | Start the player |
-| `just doctor` | List albums, Stream Decks and speaker status |
+| `just doctor` | List sources and their items, Stream Decks and speaker status |
 | `just preview [FILE]` | Draw the key layout into a PNG, no hardware needed |
 | `just ci` | Format check, clippy, tests and docs: run before a commit |
 | `just test-match NAME` | Run only the tests whose name contains `NAME` |
@@ -108,6 +111,10 @@ just pi-logs
 `docker save | ssh docker load`, copies `docker-compose.yml`, `config.toml`
 and `music/` to `~/kids-deck`, and runs `docker compose up -d` there. It uses
 `pi@raspberrypi.local`; set `PI_HOST` (and `PI_DIR`) in `.env` to change it.
+
+Sources outside `music/` are not copied: put them on the Pi (or a drive
+mounted there) at the path in `config.toml`, and add a volume for each in
+`docker-compose.yml`.
 
 `just deploy` only adds and updates music on the Pi; it never deletes. To
 remove albums from the Pi that you deleted on the Mac, run
@@ -153,8 +160,8 @@ playback: decoding, sound outputs and the Raspberry Pi's audio devices.
 | File | What it does |
 |---|---|
 | `main.rs` | Startup, command-line options, reconnecting to the deck |
-| `config.rs` | `config.toml` loading and validation |
-| `library/` | Items and shelves (`mod.rs`); scans album folders and finds covers (`scan.rs`); builds URLs |
+| `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`) |
+| `library/` | Items and shelves, one shelf per source (`mod.rs`); scans source folders and finds covers (`scan.rs`); builds URLs |
 | `ui/` | What each key shows and does (`mod.rs`), key layout (`layout.rs`) |
 | `icons.rs` | Draws control icons and album tiles (no image files needed) |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |

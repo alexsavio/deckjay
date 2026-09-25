@@ -49,7 +49,7 @@ run *ARGS:
 debug *ARGS:
     RUST_LOG=debug,tower_http=debug cargo run -- {{ARGS}}
 
-# List albums, Stream Decks and speaker status, then exit
+# List sources and their items, Stream Decks and speaker status, then exit
 doctor:
     cargo run --release -- --check
 

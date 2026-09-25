@@ -1,4 +1,5 @@
-//! Serves the music folder over HTTP so the speaker can download the tracks.
+//! Serves the source folders over HTTP so the speaker can download the
+//! tracks: source `name` at `/music/<name>/`.
 
 use std::collections::HashSet;
 use std::net::TcpListener;
@@ -15,16 +16,21 @@ use percent_encoding::percent_decode_str;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
-/// `files` holds the paths, relative to `music_dir`, that the speaker may download.
-pub fn spawn(music_dir: PathBuf, port: u16, files: HashSet<PathBuf>) -> Result<()> {
+/// `roots` maps source names to their folders; `files` holds the paths below
+/// `/music/` that the speaker may download.
+pub fn spawn(roots: Vec<(String, PathBuf)>, port: u16, files: HashSet<PathBuf>) -> Result<()> {
     // Bind here, so a port that is already in use is reported at startup.
     let listener = TcpListener::bind(("0.0.0.0", port))
         .with_context(|| format!("cannot listen on port {port} (in use?)"))?;
-    serve(listener, music_dir, files)
+    serve(listener, roots, files)
 }
 
 /// Serves on an already bound listener from a new `http` thread.
-fn serve(listener: TcpListener, music_dir: PathBuf, files: HashSet<PathBuf>) -> Result<()> {
+fn serve(
+    listener: TcpListener,
+    roots: Vec<(String, PathBuf)>,
+    files: HashSet<PathBuf>,
+) -> Result<()> {
     listener.set_nonblocking(true)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -33,8 +39,11 @@ fn serve(listener: TcpListener, music_dir: PathBuf, files: HashSet<PathBuf>) -> 
         let _guard = runtime.enter();
         tokio::net::TcpListener::from_std(listener)?
     };
-    let app = Router::new()
-        .nest_service("/music", ServeDir::new(music_dir))
+    let app = roots
+        .into_iter()
+        .fold(Router::new(), |app, (name, root)| {
+            app.nest_service(&format!("/music/{name}"), ServeDir::new(root))
+        })
         .layer(middleware::from_fn_with_state(Arc::new(files), only_listed))
         .layer(TraceLayer::new_for_http());
     std::thread::Builder::new()
@@ -48,7 +57,7 @@ fn serve(listener: TcpListener, music_dir: PathBuf, files: HashSet<PathBuf>) -> 
 }
 
 /// `ServeDir` alone would also serve dotfiles, other files, and files behind
-/// symlinks that lead out of the music folder.
+/// symlinks that lead out of a source folder.
 async fn only_listed(
     State(files): State<Arc<HashSet<PathBuf>>>,
     req: Request,
@@ -70,6 +79,7 @@ async fn only_listed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Source, SourceKind};
     use crate::library::{Library, url_for};
 
     fn touch(path: &Path, body: &[u8]) {
@@ -77,15 +87,23 @@ mod tests {
         std::fs::write(path, body).unwrap();
     }
 
-    fn start(root: &Path) -> String {
+    fn source(name: &str, path: &Path) -> Source {
+        Source {
+            name: name.into(),
+            kind: SourceKind::Music,
+            path: path.into(),
+        }
+    }
+
+    /// Serves `sources` like `main` does; returns the base URL of `/music`.
+    fn start(sources: &[Source]) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}/music", listener.local_addr().unwrap());
-        serve(
-            listener,
-            root.to_path_buf(),
-            Library::scan(root).unwrap().served_files(),
-        )
-        .unwrap();
+        let roots = sources
+            .iter()
+            .map(|s| (s.name.clone(), s.path.clone()))
+            .collect();
+        serve(listener, roots, Library::scan(sources).served_files()).unwrap();
         base
     }
 
@@ -113,14 +131,36 @@ mod tests {
         ] {
             touch(&root.join("Äl bum #2").join(name), b"x");
         }
-        let base = start(root);
+        let sources = [source("music", root)];
+        let base = start(&sources);
 
-        let files = Library::scan(root).unwrap().served_files();
+        let files = Library::scan(&sources).served_files();
         assert_eq!(files.len(), 5);
         for rel in &files {
             let url = url_for(&base, rel);
             assert_eq!(status(&url), 200, "{url}");
         }
+    }
+
+    #[test]
+    fn serves_each_source_below_its_name() {
+        let music = tempfile::tempdir().unwrap();
+        touch(&music.path().join("Album/01.mp3"), b"music");
+        let books = tempfile::tempdir().unwrap();
+        touch(&books.path().join("Book/01.mp3"), b"book");
+        let base = start(&[source("music", music.path()), source("books", books.path())]);
+
+        let body = |path: &str| {
+            let mut reply = agent().get(&format!("{base}/{path}")).call().unwrap();
+            (
+                reply.status().as_u16(),
+                reply.body_mut().read_to_string().unwrap(),
+            )
+        };
+        assert_eq!(body("music/Album/01.mp3"), (200, "music".into()));
+        assert_eq!(body("books/Book/01.mp3"), (200, "book".into()));
+        assert_eq!(body("books/Album/01.mp3").0, 404);
+        assert_eq!(body("music/Book/01.mp3").0, 404);
     }
 
     #[test]
@@ -134,13 +174,15 @@ mod tests {
         touch(&outside.path().join("secret.txt"), b"x");
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), root.join("Album/escape")).unwrap();
-        let base = start(root);
+        let base = start(&[source("music", root)]);
 
         for path in [
-            "/.env",
-            "/Album/notes.txt",
-            "/Album/escape/secret.txt",
-            "/Album/",
+            "/music/.env",
+            "/music/Album/notes.txt",
+            "/music/Album/escape/secret.txt",
+            "/music/Album/",
+            "/music/%2E%2E/music/Album/01.mp3",
+            "/Album/01.mp3",
         ] {
             assert_eq!(status(&format!("{base}{path}")), 404, "{path}");
         }
@@ -151,7 +193,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         touch(&root.join("Album/01.mp3"), b"0123456789");
-        let url = format!("{}/Album/01.mp3", start(root));
+        let url = format!("{}/music/Album/01.mp3", start(&[source("music", root)]));
 
         let mut reply = agent()
             .get(&url)

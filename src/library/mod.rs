@@ -1,23 +1,21 @@
-//! What the deck plays: items on shelves (for now one shelf with every album
-//! folder of the music folder), the files the speaker may download, and the
-//! URLs it downloads them from.
+//! What the deck plays: items on shelves (one shelf per `[[source]]`), the
+//! files the speaker may download, and the URLs it downloads them from.
 
 mod scan;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-/// The source name at the start of every [`ItemKey`] of the music folder.
-const MUSIC: &str = "music";
+use crate::config::{Source, SourceKind};
 
 #[derive(Debug, Clone)]
 pub struct Track {
-    /// The file as found in the music folder, for local playback.
+    /// The file as found in the source folder, for local playback.
     pub path: PathBuf,
-    /// Path relative to the music folder.
+    /// `<source name>/<path in the source folder>`: the path the web server
+    /// serves the file at, below `/music/`.
     pub rel_path: PathBuf,
     /// File name without the extension.
     pub title: String,
@@ -25,7 +23,7 @@ pub struct Track {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[expect(dead_code, reason = "only the music folder is scanned so far")]
+#[expect(dead_code, reason = "radio, podcast and Spotify sources come later")]
 pub enum Kind {
     Music,
     Audiobook,
@@ -41,7 +39,7 @@ pub enum Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ItemId(pub u32);
 
-/// `<source>/<path in the source>`, e.g. `music/01 Animal Songs`: the same
+/// `<source name>/<name in the source folder>`, e.g. `music/01 Animal Songs`: the same
 /// item gets the same key after a restart.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ItemKey(pub String);
@@ -52,22 +50,27 @@ pub enum Media {
     Tracks(Vec<Track>),
 }
 
-/// One thing a key plays: an album folder with at least one playable track.
+/// One thing a key plays, e.g. an album folder or a story file.
 #[derive(Debug, Clone)]
 pub struct Item {
-    #[expect(dead_code, reason = "read once keys show what kind an item is")]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "read once keys show what kind an item is")
+    )]
     pub kind: Kind,
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "read once playback progress is saved")
     )]
     pub key: ItemKey,
-    /// Folder name, including any number prefix.
+    /// Folder name, or file name without the extension, including any
+    /// number prefix.
     pub name: String,
     pub media: Media,
     /// Absolute path of the cover image, if one was found.
     pub cover: Option<PathBuf>,
-    /// Cover path relative to the music folder (for the speaker's metadata).
+    /// Where the web server serves the cover, like [`Track::rel_path`] (for
+    /// the speaker's metadata).
     pub cover_rel: Option<PathBuf>,
 }
 
@@ -81,9 +84,15 @@ impl Item {
 /// Items the deck shows together.
 #[derive(Debug, Clone)]
 pub struct Shelf {
-    #[expect(dead_code, reason = "read once the deck has shelf keys")]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "read once the deck has shelf keys")
+    )]
     pub name: String,
-    #[expect(dead_code, reason = "read once the deck has shelf keys")]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "read once the deck has shelf keys")
+    )]
     pub kind: Kind,
     /// In the order the deck shows them.
     pub items: Vec<ItemId>,
@@ -95,23 +104,56 @@ pub struct Library {
     shelves: Vec<Shelf>,
 }
 
+impl From<SourceKind> for Kind {
+    fn from(kind: SourceKind) -> Kind {
+        match kind {
+            SourceKind::Music => Kind::Music,
+            SourceKind::Audiobook => Kind::Audiobook,
+            SourceKind::Story => Kind::Story,
+        }
+    }
+}
+
 impl Library {
-    /// Every album folder in `music_dir`, on one music shelf.
-    pub fn scan(music_dir: &Path) -> Result<Library> {
-        Ok(Library::music(scan::scan(music_dir)?))
+    /// One shelf per source, in config order. A source whose folder cannot
+    /// be read gets an empty shelf and a warning, so the others still play.
+    pub fn scan(sources: &[Source]) -> Library {
+        let mut library = Library {
+            items: Vec::new(),
+            shelves: Vec::new(),
+        };
+        for source in sources {
+            let items = scan::scan(source).unwrap_or_else(|err| {
+                tracing::warn!("{err:#}");
+                Vec::new()
+            });
+            library.add_shelf(source.name.clone(), source.kind.into(), items);
+        }
+        library
     }
 
-    /// `items` in this order on one music shelf, which exists even when empty.
+    /// `items` in this order on one music shelf.
+    #[cfg(test)]
     pub fn music(items: Vec<Item>) -> Library {
-        let ids = (0..items.len()).map(|i| ItemId(i as u32)).collect();
-        Library {
-            items,
-            shelves: vec![Shelf {
-                name: MUSIC.into(),
-                kind: Kind::Music,
-                items: ids,
-            }],
-        }
+        let mut library = Library {
+            items: Vec::new(),
+            shelves: Vec::new(),
+        };
+        library.add_shelf("music".into(), Kind::Music, items);
+        library
+    }
+
+    fn add_shelf(&mut self, name: String, kind: Kind, items: Vec<Item>) {
+        let first = self.items.len();
+        let ids = (first..first + items.len())
+            .map(|i| ItemId(i as u32))
+            .collect();
+        self.items.extend(items);
+        self.shelves.push(Shelf {
+            name,
+            kind,
+            items: ids,
+        });
     }
 
     pub fn item(&self, id: ItemId) -> &Item {
@@ -129,7 +171,7 @@ impl Library {
         &self.shelves
     }
 
-    /// Paths relative to the music folder: the only files the speaker may download.
+    /// Paths below `/music/`: the only files the speaker may download.
     pub fn served_files(&self) -> HashSet<PathBuf> {
         self.items
             .iter()
@@ -184,6 +226,14 @@ mod tests {
         std::fs::write(path, b"").unwrap();
     }
 
+    fn source(name: &str, kind: SourceKind, path: &Path) -> Source {
+        Source {
+            name: name.into(),
+            kind,
+            path: path.into(),
+        }
+    }
+
     #[test]
     fn served_files_are_the_tracks_and_covers() {
         let dir = tempfile::tempdir().unwrap();
@@ -193,24 +243,28 @@ mod tests {
         touch(&root.join("Album/notes.txt"));
         touch(&root.join("Album/.hidden.mp3"));
 
-        let files = Library::scan(root).unwrap().served_files();
+        let files = Library::scan(&[source("music", SourceKind::Music, root)]).served_files();
 
         let expected: HashSet<PathBuf> = [
-            PathBuf::from("Album/01.mp3"),
-            PathBuf::from("Album/cover.jpg"),
+            PathBuf::from("music/Album/01.mp3"),
+            PathBuf::from("music/Album/cover.jpg"),
         ]
         .into();
         assert_eq!(files, expected);
     }
 
     #[test]
-    fn every_album_is_one_item_on_one_music_shelf() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        touch(&root.join("02 Bedtime/01 Moon.mp3"));
-        touch(&root.join("01 Animals/01 Elephant.mp3"));
+    fn every_source_is_one_shelf_in_config_order() {
+        let music = tempfile::tempdir().unwrap();
+        touch(&music.path().join("02 Bedtime/01 Moon.mp3"));
+        touch(&music.path().join("01 Animals/01 Elephant.mp3"));
+        let books = tempfile::tempdir().unwrap();
+        touch(&books.path().join("Pippi/01.mp3"));
 
-        let library = Library::scan(root).unwrap();
+        let library = Library::scan(&[
+            source("books", SourceKind::Audiobook, books.path()),
+            source("music", SourceKind::Music, music.path()),
+        ]);
 
         let items: Vec<(ItemId, &str, &str)> = library
             .items()
@@ -219,21 +273,38 @@ mod tests {
         assert_eq!(
             items,
             [
-                (ItemId(0), "01 Animals", "music/01 Animals"),
-                (ItemId(1), "02 Bedtime", "music/02 Bedtime"),
+                (ItemId(0), "Pippi", "books/Pippi"),
+                (ItemId(1), "01 Animals", "music/01 Animals"),
+                (ItemId(2), "02 Bedtime", "music/02 Bedtime"),
             ]
         );
-        assert_eq!(library.item(ItemId(1)).name, "02 Bedtime");
-        let shelves = library.shelves();
-        assert_eq!(shelves.len(), 1);
-        assert_eq!(shelves[0].items, [ItemId(0), ItemId(1)]);
+        assert_eq!(library.item(ItemId(2)).name, "02 Bedtime");
+        let shelves: Vec<(&str, Kind, &[ItemId])> = library
+            .shelves()
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind, s.items.as_slice()))
+            .collect();
+        assert_eq!(
+            shelves,
+            [
+                ("books", Kind::Audiobook, &[ItemId(0)][..]),
+                ("music", Kind::Music, &[ItemId(1), ItemId(2)][..]),
+            ]
+        );
     }
 
     #[test]
-    fn an_empty_music_folder_still_has_its_shelf() {
-        let library = Library::music(Vec::new());
-        assert_eq!(library.items().len(), 0);
-        assert_eq!(library.shelves().len(), 1);
+    fn a_source_that_cannot_be_read_is_an_empty_shelf() {
+        let music = tempfile::tempdir().unwrap();
+        touch(&music.path().join("Songs/01.mp3"));
+
+        let library = Library::scan(&[
+            source("usb", SourceKind::Story, &music.path().join("missing")),
+            source("music", SourceKind::Music, music.path()),
+        ]);
+
+        assert_eq!(library.items().len(), 1);
         assert!(library.shelves()[0].items.is_empty());
+        assert_eq!(library.shelves()[1].items, [ItemId(0)]);
     }
 }

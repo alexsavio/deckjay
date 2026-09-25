@@ -26,6 +26,9 @@ services:
     volumes:
       - ./config.toml:/app/config.toml:ro
       - ./music:/app/music:ro
+      # Every [[source]] folder outside ./music needs a volume too, at the
+      # same path as on this computer, e.g.:
+      # - /Volumes/Stick/audiobooks:/Volumes/Stick/audiobooks:ro
     environment:
       - RUST_LOG=${RUST_LOG:-info}
     depends_on:

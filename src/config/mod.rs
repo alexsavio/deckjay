@@ -1,17 +1,32 @@
 //! See `config.example.toml` for every key.
 
+mod source;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+use self::source::RawSource;
+pub use self::source::{Source, SourceKind};
+
 /// Unknown keys are an error, so typos are caught.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Folder with one sub-folder per album. Relative paths are resolved
-    /// against the folder the config file lives in.
-    pub music_dir: PathBuf,
+    /// Only read to point old config files at `[[source]]`.
+    #[serde(default)]
+    music_dir: Option<toml::Value>,
+    #[serde(default, rename = "source")]
+    raw_sources: Vec<RawSource>,
+    /// The `[[source]]` tables, in file order.
+    #[serde(skip)]
+    pub sources: Vec<Source>,
+
+    /// Writable folder for what the deck remembers. Relative paths are
+    /// resolved against the folder the config file lives in.
+    #[serde(default = "default_state_dir")]
+    pub state_dir: PathBuf,
 
     /// IP address (or host name) of the speaker; not used by `local`.
     #[serde(default)]
@@ -72,6 +87,9 @@ impl SpeakerType {
         }
     }
 }
+fn default_state_dir() -> PathBuf {
+    "state".into()
+}
 fn default_http_port() -> u16 {
     8765
 }
@@ -97,13 +115,19 @@ impl Config {
         Self::parse(&text, base).with_context(|| format!("invalid config in {}", path.display()))
     }
 
-    /// A relative `music_dir` is resolved against `base`.
+    /// Relative paths are resolved against `base`.
     fn parse(text: &str, base: &Path) -> Result<Self> {
         let mut cfg: Config = toml::from_str(text)?;
 
-        if cfg.music_dir.is_relative() {
-            cfg.music_dir = base.join(&cfg.music_dir);
+        if cfg.music_dir.is_some() {
+            bail!(
+                "music_dir is no longer read: the folders to play are now [[source]] \
+                 tables. Replace the music_dir line with this, at the end of the file:\n\n\
+                 [[source]]\ntype = \"music\"\npath = \"music\""
+            );
         }
+        cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base)?;
+        cfg.state_dir = base.join(&cfg.state_dir);
 
         if cfg.speaker_type != SpeakerType::Local && cfg.speaker_host.trim().is_empty() {
             bail!("speaker_host is empty; it is needed for speaker_type cast and heos");
@@ -151,10 +175,13 @@ pub fn check_advertise_host(host: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    const MINIMAL: &str = "music_dir = \"music\"\nspeaker_host = \"192.168.1.50\"\n";
+    const SPEAKER: &str = "speaker_host = \"192.168.1.50\"\n";
+    /// Tables come after the top-level keys.
+    const MUSIC: &str = "[[source]]\ntype = \"music\"\npath = \"music\"\n";
 
+    /// `extra` is top-level keys.
     fn parse(extra: &str) -> Result<Config> {
-        Config::parse(&format!("{MINIMAL}{extra}"), Path::new("/srv/deck"))
+        Config::parse(&format!("{SPEAKER}{extra}{MUSIC}"), Path::new("/srv/deck"))
     }
 
     #[test]
@@ -184,7 +211,7 @@ mod tests {
     #[test]
     fn a_local_speaker_needs_no_host() {
         let cfg = Config::parse(
-            "music_dir = \"m\"\nspeaker_type = \"local\"\naudio_device = \"Headphones\"\n",
+            &format!("speaker_type = \"local\"\naudio_device = \"Headphones\"\n{MUSIC}"),
             Path::new("."),
         )
         .unwrap();
@@ -198,18 +225,38 @@ mod tests {
     }
 
     #[test]
-    fn resolves_relative_music_dir_against_config_folder() {
-        assert_eq!(parse("").unwrap().music_dir, Path::new("/srv/deck/music"));
+    fn resolves_relative_paths_against_config_folder() {
+        let cfg = parse("").unwrap();
+        assert_eq!(cfg.sources[0].path, Path::new("/srv/deck/music"));
+        assert_eq!(cfg.state_dir, Path::new("/srv/deck/state"));
     }
 
     #[test]
-    fn keeps_absolute_music_dir() {
+    fn keeps_absolute_paths() {
         let cfg = Config::parse(
-            "music_dir = \"/data/music\"\nspeaker_host = \"x\"\n",
+            "speaker_host = \"x\"\nstate_dir = \"/var/lib/deck\"\n\
+             [[source]]\ntype = \"music\"\npath = \"/data/music\"\n",
             Path::new("/srv/deck"),
         )
         .unwrap();
-        assert_eq!(cfg.music_dir, Path::new("/data/music"));
+        assert_eq!(cfg.sources[0].path, Path::new("/data/music"));
+        assert_eq!(cfg.state_dir, Path::new("/var/lib/deck"));
+    }
+
+    #[test]
+    fn a_music_dir_config_is_told_to_use_sources() {
+        let err = Config::parse(
+            "music_dir = \"music\"\nspeaker_host = \"x\"\n",
+            Path::new("."),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("[[source]]"), "{err:#}");
+    }
+
+    #[test]
+    fn needs_a_source() {
+        let err = Config::parse("speaker_host = \"x\"\n", Path::new(".")).unwrap_err();
+        assert!(err.to_string().contains("[[source]]"), "{err:#}");
     }
 
     #[test]
@@ -262,7 +309,7 @@ mod tests {
     #[test]
     fn rejects_empty_speaker_host() {
         let err =
-            Config::parse("music_dir = \"m\"\nspeaker_host = \"\"\n", Path::new(".")).unwrap_err();
+            Config::parse(&format!("speaker_host = \"\"\n{MUSIC}"), Path::new(".")).unwrap_err();
         assert!(err.to_string().contains("speaker_host"), "{err:#}");
     }
 
@@ -305,6 +352,6 @@ mod tests {
 
     #[test]
     fn requires_speaker_host() {
-        assert!(Config::parse("music_dir = \"music\"\n", Path::new(".")).is_err());
+        assert!(Config::parse(MUSIC, Path::new(".")).is_err());
     }
 }

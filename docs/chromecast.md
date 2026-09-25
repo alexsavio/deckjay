@@ -12,7 +12,7 @@ Cast is the default `speaker_type`. The code:
   album queue, polling and the "ours" check.
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
   HEOS, the `Speaker` trait and the `Emitter`.
-- [`src/config.rs`](../src/config.rs): port 8009 as the default
+- [`src/config.rs`](../src/config/mod.rs): port 8009 as the default
   `speaker_port` for Cast.
 - `print_cast_speaker` in [`src/main.rs`](../src/main.rs): `just doctor`.
 

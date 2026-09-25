@@ -1,8 +1,9 @@
 //! kids-deck: a music player for kids.
 //!
 //! Album covers are shown on an Elgato Stream Deck. Pressing a cover plays
-//! the album on a network speaker (Chromecast or HEOS). The program serves the
-//! music folder over HTTP and tells the speaker to fetch the tracks from it.
+//! the album on a network speaker (Chromecast or HEOS) or on this computer's
+//! sound output. The program serves the source folders over HTTP and tells
+//! the speaker to fetch the tracks from it.
 //!
 //! Three threads work together:
 //!
@@ -54,7 +55,7 @@ usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
   --advertise-host HOST
                       the address the speaker uses to reach this program;
                       overrides advertise_host in the config
-  --check             list albums, Stream Decks and speaker status, then exit
+  --check             list sources, Stream Decks and speaker status, then exit
   --preview FILE.png  draw the 15-key layout into a picture, then exit
 
   simulator           run the web Stream Deck simulator
@@ -113,12 +114,7 @@ fn main() -> Result<()> {
     if advertise_host.is_some() {
         cfg.advertise_host = advertise_host;
     }
-    let library = Library::scan(&cfg.music_dir)?;
-    info!(
-        "found {} albums in {}",
-        library.items().len(),
-        cfg.music_dir.display()
-    );
+    let library = scan_sources(&cfg);
 
     let base_url =
         advertise_address(&cfg).map(|host| format!("http://{host}:{}/music", cfg.http_port));
@@ -137,7 +133,7 @@ fn main() -> Result<()> {
     let base_url = base_url?;
 
     if cfg.speaker_type != SpeakerType::Local {
-        server::spawn(cfg.music_dir.clone(), cfg.http_port, library.served_files())?;
+        serve_music(&cfg, &library)?;
         info!("serving music at {base_url}/");
     }
 
@@ -170,6 +166,28 @@ fn main() -> Result<()> {
         ui.handle_events();
         std::thread::sleep(Duration::from_secs(2));
     }
+}
+
+fn scan_sources(cfg: &Config) -> Library {
+    let library = Library::scan(&cfg.sources);
+    for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
+        info!(
+            "found {} items in {} ({})",
+            shelf.items.len(),
+            source.name,
+            source.path.display()
+        );
+    }
+    library
+}
+
+fn serve_music(cfg: &Config, library: &Library) -> Result<()> {
+    let roots = cfg
+        .sources
+        .iter()
+        .map(|s| (s.name.clone(), s.path.clone()))
+        .collect();
+    server::spawn(roots, cfg.http_port, library.served_files())
 }
 
 enum DeckSource {
@@ -276,18 +294,29 @@ fn run_check(
     base_url: Result<&str, &anyhow::Error>,
     simulator_url: Option<&str>,
 ) -> Result<()> {
-    println!("Albums in {}:", cfg.music_dir.display());
-    for (_, album) in library.items() {
-        let cover = if album.cover.is_some() {
-            "cover ✓"
-        } else {
-            "no cover"
-        };
+    for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
         println!(
-            "  {:<40} {:>3} tracks, {cover}",
-            album.name,
-            album.tracks().len()
+            "Source {} ({:?}) in {}:",
+            source.name,
+            source.kind,
+            source.path.display()
         );
+        if shelf.items.is_empty() {
+            println!("  nothing to play");
+        }
+        for &id in &shelf.items {
+            let item = library.item(id);
+            let cover = if item.cover.is_some() {
+                "cover ✓"
+            } else {
+                "no cover"
+            };
+            println!(
+                "  {:<40} {:>3} tracks, {cover}",
+                item.name,
+                item.tracks().len()
+            );
+        }
     }
     match base_url {
         Ok(base_url) => {
@@ -415,7 +444,8 @@ mod tests {
     fn config(extra: &str) -> Config {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, format!("music_dir = \"music\"\n{extra}")).unwrap();
+        let music = "[[source]]\ntype = \"music\"\npath = \"music\"\n";
+        std::fs::write(&path, format!("{extra}{music}")).unwrap();
         Config::load(&path).unwrap()
     }
 

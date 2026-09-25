@@ -136,7 +136,9 @@ fn fifteen_keys_at_the_paging_edges() {
 fn test_ui(albums: usize, volume: &str) -> (Ui, Receiver<PlayerCmd>, Sender<PlayerEvent>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let text = format!("music_dir = \"music\"\nspeaker_host = \"192.168.1.50\"\n{volume}");
+    let text = format!(
+        "speaker_host = \"192.168.1.50\"\n{volume}\n[[source]]\ntype = \"music\"\npath = \"music\"\n"
+    );
     std::fs::write(&path, text).unwrap();
     let cfg = Config::load(&path).unwrap();
     let albums = (0..albums)

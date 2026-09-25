@@ -10,7 +10,7 @@ kids-deck drives Denon / Marantz HEOS devices through the HEOS CLI, set by
   on 127.0.0.1 that records every command line kids-deck sends.
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
   Cast, the `Speaker` trait and the `Emitter`.
-- [`src/config.rs`](../src/config.rs): `speaker_type`, and port 1255 as the
+- [`src/config.rs`](../src/config/mod.rs): `speaker_type`, and port 1255 as the
   default `speaker_port` for HEOS.
 
 Tested on a Denon AVR-X1600H.
@@ -326,7 +326,7 @@ the current track means the receiver is playing a stale stream (item 1).
 - Code: [`heos.rs`](../src/player/heos.rs),
   [`heos/cli.rs`](../src/player/heos/cli.rs),
   [`heos/tests.rs`](../src/player/heos/tests.rs),
-  [`mod.rs`](../src/player/mod.rs), [`config.rs`](../src/config.rs),
+  [`mod.rs`](../src/player/mod.rs), [`config.rs`](../src/config/mod.rs),
   `print_heos_players` in [`main.rs`](../src/main.rs).
 
 [spec]: https://rn.dmglobal.com/usmodel/HEOS_CLI_ProtocolSpecification-Version-1.17.pdf

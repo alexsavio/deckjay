@@ -1,11 +1,5 @@
 # Copy to config.toml and adjust.
 
-# Folder with one sub-folder per album (relative to this file, or absolute).
-# Each album folder holds audio files (mp3, m4a, flac, ogg, wav) and a cover
-# image (cover.jpg / folder.jpg / any jpg or png). Number prefixes like
-# "01 " control the order of albums and tracks.
-music_dir = "music"
-
 # IP address of the speaker. Find it in the speaker's app or your router.
 # Tip: give it a fixed IP (DHCP reservation) in your router.
 # Not used when speaker_type = "local".
@@ -44,3 +38,33 @@ volume_step = 0.05
 
 # Stream Deck brightness in percent.
 brightness = 60
+
+# What the deck plays comes from sources: one [[source]] table each. They go
+# at the end of the file: TOML reads every key after a [[source]] line as
+# part of that source. Each source is one shelf on the deck.
+#
+# type  "music", "audiobook" or "story" (stories and sound effects).
+# name  Optional; the default is the type. Letters, digits, - and _ only.
+#       Two sources of one type need different names.
+# path  The folder, relative to this file or absolute (any drive). Every
+#       folder in it is one key: its audio files and those one folder down
+#       (CD1/, CD2/). A loose audio file is one key too, with the picture of
+#       the same name as its cover (Song.mp3 and Song.jpg). A folder's cover
+#       is cover.jpg / folder.jpg / any jpg or png in it. Number prefixes
+#       like "01 " set the order. Files: mp3, m4a, m4b, aac, flac, ogg, wav.
+#
+# In Docker, a folder outside ./music also needs a volume in
+# docker-compose.yml.
+
+[[source]]
+type = "music"
+path = "music"
+
+# [[source]]
+# type = "audiobook"
+# name = "books"
+# path = "/mnt/usb/audiobooks"
+
+# [[source]]
+# type = "story"
+# path = "/mnt/nas/kids/sounds"

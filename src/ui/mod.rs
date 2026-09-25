@@ -92,7 +92,7 @@ impl Ui {
     pub fn run(&mut self, deck: &mut Deck, brightness: u8) -> Result<()> {
         deck.set_brightness(brightness)?;
         let (rows, cols) = deck.layout();
-        let layout = Layout::new(rows, cols, self.shelf_items());
+        let layout = Layout::new(rows, cols, &self.deck_items());
         self.page = self.page.min(layout.pages - 1);
         self.prepare_tiles(deck.key_size());
         self.draw(deck, &layout)?;
@@ -268,13 +268,13 @@ impl Ui {
         deck.flush()
     }
 
-    /// The deck shows the first shelf's items.
-    fn shelf_items(&self) -> &[ItemId] {
+    /// The deck shows the items of every shelf, one shelf after the other.
+    fn deck_items(&self) -> Vec<ItemId> {
         self.library
             .shelves()
-            .first()
-            .map(|shelf| shelf.items.as_slice())
-            .unwrap_or_default()
+            .iter()
+            .flat_map(|shelf| shelf.items.iter().copied())
+            .collect()
     }
 
     /// Loads and shrinks all covers once, so drawing stays fast on a Pi.
@@ -304,9 +304,10 @@ impl Ui {
 
     /// Renders what a deck would show, as one picture (for `--preview`).
     pub fn preview(&mut self, rows: usize, cols: usize, size: u32, demo_state: bool) -> RgbImage {
-        let layout = Layout::new(rows, cols, self.shelf_items());
+        let items = self.deck_items();
+        let layout = Layout::new(rows, cols, &items);
         self.prepare_tiles(size);
-        if demo_state && let Some(&first) = self.shelf_items().first() {
+        if demo_state && let Some(&first) = items.first() {
             self.current = Some(first);
             self.playing = true;
         }

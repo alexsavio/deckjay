@@ -23,9 +23,10 @@ deploy steps and the per-file code map.
 - `just preview [FILE]`: renders a 3x5 (MK.2) layout PNG with the first
   album shown as playing: a still picture, no deck or Docker needed. To
   click through the UI without hardware, use `just sim`.
-  Still needs a valid `config.toml`, an existing `music_dir`, and a route to
+  Still needs a valid `config.toml` with a `[[source]]`, and a route to
   `speaker_host` (unless `advertise_host` is set).
-- `just doctor` (`--check`): albums, connected decks, speaker reachability.
+- `just doctor` (`--check`): sources and their items, connected decks, speaker
+  reachability.
 - `just sim [MODEL]`: player + simulator in Docker (`compose.sim.yaml`),
   page at <http://localhost:8090>. It passes the Mac's LAN IP as
   `--advertise-host`, because inside a container `local_ip_towards` returns
@@ -91,17 +92,20 @@ servers:
   - Protocol references: `docs/heos.md` and `docs/chromecast.md` (commands,
     sequences, quirks, test-by-hand snippets). Cast was tested on a Lenovo
     smart display (Chromecast built-in); the JBL itself is not tested yet.
-- **http** (`server.rs`): single-thread tokio runtime, axum `ServeDir` under
-  `/music`, behind a middleware that answers 404 for every path not in
-  `Library::served_files` (the scanned tracks and covers): no dotfiles, stray
-  files or symlink escapes reach the LAN. The port, the runtime and the
-  listener are set up on the calling thread, so start-up failures are
-  errors, not a dead server thread.
+- **http** (`server.rs`): single-thread tokio runtime, one axum `ServeDir`
+  per source at `/music/<source name>`, behind a middleware that answers 404
+  for every path not in `Library::served_files` (the scanned tracks and
+  covers): no dotfiles, stray files or symlink escapes reach the LAN. The
+  port, the runtime and the listener are set up on the calling thread, so
+  start-up failures are errors, not a dead server thread.
 
 Playback flow:
 
 1. `Library::scan` (`library/scan.rs`) builds one `Item` with its `Track`s
-   per album folder, all on one music `Shelf`.
+   per folder (tracks up to one folder down) or loose audio file of each
+   `[[source]]`, and one `Shelf` per source. The deck shows every shelf's
+   items one after the other. A source folder that cannot be read is an
+   empty shelf and a warning, not an error.
 2. `Ui::tracks` turns them into `TrackInfo` URLs with `library::url_for`
    (per-segment percent-encoding) on `base_url`:
    `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
