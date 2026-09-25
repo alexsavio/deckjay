@@ -11,9 +11,10 @@ use symphonia::core::codecs::CodecParameters;
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, Track, TrackType};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track, TrackType};
 use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
+use symphonia::core::units::{Time, TimeBase};
 use tracing::{debug, warn};
 
 /// One audio file, open and ready to decode.
@@ -21,7 +22,10 @@ pub(super) struct Source {
     reader: Box<dyn FormatReader>,
     decoder: Box<dyn AudioDecoder>,
     track_id: u32,
+    time_base: Option<TimeBase>,
     duration: Option<Duration>,
+    /// Where decoding begins: zero, or where a seek landed.
+    start: Duration,
 }
 
 impl Source {
@@ -46,6 +50,7 @@ impl Source {
             .default_track(TrackType::Audio)
             .context("no audio track")?;
         let track_id = track.id;
+        let time_base = track.time_base;
         let params = track
             .codec_params
             .as_ref()
@@ -59,13 +64,63 @@ impl Source {
             reader,
             decoder,
             track_id,
+            time_base,
             duration,
+            start: Duration::ZERO,
         })
     }
 
     /// The track's length, when the file tells it.
     pub(super) fn duration(&self) -> Option<Duration> {
         self.duration
+    }
+
+    /// Opens `path` at about `position`. A seek that fails (past the end, or a
+    /// file that cannot seek) starts the track from its beginning.
+    pub(super) fn open_at(path: &Path, position: Duration) -> Result<Source> {
+        let mut source = Source::open(path)?;
+        if position.is_zero() {
+            return Ok(source);
+        }
+        match source.seek(position) {
+            Ok(_) => Ok(source),
+            Err(err) => {
+                warn!("{}: {err:#}; playing it from its beginning", path.display());
+                Source::open(path)
+            }
+        }
+    }
+
+    /// Where the audio [`next`](Self::next) returns begins in the track.
+    pub(super) fn start(&self) -> Duration {
+        self.start
+    }
+
+    /// Moves to about `to`: a coarse seek lands on a packet near it, before
+    /// or after. Fails past the end, or for a file that cannot seek; the
+    /// source is then in an unknown place.
+    pub(super) fn seek(&mut self, to: Duration) -> Result<Duration> {
+        let time = Time::try_from_secs_f64(to.as_secs_f64()).context("not a time to seek to")?;
+        let seeked = self
+            .reader
+            .seek(
+                SeekMode::Coarse,
+                SeekTo::Time {
+                    time,
+                    // An m4b may list a chapter or cover track first.
+                    track_id: Some(self.track_id),
+                },
+            )
+            .with_context(|| format!("cannot seek to {to:?}"))?;
+        // Its state belongs to the packets before the seek.
+        self.decoder.reset();
+        let landed = self
+            .time_base
+            .and_then(|base| base.calc_time(seeked.actual_ts))
+            .map_or(to.as_secs_f64(), |time| time.as_secs_f64());
+        // Encoder delay puts a track's first packet before zero.
+        self.start = Duration::try_from_secs_f64(landed.max(0.0)).unwrap_or(to);
+        Ok(self.start)
     }
 
     /// Decodes the next packet into `samples` (interleaved) and returns its

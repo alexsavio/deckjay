@@ -24,13 +24,13 @@ use self::decode::Source;
 use self::output::OpenOutput;
 pub use self::output::output_devices;
 use super::progress::Place;
-use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
+use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, Start, TrackInfo};
 use crate::library::ItemId;
 
 /// How often the player looks for the end of a track, which is also the
 /// longest gap between two tracks.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
-/// "Previous" restarts the current track once it has played this long.
+/// "Previous" restarts the current track once it is this far in.
 const RESTART_AFTER: Duration = Duration::from_secs(5);
 
 /// Opens the sound output; tests put in one without a sound card.
@@ -92,7 +92,7 @@ impl Speaker for LocalPlayer {
                     debug!("reopening the sound output: {err:#}");
                     self.output = None;
                 }
-                self.play_from(list.start.track, events)
+                self.play_from(list.start, events)
             }
             PlayerCmd::SetVolume(volume) => {
                 self.check()?;
@@ -110,7 +110,7 @@ impl Speaker for LocalPlayer {
                 self.check()?;
                 match self.current {
                     Some(track) if track + 1 < self.tracks.len() => {
-                        self.play_from(track + 1, events)
+                        self.play_from(from_top(track + 1), events)
                     }
                     _ => Ok(()),
                 }
@@ -120,14 +120,14 @@ impl Speaker for LocalPlayer {
                 let Some(track) = self.current else {
                     return Ok(());
                 };
-                let played = self
+                let into = self
                     .output
                     .as_ref()
                     .map_or(Duration::ZERO, |o| o.engine.position());
-                if played >= RESTART_AFTER {
-                    self.play_from(track, events)
+                if into >= RESTART_AFTER {
+                    self.play_from(from_top(track), events)
                 } else {
-                    self.play_from(track.saturating_sub(1), events)
+                    self.play_from(from_top(track.saturating_sub(1)), events)
                 }
             }
         }
@@ -141,7 +141,7 @@ impl Speaker for LocalPlayer {
         // A paused track may have ended just before the pause: it moves on
         // once resumed, not while paused.
         if !self.paused && output.engine.finished() {
-            if !self.start_track(track + 1, events)? {
+            if !self.start_track(from_top(track + 1), events)? {
                 events.finished();
                 self.end_album(events);
             }
@@ -189,7 +189,7 @@ impl LocalPlayer {
             // where a resuming item got to.
             _ if !self.tracks.is_empty() => {
                 let start = events.resume_point();
-                self.play_from(start.track, events)
+                self.play_from(start, events)
             }
             _ => {
                 events.emit(PlayerEvent::Stopped);
@@ -200,35 +200,40 @@ impl LocalPlayer {
 
     /// Plays the first track from `start` on that can be decoded; with none
     /// left, the album is over.
-    fn play_from(&mut self, start: usize, events: &mut Emitter) -> Result<()> {
+    fn play_from(&mut self, start: Start, events: &mut Emitter) -> Result<()> {
         if !self.start_track(start, events)? {
             self.end_album(events);
         }
         Ok(())
     }
 
-    /// Starts the first track from `start` on that can be decoded; false when
-    /// there is none.
-    fn start_track(&mut self, start: usize, events: &mut Emitter) -> Result<bool> {
+    /// Starts the first track from `start.track` on that can be decoded, at
+    /// about `start.position` if it is that track; false when there is none.
+    fn start_track(&mut self, start: Start, events: &mut Emitter) -> Result<bool> {
         let output = match &mut self.output {
             Some(output) => output,
             empty @ None => empty.insert((self.open)()?),
         };
         output.engine.set_volume(self.volume);
-        for (index, track) in self.tracks.iter().enumerate().skip(start) {
-            match Source::open(&track.path) {
+        for (index, track) in self.tracks.iter().enumerate().skip(start.track) {
+            let position = if index == start.track {
+                start.position
+            } else {
+                Duration::ZERO
+            };
+            match Source::open_at(&track.path, position) {
                 Ok(source) => {
                     let duration = source.duration();
+                    let at = Place {
+                        track: index,
+                        position: source.start(),
+                        duration,
+                    };
                     output.engine.play(source)?;
                     info!(album = %track.album, track = %track.title, "playing");
                     self.current = Some(index);
                     self.duration = duration;
                     self.paused = false;
-                    let at = Place {
-                        track: index,
-                        position: Duration::ZERO,
-                        duration,
-                    };
                     events.place(at, true);
                     events.emit(PlayerEvent::Playing(self.item));
                     return Ok(true);
@@ -259,6 +264,14 @@ impl LocalPlayer {
             };
             events.place(at, false);
         }
+    }
+}
+
+/// The start of `track`.
+fn from_top(track: usize) -> Start {
+    Start {
+        track,
+        position: Duration::ZERO,
     }
 }
 

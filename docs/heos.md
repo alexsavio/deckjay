@@ -144,6 +144,9 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    track (`start.track`; track 1 when it is out of range): `clear_queue`,
    `play_stream`. Emits `Playing`. The track is "loading". An item that
    reports progress first gets `Progress` for the start of that track.
+   `start.position` is not used: the CLI has no command that seeks in a
+   stream, so the track (an audiobook chapter) starts from its beginning,
+   and kids-deck logs that at debug level.
 3. **Poll** every 1 s while an album is active: `get_play_state`.
    - For an item that reports progress, the latest
      `player_now_playing_progress` read since the last poll gives the place
@@ -201,6 +204,9 @@ Written down in the module doc of `heos.rs`:
 - The place in a track is as old as the latest progress event, which comes
   about every 5 s (item 5). Progress events were seen on the AVR-X1600H;
   kids-deck's use of them is tested against the fake receiver only.
+- No seek: an item that resumes starts its track from the beginning. A
+  one-file book (`.m4b`) therefore starts over; a book split into chapter
+  files goes back to the start of the chapter.
 - A track that does not start within 15 s (`LOAD_TIMEOUT`) ends the album.
 - One connection stays open. The spec (§2.1.1) says the CLI module sleeps
   until the first connection comes, and advises controllers that reconnect

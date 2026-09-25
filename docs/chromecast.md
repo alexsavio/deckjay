@@ -55,7 +55,7 @@ Namespaces, all `urn:x-cast:com.google.cast.` plus:
 | `tp.connection` | `CONNECT` | none |
 | `tp.heartbeat` | nothing | none (the receiver's `PING`s are buffered) |
 | `receiver` | `GET_STATUS`, `SET_VOLUME`, `LAUNCH` | `RECEIVER_STATUS` |
-| `media` | `LOAD`, `GET_STATUS`, `PAUSE`, `PLAY` | `MEDIA_STATUS` |
+| `media` | `LOAD`, `GET_STATUS`, `PAUSE`, `PLAY`, `SEEK` | `MEDIA_STATUS` |
 
 rust_cast turns `LAUNCH_ERROR` and the media errors `LOAD_FAILED`,
 `LOAD_CANCELLED`, `INVALID_PLAYER_STATE` and `INVALID_REQUEST` into a
@@ -80,6 +80,7 @@ and it takes `mediaSessionId` from `MEDIA_STATUS`.
 | `media.load_with_queue(…)` | the app | success or failure |
 | `media.get_status(transportId, None)` | the app | first entry |
 | `media.pause` / `media.play` | the app | success or failure |
+| `media.seek(…)` (resume only) | the app | success or failure |
 
 ```json
 {"type":"CONNECT","userAgent":"RustCast"}
@@ -124,8 +125,11 @@ the destination come from the app entry of `RECEIVER_STATUS`):
   has one.
 - rust_cast hard-codes `repeatMode` `REPEAT_OFF`, item `autoplay: true`,
   `preloadTime` 20 s and `startTime` 0.
-- kids-deck never sends `STOP`, `SEEK`, `QUEUE_*`, `CLOSE`, `PING` or
-  `PONG`.
+- `currentTime` is `start.position` in seconds (`LoadOptions.current_time`),
+  0.0 unless an item resumes inside a track (see
+  [Resume inside a track](#resume-inside-a-track)).
+- kids-deck never sends `STOP`, `QUEUE_*`, `CLOSE`, `PING` or `PONG`, and
+  `SEEK` only right after a `LOAD` that resumes inside a track.
 
 `MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
 (`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,
@@ -144,10 +148,12 @@ Every command opens its own connection and drops it at the end, without a
 2. **Play an album** (`PlayerCmd::Play`): `SET_VOLUME`; `LAUNCH` if the
    Default Media Receiver is not running; `CONNECT` to its `transportId`;
    `LOAD` with the whole album, start index `start.track` (0 when it is out
-   of range). Emits `Playing`; polling starts. The speaker then downloads
-   the tracks itself. An item that reports progress first gets `Progress`
-   for the start of that track. When the item playing before reports
-   progress, a media `GET_STATUS` before the `LOAD` gives its last place.
+   of range) and `currentTime` `start.position`; when that is not 0, a
+   `SEEK` to it follows. Emits `Playing`; polling starts. The speaker then
+   downloads the tracks itself. An item that reports progress first gets
+   `Progress` for `start` (the next poll reads the real `currentTime`).
+   When the item playing before reports progress, a media `GET_STATUS`
+   before the `LOAD` gives its last place.
 3. **Poll** every 4 s while an album is active: media `GET_STATUS`. The
    status is "ours" when its `media.contentId` equals one of our track
    URLs. `IDLE` with `loadingItemId` or `extendedStatus` set is the next
@@ -198,6 +204,41 @@ Every command opens its own connection and drops it at the end, without a
    timeout. A failed poll is logged at debug level; three in a row
    (`MAX_FAILED_POLLS`) end the album the same way, about 20 s after the
    speaker went away. A poll or command that works restarts the count.
+
+## Resume inside a track
+
+An item that resumes (an audiobook) sends `PlayerCmd::Play` with
+`start = Start { track, position }`. What rust_cast 0.21.0 can send for it
+(read in its `channels/media.rs`):
+
+- `load_with_queue` sends `queueData.startIndex` (`MediaQueue.start_index`)
+  and the `LOAD`'s `currentTime` (`LoadOptions.current_time`).
+- Every queue item goes out with `startTime: 0.0` (`QueueItem::encode`
+  hard-codes it) and `queueData` has no `startTime` of its own, so neither
+  can carry the position.
+
+Whether a receiver applies the `LOAD`'s `currentTime` to the first queue
+item when that item says `startTime` 0 is not documented clearly enough to
+rely on. So kids-deck sends both: `currentTime` in the `LOAD`, then a `SEEK`
+(`seek_after_load`) to the `mediaSessionId` of the first entry in the
+`LOAD`'s reply, with `resumeState` `PLAYBACK_START`. The payload, from the
+field order of rust_cast's `PlaybackSeekRequest` (not a byte capture):
+
+```json
+{"requestId":5,"mediaSessionId":1,"type":"SEEK",
+ "resumeState":"PLAYBACK_START","currentTime":95.5,"customData":{}}
+```
+
+- A reply without entries: no `SEEK`, logged at debug level.
+- A failed `SEEK` is a warning, not a failed command: the album plays, from
+  wherever the `LOAD` put it. The next poll's `currentTime` corrects the
+  reported place.
+- rust_cast waits for a `MEDIA_STATUS` with the `SEEK`'s `requestId` and the
+  same `mediaSessionId`, with no timeout (see "No read timeout" below).
+- **Unverified on a device**: whether `currentTime` alone works, and
+  whether the `SEEK` right after the `LOAD` lands before the receiver has
+  buffered. A double seek to the same spot should at worst cost a short
+  rebuffer.
 
 ## Seen on real hardware
 

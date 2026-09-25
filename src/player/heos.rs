@@ -98,6 +98,12 @@ impl Speaker for HeosPlayer {
                 volume,
             } => {
                 let list = content.into_tracks()?;
+                if !list.start.position.is_zero() {
+                    debug!(
+                        position = ?list.start.position,
+                        "HEOS cannot seek: the track starts from its beginning"
+                    );
+                }
                 self.report_place(events);
                 events.begin(item, list.progress);
                 self.item = item;

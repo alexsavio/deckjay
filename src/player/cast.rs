@@ -13,10 +13,10 @@ use anyhow::{Result, anyhow};
 use rust_cast::CastDevice;
 use rust_cast::channels::media::{
     IdleReason, Image, LoadOptions, Media, MediaQueue, Metadata, MusicTrackMediaMetadata,
-    PlayerState, QueueItem, QueueType, StatusEntry, StreamType,
+    PlayerState, QueueItem, QueueType, ResumeState, StatusEntry, StreamType,
 };
 use rust_cast::channels::receiver::{Application, CastDeviceApp};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::progress::{END_MARGIN, Place};
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, Start, TrackInfo};
@@ -194,8 +194,8 @@ impl Speaker for CastPlayer {
 }
 
 impl CastPlayer {
-    /// Loads our album as a queue on the speaker, starting at `start.track`;
-    /// `start.position` is ignored.
+    /// Loads our album as a queue on the speaker, starting at `start.track`,
+    /// `start.position` into it.
     fn load(&mut self, s: Session, start: Start, events: &mut Emitter) -> Result<()> {
         let index = start.track;
         let track = self
@@ -222,17 +222,24 @@ impl CastPlayer {
             start_index: index as u16,
             queue_type: QueueType::Album,
         };
-        s.device.media.load_with_queue(
+        let options = LoadOptions {
+            current_time: start.position.as_secs_f64(),
+            ..LoadOptions::default()
+        };
+        let status = s.device.media.load_with_queue(
             app.transport_id.clone(),
             app.session_id.clone(),
             &track.to_media(),
             Some(&queue),
-            LoadOptions::default(),
+            options,
         )?;
+        if !start.position.is_zero() {
+            seek_after_load(&s.device, &app, status.entries.first(), start.position);
+        }
         info!(album = %track.album, track = %track.title, "playing");
         self.active = true;
         self.last_place = None;
-        events.place(Place::start_of(index, Duration::ZERO), true);
+        events.place(Place::start_of(index, start.position), true);
         events.emit(PlayerEvent::Playing(self.item));
         Ok(())
     }
@@ -267,6 +274,30 @@ impl CastPlayer {
             .into_iter()
             .find(|a| a.app_id == DEFAULT_MEDIA_RECEIVER);
         Ok(Session { device, app })
+    }
+}
+
+/// `rust_cast` sends every queue item with `startTime` 0, which a receiver may
+/// follow instead of the LOAD's `currentTime`, so a SEEK follows the LOAD. A
+/// failure only costs the place: the track plays from its beginning.
+fn seek_after_load(
+    device: &CastDevice<'static>,
+    app: &Application,
+    loaded: Option<&StatusEntry>,
+    to: Duration,
+) {
+    let Some(loaded) = loaded else {
+        debug!("no media session to seek in");
+        return;
+    };
+    let sought = device.media.seek(
+        app.transport_id.clone(),
+        loaded.media_session_id,
+        Some(to.as_secs_f32()),
+        Some(ResumeState::PlaybackStart),
+    );
+    if let Err(err) = sought {
+        warn!("cannot seek to {to:?}: {err:#}");
     }
 }
 

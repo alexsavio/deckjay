@@ -96,6 +96,8 @@ pub(super) struct Engine {
     decoder: JoinHandle<()>,
     rate: u32,
     generation: u32,
+    /// Where the current track's audio begins: zero, or where a seek landed.
+    offset: Duration,
 }
 
 /// The sound card's end: see [`Sink::fill`].
@@ -151,6 +153,7 @@ impl Engine {
             decoder,
             rate: format.rate,
             generation: 0,
+            offset: Duration::ZERO,
         };
         let sink = Sink {
             ring: consumer,
@@ -163,9 +166,10 @@ impl Engine {
         Ok((engine, sink))
     }
 
-    /// Replaces whatever plays with `source`, from its start, unpaused.
+    /// Replaces whatever plays with `source`, from where it stands, unpaused.
     pub(super) fn play(&mut self, source: Source) -> Result<()> {
         self.next_generation();
+        self.offset = source.start();
         self.shared.paused.store(false, Ordering::Release);
         self.jobs
             .send(Job::Play(self.generation, source))
@@ -175,6 +179,7 @@ impl Engine {
     /// Silence until the next [`play`](Self::play).
     pub(super) fn stop(&mut self) {
         self.next_generation();
+        self.offset = Duration::ZERO;
         // A decoder thread that is gone has nothing left to stop.
         let _ = self.jobs.send(Job::Stop);
     }
@@ -208,14 +213,15 @@ impl Engine {
         self.shared.finished.load(Ordering::Acquire) == self.generation
     }
 
-    /// How much of the current track has been played.
+    /// The place in the current track: where it began, plus what the sound
+    /// card played of it.
     pub(super) fn position(&self) -> Duration {
         let progress = self.shared.progress.load(Ordering::Acquire);
         if (progress >> 32) as u32 != self.generation {
-            return Duration::ZERO;
+            return self.offset;
         }
         let frames = progress & u64::from(u32::MAX);
-        Duration::from_secs_f64(frames as f64 / f64::from(self.rate))
+        self.offset + Duration::from_secs_f64(frames as f64 / f64::from(self.rate))
     }
 
     /// Fails once the sound card's stream or the decoder thread is gone.

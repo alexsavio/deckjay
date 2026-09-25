@@ -17,14 +17,16 @@ speaker, no `speaker_host` and no music web server. The code:
 - [`src/player/local/tests.rs`](../src/player/local/tests.rs): decoding of
   WAV, MP3 and AAC files, the converter, and the player with a fake sound
   card; [`tests/resume.rs`](../src/player/local/tests/resume.rs): the start
-  track, the reported place and the end of a book.
+  track, seeking in every format (the `fixtures/steps.*` files), the
+  reported place and the end of a book.
 - [`src/player/progress.rs`](../src/player/progress.rs): when an item
   reports its place, shared with Cast and HEOS.
 
 Tested on a Mac, with a USB DAC as the default output and the web simulator
 as the deck: MP3 and AAC tracks, the end of a track and of the album, Next,
 Prev, pause, volume and a wrong `audio_device`. Not tested on a Raspberry Pi
-yet.
+yet. Progress reports and resuming inside a track are tested with the fake
+sound card only.
 
 ## Configuration
 
@@ -68,7 +70,32 @@ has been heard to the end and the next poll starts the next track, or ends
 the album with `Stopped`.
 
 An album starts at `start.track` (the first track when it is out of
-range). For an item that reports progress (`progress: true`), the place in
+range), at about `start.position` into it: `Source::open_at` seeks with
+symphonia's `FormatReader::seek` (`SeekMode::Coarse`, `SeekTo::Time` with
+the audio track's id, so an m4b's chapter or cover track does not get in
+the way) and resets the decoder. A coarse seek lands on a packet near the
+target; the place reported, and counted on from, is where it landed
+(`SeekedTo::actual_ts`), not the target. A position past the end of the
+track, or a file that cannot seek, plays the track from its beginning, with
+a warning.
+
+Where seeks land on the 3 s `steps.*` fixtures (`tests/resume.rs`, targets
+0.5, 1.5 and 2.5 s):
+
+| Format | Lands | Audio starts |
+|---|---|---|
+| MP3 | 0.10–0.13 s early | at the reported place, ~0.1 s quiet |
+| AAC (`.m4a`, `.m4b`) | up to 0.05 s early | at the reported place |
+| FLAC | 0.07–0.12 s early | at the reported place |
+| Vorbis | 0.20–0.25 s early | one packet later (0.128 s there) |
+| WAV | on a packet boundary before the target | at the reported place |
+
+After a reset the Vorbis decoder turns its first packet into no audio, so
+the reported place is that packet early; the MP3 decoder needs a few frames
+to fill its bit reservoir. Both are well under a second, which is what a
+resumed book needs.
+
+For an item that reports progress (`progress: true`), the place in
 the track is what the sound card played: `fill` counts the frames it wrote
 for the current generation, so the ~1.5 s the decoder runs ahead does not
 count. The track's length comes from the file (the container's duration,
@@ -80,9 +107,9 @@ the end.
 
 - **Pause:** `fill` plays silence and takes nothing from the ring, so
   resuming goes on from the same sample.
-- **Prev:** restarts the current track once it has played 5 s, else goes to
-  the previous track (as on Chromecast). **Next** on the last track does
-  nothing.
+- **Prev:** restarts the current track once it is 5 s in (a resumed track
+  counts from where it resumed), else goes to the previous track (as on
+  Chromecast). **Next** on the last track does nothing.
 - **Play/pause after the album ended:** starts the album again from the
   first track (an item that reports progress and did not finish: from the
   track it got to).
@@ -115,7 +142,7 @@ level.
 | Files | Codec | Notes |
 |---|---|---|
 | `.mp3` | MP3 | ID3 tags are skipped |
-| `.m4a`, `.mp4` | AAC-LC | HE-AAC (SBR) is not supported |
+| `.m4a`, `.m4b`, `.mp4` | AAC-LC | HE-AAC (SBR) is not supported |
 | `.aac` | AAC-LC in ADTS | |
 | `.flac` | FLAC | |
 | `.ogg`, `.oga` | Vorbis | |

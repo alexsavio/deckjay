@@ -164,3 +164,20 @@ fn the_start_track_plays_first_and_one_out_of_range_is_the_first() {
     rig.send(play(3, beyond, true)).unwrap();
     assert_eq!(rig.fake.streamed(), [track_url(2), track_url(0)]);
 }
+
+#[test]
+fn a_place_inside_the_track_starts_that_track_from_its_beginning() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    let inside = Start {
+        track: 1,
+        position: Duration::from_secs(90),
+    };
+    rig.send(play(3, inside, true)).unwrap();
+    assert_eq!(rig.fake.streamed(), [track_url(1)]);
+    assert_eq!(rig.events(), [at(1, 0, None), Playing(ITEM)]);
+    let seeks = rig.fake.commands();
+    assert!(
+        seeks.iter().all(|c| !c.contains("seek")),
+        "the CLI has no seek: {seeks:?}"
+    );
+}
