@@ -20,7 +20,8 @@ const TWO_PLAYERS: &str = concat!(
 struct Script {
     commands: Vec<String>,
     state: &'static str,
-    /// Answer this command with `result: fail`.
+    /// Answer this command, or every command line that starts with it,
+    /// with `result: fail`.
     fail: Option<&'static str>,
     /// Send a change event and a "command under process" note before each reply.
     noisy: bool,
@@ -132,7 +133,10 @@ fn answer(script: &mut Script, command: &str, players: &str) -> Vec<String> {
             r#"{{"heos": {{"command": "{name}", "result": "success", "message": "command under process&pid={pid}"}}}}"#
         ));
     }
-    let reply = if script.fail == Some(name) {
+    let reply = if script
+        .fail
+        .is_some_and(|fail| fail == name || command.starts_with(fail))
+    {
         format!(
             r#"{{"heos": {{"command": "{name}", "result": "fail", "message": "eid=14&text=cannot play&{query}"}}}}"#
         )
@@ -507,17 +511,15 @@ fn a_failed_play_stream_from_a_poll_ends_the_album() {
 }
 
 #[test]
-fn radio_and_spotify_are_refused_before_anything_is_sent() {
+fn spotify_is_refused_before_anything_is_sent() {
     let mut rig = Rig::new(ONE_PLAYER);
-    for content in crate::player::tests::unsupported() {
-        let cmd = PlayerCmd::Play {
-            item: ITEM,
-            content,
-            volume: 0.2,
-        };
-        let err = rig.send(cmd).unwrap_err();
-        assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
-    }
+    let cmd = PlayerCmd::Play {
+        item: ITEM,
+        content: crate::player::tests::unsupported(),
+        volume: 0.2,
+    };
+    let err = rig.send(cmd).unwrap_err();
+    assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
     assert_eq!(rig.fake.commands(), Vec::<String>::new());
     assert_eq!(rig.events(), []);
 }
@@ -627,3 +629,4 @@ fn command_lines_encode_values_but_put_the_url_last_and_raw() {
 }
 
 mod progress;
+mod radio;

@@ -3,13 +3,15 @@
 kids-deck drives Denon / Marantz HEOS devices through the HEOS CLI, set by
 `speaker_type = "heos"` in `config.toml`. The code:
 
-- [`src/player/heos.rs`](../src/player/heos.rs): the player choice and the
-  album walk.
+- [`src/player/heos.rs`](../src/player/heos.rs): the player choice, the
+  album walk and radio stations.
 - [`src/player/heos/cli.rs`](../src/player/heos/cli.rs): the protocol.
 - [`src/player/heos/tests.rs`](../src/player/heos/tests.rs): a fake receiver
   on 127.0.0.1 that records every command line kids-deck sends, and can
   send progress events for
-  [`tests/progress.rs`](../src/player/heos/tests/progress.rs).
+  [`tests/progress.rs`](../src/player/heos/tests/progress.rs);
+  [`tests/radio.rs`](../src/player/heos/tests/radio.rs) plays stations on
+  it.
 - [`src/player/mod.rs`](../src/player/mod.rs): the command loop shared with
   Cast, the `Speaker` trait and the `Emitter`;
   [`progress.rs`](../src/player/progress.rs): when an item reports its
@@ -83,15 +85,18 @@ Error codes that matter here (spec §6.2):
 | `system/register_for_change_events?enable=off` | new connection | result |
 | `system/register_for_change_events?enable=on` | progress item | result |
 | `player/get_players` | new connection, `just doctor` | payload |
-| `player/set_volume?pid=P&level=L` | album start, volume key | result |
+| `player/set_volume?pid=P&level=L` | item start, volume key | result |
 | `player/clear_queue?pid=P` | before each `play_stream` | nothing |
-| `browse/play_stream?pid=P&url=U` | each track | result |
+| `browse/play_stream?pid=P&url=U` | each track or station | result |
 | `player/get_play_state?pid=P` | poll, play/pause key | `state` |
-| `player/set_play_state?pid=P&state=S` | play/pause key, album end | result |
+| `player/set_play_state?pid=P&state=S` | play/pause key, item end | result |
 
 - `level` is `round(volume × 100)`, volume clamped to 0.0–1.0 (spec range
   0 to 100).
-- `S` is `pause` or `play` for the play/pause key, `stop` at album end.
+- `S` is `pause` or `play` for the play/pause key, `stop` at the end of an
+  album or station. A station is paused with `pause`, and with `stop` when
+  the receiver answers `fail` to that; it never gets `play` (see
+  [Radio](#radio)).
 - A `fail` reply to `clear_queue` (eid 4 on an empty queue) is logged at
   debug level and ignored. An I/O error (timeout, reset) ends the track
   change: no `play_stream` goes out without its `clear_queue`.
@@ -185,6 +190,54 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    (`MAX_FAILED_POLLS`) end the album the same way, about 12 to 18 s after
    the speaker went away. A poll or command that works restarts the
    count. A failed `play_stream` from a poll ends the album.
+
+## Radio
+
+A station (`Content::Stream`) is one live stream, played with the same
+`clear_queue` and `play_stream` as a track. How the station's URL becomes
+the stream URL is in [radio.md](radio.md).
+
+A spike on the AVR-X1600H found that HEOS plays MP3, AAC and HE-AAC
+streams, over HTTP, HTTPS and HLS, and follows 302 redirects. A stream
+takes 1.5 to 10 s to start, with the state going `stop`, `unknown`, then
+`play`, and it can drop to `stop` right after it started.
+
+1. **Play:** resolve the station on the player thread (a failure sends
+   nothing to the receiver and reports `Stopped`), `set_volume`,
+   `clear_queue`, `play_stream` with the stream URL. Emits `Playing`. The
+   station never reports `Progress` or `Finished`.
+2. **Poll** every 1 s, as for a track. `play` and `pause` report
+   `Playing` and `Paused`. `stop` or `unknown`:
+   - before the stream was seen playing, for less than 15 s
+     (`LOAD_TIMEOUT`): wait; after that: end it.
+   - within 10 s (`DROP_WINDOW`) of the stream first seen playing: a drop.
+     `clear_queue` and `play_stream` again, while the deck stays on
+     "playing", up to 3 `play_stream`s per key press (`MAX_TRIES`).
+   - later, after the play/pause key paused it, or with the tries used up:
+     a stop that lasts. End it.
+   - Ending sends `set_play_state stop` (item 4 of "Seen on real hardware")
+     and emits `Stopped`. There is no next track.
+3. **Play/pause key:** `get_play_state` first. `play`: `set_play_state
+   pause`; when the receiver answers `fail`, `set_play_state stop` instead,
+   and polling stops. Either way emits `Paused`. `pause`, or nothing of
+   ours playing: `clear_queue` and `play_stream` again, so the station goes
+   on live, not from where it paused.
+4. **Next / previous:** nothing is sent.
+5. **Volume key:** `set_volume`.
+
+The lines for a station and a press of play/pause while it plays (pid 7):
+
+```text
+heos://player/set_volume?pid=7&level=20
+heos://player/clear_queue?pid=7
+heos://browse/play_stream?pid=7&url=http://radio.example/kids.mp3
+heos://player/get_play_state?pid=7
+heos://player/set_play_state?pid=7&state=pause
+```
+
+Not tried on the receiver: the retry after a drop, pausing a live stream,
+and the `stop` fallback. A stop pressed in the HEOS app within 10 s of the
+start looks like a drop, and the station starts again.
 
 ## Limits of the design
 

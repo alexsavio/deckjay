@@ -16,6 +16,10 @@
 //! that reports progress plays, change events are on and the place comes
 //! from `event/player_now_playing_progress`, which the speaker sends every
 //! few seconds.
+//!
+//! A radio station is one `play_stream` of the stream its URL names. A stop
+//! within [`DROP_WINDOW`] of the stream starting is a drop, and the stream
+//! goes out again, up to [`MAX_TRIES`] times; a later stop ends it.
 
 mod cli;
 
@@ -28,12 +32,18 @@ use tracing::{debug, info, warn};
 pub use self::cli::players;
 use self::cli::{Cli, IO_TIMEOUT, Message, NowPlaying};
 use super::progress::{END_MARGIN, Place};
-use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
+use super::{Content, Emitter, PlayerCmd, PlayerEvent, Speaker, Station, TrackInfo};
 use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
-/// How long a new track may report `stop` before we give up on it.
+/// How long a new track may report `stop` before we give up on it. A
+/// station takes 1.5 to 10 s to start.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
+/// A station that stops this soon after it started playing dropped out,
+/// which HEOS does now and then right after a start.
+const DROP_WINDOW: Duration = Duration::from_secs(10);
+/// `play_stream`s of one station press, the first one included.
+const MAX_TRIES: u32 = 3;
 
 pub(super) struct HeosPlayer {
     host: String,
@@ -45,9 +55,14 @@ pub(super) struct HeosPlayer {
     tracks: Vec<TrackInfo>,
     /// Whether that album reports progress.
     progress: bool,
-    /// `None` while no album is active.
+    /// The stream of the station we started last, instead of an album.
+    stream: Option<String>,
+    /// `play_stream`s of that station since its key was pressed.
+    tries: u32,
+    /// `None` while no album or station is active.
     current: Option<Current>,
     load_timeout: Duration,
+    drop_window: Duration,
     io_timeout: Duration,
 }
 
@@ -58,13 +73,16 @@ struct Current {
     phase: Phase,
     /// The latest progress event for this track.
     seen: Option<NowPlaying>,
+    /// Paused with the play/pause key: a stop then is not a drop.
+    paused: bool,
 }
 
 #[derive(Clone, Copy)]
 enum Phase {
     /// Sent to the speaker at this time, not seen playing yet.
     Loading(Instant),
-    Started,
+    /// Seen playing or paused, first at this time.
+    Started(Instant),
 }
 
 enum PlayState {
@@ -82,8 +100,11 @@ impl HeosPlayer {
             item: ItemId(0),
             tracks: Vec::new(),
             progress: false,
+            stream: None,
+            tries: 0,
             current: None,
             load_timeout: LOAD_TIMEOUT,
+            drop_window: DROP_WINDOW,
             io_timeout: IO_TIMEOUT,
         }
     }
@@ -92,6 +113,11 @@ impl HeosPlayer {
 impl Speaker for HeosPlayer {
     fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
         match cmd {
+            PlayerCmd::Play {
+                item,
+                content: Content::Stream(station),
+                volume,
+            } => self.play_station(item, &station, volume, events),
             PlayerCmd::Play {
                 item,
                 content,
@@ -109,12 +135,14 @@ impl Speaker for HeosPlayer {
                 self.item = item;
                 self.tracks = list.tracks;
                 self.progress = list.progress;
+                self.stream = None;
                 self.current = None;
                 self.set_volume(volume)?;
                 self.play_track(list.start.track, events)
             }
             PlayerCmd::SetVolume(volume) => self.set_volume(volume),
             PlayerCmd::TogglePause => self.toggle_pause(events),
+            PlayerCmd::Next | PlayerCmd::Prev if self.stream.is_some() => Ok(()),
             PlayerCmd::Next => match self.current {
                 Some(c) if c.track + 1 < self.tracks.len() => self.play_track(c.track + 1, events),
                 _ => Ok(()),
@@ -136,17 +164,23 @@ impl Speaker for HeosPlayer {
             return Ok(());
         };
         let started = Some(Current {
-            phase: Phase::Started,
+            phase: match current.phase {
+                Phase::Loading(_) => Phase::Started(Instant::now()),
+                Phase::Started(since) => Phase::Started(since),
+            },
             ..current
         });
         match state {
             PlayState::Play => {
-                self.current = started;
+                self.current = started.map(|c| Current { paused: false, ..c });
                 events.emit(PlayerEvent::Playing(self.item));
             }
             PlayState::Pause => {
                 self.current = started;
                 events.emit(PlayerEvent::Paused(self.item));
+            }
+            PlayState::Stop if self.stream.is_some() => {
+                return self.station_stopped(current, events);
             }
             PlayState::Stop => match current.phase {
                 Phase::Loading(since) if since.elapsed() < self.load_timeout => {}
@@ -154,13 +188,13 @@ impl Speaker for HeosPlayer {
                     warn!(track = current.track, "the track did not start playing");
                     self.end(events);
                 }
-                Phase::Started if current.track + 1 < self.tracks.len() => {
+                Phase::Started(_) if current.track + 1 < self.tracks.len() => {
                     if let Err(err) = self.play_track(current.track + 1, events) {
                         self.end(events);
                         return Err(err);
                     }
                 }
-                Phase::Started => {
+                Phase::Started(_) => {
                     if ended(current.seen) {
                         events.finished();
                     }
@@ -186,11 +220,14 @@ impl HeosPlayer {
     fn toggle_pause(&mut self, events: &mut Emitter) -> Result<()> {
         let state = self.play_state()?;
         self.report_place(events);
+        let live = self.stream.is_some();
         match (self.current, state) {
+            (Some(_), PlayState::Play) if live => self.pause_station(events)?,
             (Some(_), PlayState::Play) => {
                 self.set_play_state("pause")?;
                 events.emit(PlayerEvent::Paused(self.item));
             }
+            (Some(_), PlayState::Pause) if live => self.tune(1, events)?,
             (Some(_), PlayState::Pause) => {
                 self.set_play_state("play")?;
                 events.emit(PlayerEvent::Playing(self.item));
@@ -204,6 +241,7 @@ impl HeosPlayer {
             ) if since.elapsed() < self.load_timeout => {
                 events.emit(PlayerEvent::Playing(self.item));
             }
+            _ if live => self.tune(1, events)?,
             _ if !self.tracks.is_empty() => {
                 let start = events.resume_point();
                 self.play_track(start.track, events)?;
@@ -220,6 +258,105 @@ impl HeosPlayer {
             .ok_or_else(|| anyhow!("the album has no track {index}"))?
             .url
             .clone();
+        self.play_stream(&url)?;
+        let track = &self.tracks[index];
+        info!(album = %track.album, track = %track.title, "playing");
+        self.current = Some(Current {
+            track: index,
+            phase: Phase::Loading(Instant::now()),
+            seen: None,
+            paused: false,
+        });
+        events.place(Place::start_of(index, Duration::ZERO), true);
+        events.emit(PlayerEvent::Playing(self.item));
+        Ok(())
+    }
+
+    fn play_station(
+        &mut self,
+        item: ItemId,
+        station: &Station,
+        volume: f32,
+        events: &mut Emitter,
+    ) -> Result<()> {
+        let stream = crate::radio::resolve(&crate::net::stream_agent(), &station.url)?;
+        self.report_place(events);
+        events.begin(item, false);
+        self.item = item;
+        self.tracks = Vec::new();
+        self.progress = false;
+        self.stream = Some(stream.url);
+        self.current = None;
+        self.set_volume(volume)?;
+        info!(station = %station.name, "playing");
+        self.tune(1, events)
+    }
+
+    /// Sends the station's stream again; `tries` counts this one.
+    fn tune(&mut self, tries: u32, events: &mut Emitter) -> Result<()> {
+        let url = self.stream.clone().context("no station to play")?;
+        self.play_stream(&url)?;
+        self.tries = tries;
+        self.current = Some(Current {
+            track: 0,
+            phase: Phase::Loading(Instant::now()),
+            seen: None,
+            paused: false,
+        });
+        events.emit(PlayerEvent::Playing(self.item));
+        Ok(())
+    }
+
+    /// The station went to `stop` or `unknown`.
+    fn station_stopped(&mut self, current: Current, events: &mut Emitter) -> Result<()> {
+        match current.phase {
+            Phase::Loading(since) if since.elapsed() < self.load_timeout => {}
+            Phase::Started(since)
+                if !current.paused
+                    && since.elapsed() < self.drop_window
+                    && self.tries < MAX_TRIES =>
+            {
+                warn!(
+                    tries = self.tries,
+                    "the station dropped out; sending it again"
+                );
+                if let Err(err) = self.tune(self.tries + 1, events) {
+                    self.end(events);
+                    return Err(err);
+                }
+            }
+            Phase::Loading(_) => {
+                warn!("the station did not start playing");
+                self.end(events);
+            }
+            Phase::Started(_) => {
+                info!("the station stopped");
+                self.end(events);
+            }
+        }
+        Ok(())
+    }
+
+    /// Pauses a station, or stops it when the receiver will not pause it;
+    /// either way play/pause sends it again, live.
+    fn pause_station(&mut self, events: &mut Emitter) -> Result<()> {
+        if let Err(err) = self.set_play_state("pause") {
+            // A `fail` reply keeps the connection; an I/O error does not.
+            if self.conn.is_none() {
+                return Err(err);
+            }
+            debug!("the receiver cannot pause the station, stopping it: {err:#}");
+            self.silence();
+        }
+        if let Some(current) = &mut self.current {
+            current.paused = true;
+        }
+        events.emit(PlayerEvent::Paused(self.item));
+        Ok(())
+    }
+
+    /// Plays `url` alone.
+    fn play_stream(&mut self, url: &str) -> Result<()> {
         // A Denon AVR-X1600H keeps earlier streams in a hidden queue that
         // `get_queue` does not list: without this, it plays them after our
         // track and never reports `stop`. It fails (eid 4) when the queue is
@@ -230,18 +367,9 @@ impl HeosPlayer {
             Err(err) if self.conn.is_some() => debug!("clear_queue: {err:#}"),
             Err(err) => return Err(err),
         }
-        self.call("browse/play_stream", &[("url", &url)])?;
+        self.call("browse/play_stream", &[("url", url)])?;
         // Anything read up to this reply was about the stream before.
         self.take_progress();
-        let track = &self.tracks[index];
-        info!(album = %track.album, track = %track.title, "playing");
-        self.current = Some(Current {
-            track: index,
-            phase: Phase::Loading(Instant::now()),
-            seen: None,
-        });
-        events.place(Place::start_of(index, Duration::ZERO), true);
-        events.emit(PlayerEvent::Playing(self.item));
         Ok(())
     }
 
@@ -275,11 +403,15 @@ impl HeosPlayer {
     /// A Denon AVR-X1600H keeps retrying a finished URL stream, and sometimes
     /// plays it again, until it is told to stop.
     fn end(&mut self, events: &mut Emitter) {
+        self.silence();
+        events.emit(PlayerEvent::Stopped);
+    }
+
+    fn silence(&mut self) {
         self.current = None;
         if let Err(err) = self.set_play_state("stop") {
             warn!("cannot stop the speaker: {err:#}");
         }
-        events.emit(PlayerEvent::Stopped);
     }
 
     fn set_volume(&mut self, volume: f32) -> Result<()> {

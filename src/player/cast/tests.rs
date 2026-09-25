@@ -127,7 +127,7 @@ fn skipping_someone_elses_media_does_nothing() {
 }
 
 #[test]
-fn radio_and_spotify_are_refused_before_connecting() {
+fn spotify_is_refused_before_connecting() {
     // Nothing listens on this port, so a connection attempt would fail with
     // another error.
     let port = std::net::TcpListener::bind("127.0.0.1:0")
@@ -138,15 +138,13 @@ fn radio_and_spotify_are_refused_before_connecting() {
     let mut player = CastPlayer::new("127.0.0.1".into(), port);
     let (tx, _events) = std::sync::mpsc::channel();
     let mut emitter = Emitter::new(tx);
-    for content in crate::player::tests::unsupported() {
-        let cmd = PlayerCmd::Play {
-            item: ITEM,
-            content,
-            volume: 0.2,
-        };
-        let err = player.handle(cmd, &mut emitter).unwrap_err();
-        assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
-    }
+    let cmd = PlayerCmd::Play {
+        item: ITEM,
+        content: crate::player::tests::unsupported(),
+        volume: 0.2,
+    };
+    let err = player.handle(cmd, &mut emitter).unwrap_err();
+    assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
 }
 
 fn timed(state: PlayerState, track: usize, secs: f32, duration: Option<f32>) -> StatusEntry {

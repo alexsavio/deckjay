@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -64,34 +66,73 @@ fn album() -> PlayerCmd {
     }
 }
 
-/// One [`Content`] of each kind that no backend plays yet.
-pub(super) fn unsupported() -> [Content; 2] {
-    [
-        Content::Stream(Station {
-            url: "https://radio.example/kids.mp3".into(),
-            content_type: Some("audio/mpeg".into()),
-            name: "Kids Radio".into(),
-            cover_url: None,
-        }),
-        Content::Spotify(Playlist {
-            uri: "spotify:playlist:37i9dQZF1DX0XUsuxWHRQd".into(),
-            name: "Bedtime".into(),
-        }),
-    ]
+/// Content no backend plays yet.
+pub(super) fn unsupported() -> Content {
+    Content::Spotify(Playlist {
+        uri: "spotify:playlist:37i9dQZF1DX0XUsuxWHRQd".into(),
+        name: "Bedtime".into(),
+    })
+}
+
+/// A station whose key points at `url`.
+pub(super) fn station(url: String) -> Content {
+    Content::Stream(Station {
+        url,
+        content_type: None,
+        name: "Kids Radio".into(),
+        cover_url: None,
+    })
+}
+
+/// A web server on 127.0.0.1, one thread per connection: `answer` gets the
+/// path of each GET and writes the whole reply. Returns the server's URL.
+pub(super) fn web(answer: impl Fn(&str, &mut TcpStream) + Send + Sync + 'static) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let answer = Arc::new(answer);
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let answer = Arc::clone(&answer);
+            thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                let _ = reader.read_line(&mut request);
+                // The rest of the request, so closing sends no reset.
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                    line.clear();
+                }
+                let path = request.split_whitespace().nth(1).unwrap_or("/");
+                answer(path, &mut stream);
+            });
+        }
+    });
+    base
+}
+
+/// The head of a reply as radio servers send it: no length, the body lasts
+/// until the connection closes.
+pub(super) fn head(stream: &mut TcpStream, status: u16, content_type: &str) {
+    let head =
+        format!("HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nConnection: close\r\n\r\n");
+    let _ = stream.write_all(head.as_bytes());
 }
 
 #[test]
-fn only_tracks_can_be_played_so_far() {
+fn only_tracks_are_track_lists() {
     let tracks = Content::Tracks {
         tracks: vec![],
         start: Start::default(),
         progress: false,
     };
     assert!(tracks.into_tracks().is_ok());
-    for content in unsupported() {
-        let err = content.into_tracks().unwrap_err();
-        assert!(err.to_string().contains("not supported yet"), "{err:#}");
-    }
+    let err = unsupported().into_tracks().unwrap_err();
+    assert!(err.to_string().contains("not supported yet"), "{err:#}");
+    let err = station("http://127.0.0.1:9/kids.mp3".into())
+        .into_tracks()
+        .unwrap_err();
+    assert!(err.to_string().contains("Kids Radio"), "{err:#}");
 }
 
 #[test]
@@ -258,22 +299,40 @@ fn a_failed_command_reports_the_latest_place_before_stopped() {
 }
 
 #[test]
-fn unsupported_content_reports_stopped() {
-    // A local player opens the sound card only for tracks, so this runs
-    // without one.
-    let (tx, events) = mpsc::channel();
-    let player = spawn(Output::Local { device: None }, tx);
-    for content in unsupported() {
-        let cmd = PlayerCmd::Play {
-            item: ItemId(1),
-            content,
-            volume: 0.2,
-        };
-        player.send(cmd).unwrap();
-        assert_eq!(
-            events.recv_timeout(Duration::from_secs(5)),
-            Ok(PlayerEvent::Stopped)
-        );
+fn unsupported_content_and_broken_stations_report_stopped() {
+    let gone = web(|_, stream| head(stream, 404, "text/html"));
+    // Nothing listens on this port: the speaker, if reached, fails too.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let host = String::from("127.0.0.1");
+    for output in [
+        // A local player opens the sound card only once a station answers,
+        // so this runs without one.
+        Output::Local { device: None },
+        Output::Cast {
+            host: host.clone(),
+            port,
+        },
+        Output::Heos { host, port },
+    ] {
+        let (tx, events) = mpsc::channel();
+        let player = spawn(output.clone(), tx);
+        for content in [unsupported(), station(format!("{gone}/kids.mp3"))] {
+            let cmd = PlayerCmd::Play {
+                item: ItemId(1),
+                content,
+                volume: 0.2,
+            };
+            player.send(cmd).unwrap();
+            assert_eq!(
+                events.recv_timeout(Duration::from_secs(5)),
+                Ok(PlayerEvent::Stopped),
+                "{output:?}"
+            );
+        }
     }
 }
 

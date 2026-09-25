@@ -509,17 +509,15 @@ fn a_broken_stream_fails_the_next_command_and_poll_and_an_album_reopens_it() {
 }
 
 #[test]
-fn radio_and_spotify_do_not_open_the_sound_card() {
+fn spotify_does_not_open_the_sound_card() {
     let mut rig = Rig::new();
-    for content in crate::player::tests::unsupported() {
-        let cmd = PlayerCmd::Play {
-            item: ITEM,
-            content,
-            volume: 1.0,
-        };
-        let err = rig.send(cmd).unwrap_err();
-        assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
-    }
+    let cmd = PlayerCmd::Play {
+        item: ITEM,
+        content: crate::player::tests::unsupported(),
+        volume: 1.0,
+    };
+    let err = rig.send(cmd).unwrap_err();
+    assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
     assert_eq!(rig.opened.get(), 0);
     assert_eq!(rig.events(), []);
 }
