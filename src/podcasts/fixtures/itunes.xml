@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Die Maus zum Hören</title>
+    <link>https://example.org/maus</link>
+    <description>Geschichten für Kinder</description>
+    <itunes:image href="https://example.org/maus-itunes.jpg"/>
+    <image>
+      <url>https://example.org/maus-channel.jpg</url>
+      <title>Die Maus</title>
+      <link>https://example.org/maus</link>
+    </image>
+    <item>
+      <title>Die Ente</title>
+      <guid isPermaLink="false">maus-2</guid>
+      <pubDate>Mon, 06 Jan 2025 10:00:00 GMT</pubDate>
+      <enclosure url="https://cdn.example.org/ente.mp3" type="audio/mpeg" length="0"/>
+    </item>
+    <item>
+      <title>Video</title>
+      <guid>maus-video</guid>
+      <pubDate>Mon, 06 Jan 2025 12:00:00 GMT</pubDate>
+      <enclosure url="https://cdn.example.org/video.mp4" type="video/mp4" length="99"/>
+    </item>
+    <item>
+      <title>  Der
+        Elefant </title>
+      <guid isPermaLink="false">maus-3</guid>
+      <pubDate>Tue, 07 Jan 2025 08:00:00 +0200</pubDate>
+      <enclosure url="https://cdn.example.org/elefant.mp3?x=1" type="audio/mpeg" length="1234"/>
+      <itunes:image href="https://example.org/elefant.png"/>
+    </item>
+    <item>
+      <title>Kein Anhang</title>
+      <guid>maus-text</guid>
+      <pubDate>Tue, 07 Jan 2025 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Ein PDF</title>
+      <guid>maus-pdf</guid>
+      <pubDate>Tue, 07 Jan 2025 09:00:00 GMT</pubDate>
+      <enclosure url="https://cdn.example.org/heft.mp3" type="application/pdf" length="5"/>
+    </item>
+    <item>
+      <title>Nur FTP</title>
+      <guid>maus-ftp</guid>
+      <pubDate>Tue, 07 Jan 2025 09:00:00 GMT</pubDate>
+      <enclosure url="ftp://cdn.example.org/ftp.mp3" type="audio/mpeg" length="5"/>
+    </item>
+    <item>
+      <title>Unbekannt</title>
+      <guid>maus-xyz</guid>
+      <pubDate>Tue, 07 Jan 2025 09:00:00 GMT</pubDate>
+      <enclosure url="https://cdn.example.org/klang.xyz" type="audio/x-unknown" length="5"/>
+    </item>
+    <item>
+      <title>Ohne Guid</title>
+      <pubDate>Sun, 05 Jan 2025 09:00:00 EST</pubDate>
+      <enclosure url="https://cdn.example.org/ohne-guid.m4a" type="audio/x-m4a" length=""/>
+    </item>
+    <item>
+      <title>Das Schaf</title>
+      <guid isPermaLink="false">maus-1</guid>
+      <pubDate>Fri, 04 Jan 2025 11:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.org/schaf.mp3" type="audio/mpeg" length="4321"/>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Fortsetzungsgeschichte</title>
+    <link>http://example.org/</link>
+    <description>Plain RSS without iTunes tags</description>
+    <image>
+      <url>http://example.org/logo.png</url>
+      <title>Logo</title>
+      <link>http://example.org/</link>
+    </image>
+    <item>
+      <title>Teil 1</title>
+      <guid>teil-1</guid>
+      <pubDate>Wed, 01 Jan 2025 08:00:00 +0100</pubDate>
+      <enclosure url="http://example.org/teil-1.m4a" type="audio/mp4" length="100"/>
+    </item>
+    <item>
+      <title>Teil 2</title>
+      <guid>teil-2</guid>
+      <pubDate>gestern</pubDate>
+      <enclosure url="http://example.org/teil-2.opus" type="audio/opus" length="100"/>
+    </item>
+    <item>
+      <title>Teil 3</title>
+      <guid>teil-3</guid>
+      <pubDate>Fri, 03 Jan 2025 08:00:00 +0100</pubDate>
+      <enclosure url="http://example.org/teil-3.mp3" length="100"/>
+    </item>
+  </channel>
+</rss>
