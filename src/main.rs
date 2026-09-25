@@ -19,6 +19,7 @@ mod config;
 mod deck;
 mod icons;
 mod library;
+mod net;
 mod player;
 mod server;
 mod simulator;
@@ -61,6 +62,7 @@ usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
 const DEFAULT_SIMULATOR_PORT: u16 = 8090;
 
 fn main() -> Result<()> {
+    net::install_crypto();
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()

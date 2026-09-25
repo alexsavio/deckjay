@@ -24,7 +24,14 @@ toml = "1"
 tower-http = { version = "0.7", features = ["fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ureq = { version = "3", default-features = false }
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots", "gzip"] }
+# rust_cast uses the aws-lc-rs engine; a second engine (ring) would make
+# rustls panic when it picks a default, so ureq gets this one explicitly.
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }
+base64 = "0.23"
+rss = { version = "2.1", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"

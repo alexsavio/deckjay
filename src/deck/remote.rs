@@ -36,13 +36,17 @@ pub(super) fn agent() -> Agent {
 /// errors: waiting would never help.
 pub(super) fn fetch_info(agent: &Agent, url: &str) -> Result<Option<Info>> {
     let base = url.trim_end_matches('/');
+    // The simulator speaks plain HTTP only; an https URL would fail its TLS
+    // handshake like a server that is not up yet, and wait forever.
+    if !base.starts_with("http://") {
+        bail!("{base} is not a usable simulator URL (use http://HOST:PORT)");
+    }
     let mut reply = match agent.get(format!("{base}/api/info")).call() {
         Ok(reply) => reply,
         Err(ureq::Error::StatusCode(code)) => {
             bail!("{base}/api/info answered HTTP {code}: is this the deck simulator?")
         }
-        // TlsRequired: ureq is built without TLS, so an https URL can never work.
-        Err(err @ (ureq::Error::BadUri(_) | ureq::Error::Http(_) | ureq::Error::TlsRequired)) => {
+        Err(err @ (ureq::Error::BadUri(_) | ureq::Error::Http(_))) => {
             bail!("{base} is not a usable simulator URL (use http://HOST:PORT): {err}")
         }
         Err(err) => {
