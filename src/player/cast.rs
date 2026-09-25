@@ -18,7 +18,7 @@ use rust_cast::channels::media::{
 use rust_cast::channels::receiver::{Application, CastDeviceApp};
 use tracing::{debug, info};
 
-use super::progress::Place;
+use super::progress::{END_MARGIN, Place};
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, Start, TrackInfo};
 use crate::library::ItemId;
 
@@ -65,6 +65,8 @@ pub(super) struct CastPlayer {
     tracks: Vec<TrackInfo>,
     /// True while we believe our album is loaded on the speaker.
     active: bool,
+    /// The latest place of our album seen in a status.
+    last_place: Option<Place>,
 }
 
 /// An open connection plus the running media app, if any.
@@ -81,6 +83,7 @@ impl CastPlayer {
             item: ItemId(0),
             tracks: Vec::new(),
             active: false,
+            last_place: None,
         }
     }
 }
@@ -122,7 +125,7 @@ impl Speaker for CastPlayer {
                     {
                         s.device.media.pause(tid, e.media_session_id)?;
                         if let Some(at) = place(&e, &self.tracks) {
-                            events.place(at, false);
+                            self.note_place(at, events);
                         }
                         events.emit(PlayerEvent::Paused(self.item));
                     }
@@ -164,14 +167,16 @@ impl Speaker for CastPlayer {
         let s = self.open()?;
         let entry = media_status(&s)?.map(|(_, e)| e);
         if let Some(at) = entry.as_ref().and_then(|e| place(e, &self.tracks)) {
-            events.place(at, false);
+            self.note_place(at, events);
         }
         let Some(event) = poll_event(entry.as_ref(), &self.tracks, self.item) else {
             return Ok(());
         };
         if event == PlayerEvent::Stopped {
             self.active = false;
-            if entry.as_ref().is_some_and(|e| finished(e, &self.tracks)) {
+            let ended = entry.as_ref().is_some_and(|e| finished(e, &self.tracks))
+                || near_end(self.last_place, self.tracks.len());
+            if ended {
                 events.finished();
             }
         }
@@ -226,22 +231,28 @@ impl CastPlayer {
         )?;
         info!(album = %track.album, track = %track.title, "playing");
         self.active = true;
+        self.last_place = None;
         events.place(Place::start_of(index, Duration::ZERO), true);
         events.emit(PlayerEvent::Playing(self.item));
         Ok(())
     }
 
     /// Reports where the item playing got to; a failure only loses the report.
-    fn report_place(&self, s: &Session, events: &mut Emitter) {
+    fn report_place(&mut self, s: &Session, events: &mut Emitter) {
         match media_status(s) {
             Ok(Some((_, entry))) => {
                 if let Some(at) = place(&entry, &self.tracks) {
-                    events.place(at, false);
+                    self.note_place(at, events);
                 }
             }
             Ok(None) => {}
             Err(err) => debug!("no place for the item playing: {err:#}"),
         }
+    }
+
+    fn note_place(&mut self, at: Place, events: &mut Emitter) {
+        self.last_place = Some(at);
+        events.place(at, false);
     }
 
     fn open(&self) -> Result<Session> {
@@ -324,6 +335,15 @@ fn finished(entry: &StatusEntry, tracks: &[TrackInfo]) -> bool {
         && matches!(entry.idle_reason, Some(IdleReason::Finished))
         && !loading(entry)
         && track_index(entry, tracks).is_some_and(|t| t + 1 == tracks.len())
+}
+
+/// Whether `last`, the latest place seen, was on the last track within
+/// [`END_MARGIN`] of its known length. At the end of the queue the receiver
+/// may end the media session, and its status then tells nothing about how.
+fn near_end(last: Option<Place>, tracks: usize) -> bool {
+    last.is_some_and(|at| {
+        at.track + 1 == tracks && at.duration.is_some_and(|d| at.position + END_MARGIN >= d)
+    })
 }
 
 /// The track that Next (`forward`) or Prev loads; `None` when the media is

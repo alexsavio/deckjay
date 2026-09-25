@@ -185,9 +185,13 @@ Every command opens its own connection and drops it at the end, without a
    `FINISHED`) or no entry, and report `Stopped`. For an item that reports
    progress, `IDLE` with idle reason `FINISHED` and the `contentId` of our
    last track (`finished`) sends `Finished` before `Stopped`. Without
-   `media` in that status, or with no entry, the track is unknown: only
-   `Stopped`, and the item keeps its last place. This is read from the
-   docs, not seen on a device.
+   `media` in that status, or with no entry (the session terminated), the
+   last place a poll saw decides (`near_end`): on the last track, within
+   10 s (`END_MARGIN`) of its known length, is `Finished` too. Otherwise
+   only `Stopped`, and the item keeps its last place. So a stop from
+   another sender in the last 10 s of a book counts as its end, and a book
+   whose length the receiver never reported ends only with `FINISHED`.
+   This is read from the docs, not seen on a device.
 8. **Errors:** a failed command makes `player::run` log a warning, call
    `reset` (polling stops), emit `Stopped` and drop the other key presses
    that came with it: each would open a connection and wait out its own

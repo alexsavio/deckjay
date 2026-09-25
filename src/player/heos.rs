@@ -27,16 +27,13 @@ use tracing::{debug, info, warn};
 
 pub use self::cli::players;
 use self::cli::{Cli, IO_TIMEOUT, Message, NowPlaying};
-use super::progress::Place;
+use super::progress::{END_MARGIN, Place};
 use super::{Emitter, PlayerCmd, PlayerEvent, Speaker, TrackInfo};
 use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// How long a new track may report `stop` before we give up on it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
-/// A last track that stops this close to its length has ended; earlier, it
-/// was stopped in the HEOS app. Progress events come every ~5 s.
-const END_MARGIN: Duration = Duration::from_secs(10);
 
 pub(super) struct HeosPlayer {
     host: String,
@@ -101,6 +98,7 @@ impl Speaker for HeosPlayer {
                 volume,
             } => {
                 let list = content.into_tracks()?;
+                self.report_place(events);
                 events.begin(item, list.progress);
                 self.item = item;
                 self.tracks = list.tracks;
@@ -369,8 +367,9 @@ impl Connection {
     }
 }
 
-/// Whether the last track, stopped after `seen`, played to its end. With no
-/// length known, every stop counts as the end.
+/// Whether the last track, stopped after `seen`, played to its end; a stop
+/// earlier than [`END_MARGIN`] before it was pressed in the HEOS app. With
+/// no length known, every stop counts as the end.
 fn ended(seen: Option<NowPlaying>) -> bool {
     match seen {
         Some(NowPlaying {

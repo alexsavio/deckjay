@@ -11,6 +11,10 @@ use crate::library::ItemId;
 
 /// The shortest time between two reports while the place moves on by itself.
 pub(super) const INTERVAL: Duration = Duration::from_secs(5);
+/// A last track that stops this close to its length has ended; earlier, it
+/// was stopped. Speakers tell the place every few seconds, so the last place
+/// seen can be that far from the end.
+pub(super) const END_MARGIN: Duration = Duration::from_secs(10);
 
 /// A place in an item: `track` indexes its tracks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

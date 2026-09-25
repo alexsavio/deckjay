@@ -60,6 +60,19 @@ fn pause_reports_the_latest_place_at_once() {
 }
 
 #[test]
+fn the_next_album_reports_the_books_latest_place_first() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(book(3)).unwrap();
+    rig.poll_with("play");
+    rig.events();
+    rig.fake.script().progress = Some("pid=7&cur_pos=42000&duration=180000");
+    // Reads the event; nothing asks for the place until the next album.
+    rig.send(PlayerCmd::SetVolume(0.3)).unwrap();
+    rig.send(play_album(2)).unwrap();
+    assert_eq!(rig.events(), [at(0, 42, Some(180)), Playing(ITEM)]);
+}
+
+#[test]
 fn the_end_of_the_last_track_is_finished_and_turns_events_off() {
     let mut rig = Rig::new(ONE_PLAYER);
     rig.send(book(1)).unwrap();

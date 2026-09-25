@@ -230,3 +230,20 @@ fn finished_is_the_last_track_idle_because_it_ended() {
     let playing = entry(PlayerState::Playing, Some(&url(2)));
     assert!(!finished(&playing, &tracks));
 }
+
+#[test]
+fn a_stop_seen_near_the_end_of_the_last_track_is_its_end() {
+    let seen = |track, position, duration: Option<u64>| {
+        Some(Place {
+            track,
+            position: Duration::from_secs(position),
+            duration: duration.map(Duration::from_secs),
+        })
+    };
+    assert!(near_end(seen(2, 296, Some(300)), 3));
+    assert!(near_end(seen(2, 290, Some(300)), 3));
+    assert!(!near_end(seen(2, 289, Some(300)), 3), "stopped earlier");
+    assert!(!near_end(seen(1, 299, Some(300)), 3), "not the last track");
+    assert!(!near_end(seen(2, 299, None), 3), "length unknown");
+    assert!(!near_end(None, 3));
+}
