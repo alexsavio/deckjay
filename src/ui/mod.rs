@@ -35,7 +35,7 @@ use self::layout::{Action, Control, Layout};
 use crate::config::Config;
 use crate::deck::Deck;
 use crate::icons::{self, Decor};
-use crate::library::{self, ItemId, Kind, Library};
+use crate::library::{self, ItemId, Kind, Library, Media};
 use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
 use crate::state::Store;
 
@@ -245,19 +245,7 @@ impl Ui {
                 self.playing = !self.playing;
             }
             Action::Item(id) => {
-                let item = self.library.item(id);
-                let resumes = item.kind.resumes();
-                let start = if resumes {
-                    self.resume(id)
-                } else {
-                    Start::default()
-                };
-                info!(item = %item.name, track = start.track, position = ?start.position, "item pressed");
-                let content = player::Content::Tracks {
-                    tracks: self.tracks(id),
-                    start,
-                    progress: resumes,
-                };
+                let content = self.content(id);
                 self.send(PlayerCmd::Play {
                     item: id,
                     content,
@@ -295,6 +283,33 @@ impl Ui {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// What pressing `id` plays: its tracks, from where it stopped if it
+    /// resumes, or its stream.
+    fn content(&self, id: ItemId) -> player::Content {
+        let item = self.library.item(id);
+        if let Media::Stream { url } = &item.media {
+            info!(item = %item.name, "station pressed");
+            return player::Content::Stream(player::Station {
+                url: url.clone(),
+                content_type: None,
+                name: item.name.clone(),
+                cover_url: None,
+            });
+        }
+        let resumes = item.kind.resumes();
+        let start = if resumes {
+            self.resume(id)
+        } else {
+            Start::default()
+        };
+        info!(item = %item.name, track = start.track, position = ?start.position, "item pressed");
+        player::Content::Tracks {
+            tracks: self.tracks(id),
+            start,
+            progress: resumes,
         }
     }
 

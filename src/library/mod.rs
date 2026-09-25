@@ -24,7 +24,7 @@ pub struct Track {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[expect(dead_code, reason = "radio and Spotify sources come later")]
+#[expect(dead_code, reason = "Spotify sources come later")]
 pub enum Kind {
     Music,
     Audiobook,
@@ -49,6 +49,8 @@ pub struct ItemKey(pub String);
 pub enum Media {
     /// Sorted by file name.
     Tracks(Vec<Track>),
+    /// An internet radio station: a stream, or a playlist that names one.
+    Stream { url: String },
 }
 
 /// One thing a key plays, e.g. an album folder or a story file.
@@ -73,9 +75,12 @@ pub struct Item {
 }
 
 impl Item {
+    /// Empty for a stream.
     pub fn tracks(&self) -> &[Track] {
-        let Media::Tracks(tracks) = &self.media;
-        tracks
+        match &self.media {
+            Media::Tracks(tracks) => tracks,
+            Media::Stream { .. } => &[],
+        }
     }
 }
 
@@ -111,6 +116,7 @@ impl From<SourceKind> for Kind {
             SourceKind::Audiobook => Kind::Audiobook,
             SourceKind::Story => Kind::Story,
             SourceKind::Podcast => Kind::Podcast,
+            SourceKind::Radio => Kind::Radio,
         }
     }
 }
@@ -127,6 +133,8 @@ impl Library {
         for source in sources {
             let items = if let Some(settings) = podcast::settings(source) {
                 podcast::items(source, &crate::podcasts::load_cached(&settings))
+            } else if source.kind == SourceKind::Radio {
+                stations(source)
             } else {
                 scan::scan(source).unwrap_or_else(|err| {
                     tracing::warn!("{err:#}");
@@ -233,6 +241,26 @@ impl Library {
             })
             .collect()
     }
+}
+
+/// One item per station of a radio source.
+fn stations(source: &Source) -> Vec<Item> {
+    source
+        .stations
+        .iter()
+        .map(|station| Item {
+            kind: Kind::Radio,
+            key: ItemKey(format!("{}/{}", source.name, station.name)),
+            name: station.name.clone(),
+            media: Media::Stream {
+                url: station.url.clone(),
+            },
+            cover: None,
+            cover_rel: None,
+            picture: station.picture.clone(),
+            color: station.color,
+        })
+        .collect()
 }
 
 /// Everything except unreserved URL characters gets percent-encoded.
@@ -352,5 +380,34 @@ mod tests {
         assert_eq!(library.items().len(), 1);
         assert!(library.shelves()[0].items.is_empty());
         assert_eq!(library.shelves()[1].items, [ItemId(0)]);
+    }
+
+    #[test]
+    fn every_station_of_a_radio_source_is_an_item() {
+        use crate::config::Station;
+        let mut radio = Source::plain("radio", SourceKind::Radio, Path::new(""));
+        radio.stations = vec![Station {
+            name: "Kinder".into(),
+            url: "https://example.org/kinder.mp3".into(),
+            picture: Some("/pics/kinder.png".into()),
+            color: None,
+        }];
+
+        let library = Library::scan(&[radio]);
+
+        let item = library.item(ItemId(0));
+        assert_eq!(
+            (item.kind, item.key.0.as_str(), item.picture.as_deref()),
+            (
+                Kind::Radio,
+                "radio/Kinder",
+                Some(Path::new("/pics/kinder.png"))
+            )
+        );
+        assert!(
+            matches!(&item.media, Media::Stream { url } if url == "https://example.org/kinder.mp3")
+        );
+        assert!(item.tracks().is_empty());
+        assert!(library.served_files().is_empty());
     }
 }

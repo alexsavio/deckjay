@@ -1,6 +1,7 @@
 //! See `config.example.toml` for every key.
 
 mod podcast;
+mod radio;
 mod source;
 
 use std::path::{Path, PathBuf};
@@ -11,6 +12,8 @@ use serde::Deserialize;
 pub use self::podcast::Order as FeedOrder;
 #[cfg(test)]
 pub use self::podcast::{Feed as PodcastFeed, Podcast};
+#[cfg(test)]
+pub use self::radio::Station;
 #[cfg(test)]
 pub use self::source::Look;
 use self::source::RawSource;

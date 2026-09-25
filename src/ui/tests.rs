@@ -489,3 +489,37 @@ mod podcasts {
         assert_eq!(ui.tiles.len(), 2);
     }
 }
+
+#[test]
+fn a_station_plays_its_stream() {
+    let station = Item {
+        kind: Kind::Radio,
+        key: ItemKey("radio/Kinder".into()),
+        name: "Kinder".into(),
+        media: Media::Stream {
+            url: "https://example.org/kinder.mp3".into(),
+        },
+        cover: None,
+        cover_rel: None,
+        picture: None,
+        color: None,
+    };
+    let (mut ui, cmds, _events) = ui_with(
+        Library::with_shelves(vec![("radio", Kind::Radio, vec![station])]),
+        "",
+    );
+    let layout = ui.layout(3, 5);
+    ui.press(&layout, 0);
+    let Ok(PlayerCmd::Play {
+        item,
+        content: player::Content::Stream(station),
+        ..
+    }) = cmds.try_recv()
+    else {
+        panic!("no stream was played");
+    };
+    assert_eq!(
+        (item, station.url.as_str(), station.name.as_str()),
+        (ItemId(0), "https://example.org/kinder.mp3", "Kinder")
+    );
+}

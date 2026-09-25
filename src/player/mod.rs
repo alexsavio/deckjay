@@ -75,7 +75,6 @@ pub enum Content {
         )]
         progress: bool,
     },
-    #[cfg_attr(not(test), expect(dead_code, reason = "radio items do not exist yet"))]
     Stream(Station),
     #[cfg_attr(
         not(test),

@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use serde::Deserialize;
 
 use super::podcast::{Podcast, RawPodcast};
+use super::radio::{RawRadio, Station};
 
 /// One `[[source]]` table, checked and with its path resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,9 +16,9 @@ pub struct Source {
     /// and `_` only. Defaults to the type (`music`, `audiobook`, `story`).
     pub name: String,
     pub kind: SourceKind,
-    /// The folder to scan, or for a podcast source its cache folder.
-    /// Relative paths are resolved against the folder the config file lives
-    /// in.
+    /// The folder to scan, or for a podcast source its cache folder; empty
+    /// for a radio source. Relative paths are resolved against the folder
+    /// the config file lives in.
     pub path: PathBuf,
     /// How the shelf key looks.
     pub look: Look,
@@ -26,6 +27,8 @@ pub struct Source {
     pub items: BTreeMap<String, Look>,
     /// For `type = "podcast"`.
     pub podcast: Option<Podcast>,
+    /// For `type = "radio"`.
+    pub stations: Vec<Station>,
 }
 
 /// A picture or a colour for a key; pictures are resolved like `path`.
@@ -76,6 +79,7 @@ impl Source {
             look: Look::default(),
             items: BTreeMap::new(),
             podcast: None,
+            stations: Vec::new(),
         }
     }
 }
@@ -87,6 +91,7 @@ pub enum SourceKind {
     /// Stories and sound effects.
     Story,
     Podcast,
+    Radio,
 }
 
 impl SourceKind {
@@ -96,6 +101,7 @@ impl SourceKind {
             SourceKind::Audiobook => "audiobook",
             SourceKind::Story => "story",
             SourceKind::Podcast => "podcast",
+            SourceKind::Radio => "radio",
         }
     }
 }
@@ -108,6 +114,7 @@ pub(super) enum RawSource {
     Audiobook(Folder),
     Story(Folder),
     Podcast(RawPodcast),
+    Radio(RawRadio),
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +155,22 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                     }
                     return Ok(source);
                 }
+                RawSource::Radio(r) => {
+                    let name = r
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| SourceKind::Radio.name().into());
+                    check_unique(&name, &mut names)?;
+                    return Ok(Source {
+                        stations: r.stations(&name, base)?,
+                        look: r.look().resolve(base),
+                        name,
+                        kind: SourceKind::Radio,
+                        path: PathBuf::new(),
+                        items: BTreeMap::new(),
+                        podcast: None,
+                    });
+                }
             };
             let name = folder.name.unwrap_or_else(|| kind.name().into());
             check_unique(&name, &mut names)?;
@@ -166,6 +189,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                     .map(|(name, look)| (name, look.resolve(base)))
                     .collect(),
                 podcast: None,
+                stations: Vec::new(),
             })
         })
         .collect()
@@ -193,6 +217,7 @@ fn podcast_source(
         kind: SourceKind::Podcast,
         path,
         items: BTreeMap::new(),
+        stations: Vec::new(),
     })
 }
 
@@ -255,6 +280,7 @@ mod tests {
                     look: Look::default(),
                     items: BTreeMap::new(),
                     podcast: None,
+                    stations: Vec::new(),
                 },
                 Source {
                     name: "books".into(),
@@ -263,6 +289,7 @@ mod tests {
                     look: Look::default(),
                     items: BTreeMap::new(),
                     podcast: None,
+                    stations: Vec::new(),
                 },
                 Source {
                     name: "story".into(),
@@ -271,6 +298,7 @@ mod tests {
                     look: Look::default(),
                     items: BTreeMap::new(),
                     podcast: None,
+                    stations: Vec::new(),
                 },
             ]
         );

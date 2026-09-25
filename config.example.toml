@@ -57,8 +57,8 @@ brightness = 60
 # at the end of the file: TOML reads every key after a [[source]] line as
 # part of that source. Each source is one shelf on the deck.
 #
-# type  "music", "audiobook", "story" (stories and sound effects) or
-#       "podcast" (see the end of this file).
+# type  "music", "audiobook", "story" (stories and sound effects),
+#       "radio" or "podcast" (see the end of this file).
 # name  Optional; the default is the type. Letters, digits, - and _ only.
 #       Two sources of one type need different names.
 # path  The folder, relative to this file or absolute (any drive). Every
@@ -97,6 +97,15 @@ path = "music"
 # [[source]]
 # type = "story"
 # path = "/mnt/nas/kids/sounds"
+
+# A radio source is a shelf of internet radio stations, one key each. The url
+# is the stream (MP3 plays everywhere) or a .pls / .m3u playlist.
+# [[source]]
+# type = "radio"
+# [[source.station]]
+# name = "Kinderradio"
+# url = "https://example.org/kinder.mp3"
+# picture = "pictures/kinder.png"
 
 # A podcast source downloads the newest episodes of its feeds and shows them
 # on one shelf; episodes play on from where they stopped, and a red dot
