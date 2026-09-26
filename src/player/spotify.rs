@@ -204,6 +204,29 @@ impl Speaker for SpotifyPlayer {
         self.now = None;
     }
 
+    /// Pauses the configured device whatever it plays, e.g. a playlist that
+    /// an earlier run of kids-deck started.
+    fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
+        self.stop(events)?;
+        let wanted = self.connect.device.clone();
+        let client = self.client()?;
+        let Some(state) = client.player()? else {
+            return Ok(());
+        };
+        if !state.is_playing {
+            return Ok(());
+        }
+        let devices = client.devices()?;
+        if let Ok(device) = pick_device(&devices, &wanted)
+            && device.id.is_some()
+            && device.id == state.device_id
+            && let Some(id) = &device.id
+        {
+            client.pause(id)?;
+        }
+        Ok(())
+    }
+
     fn stop(&mut self, _events: &mut Emitter) -> Result<()> {
         if let Some(now) = self.now.take()
             && now.playing

@@ -269,6 +269,20 @@ impl Speaker for CastPlayer {
         self.halt(events);
         Ok(())
     }
+
+    /// Quits every app on the receiver: ours, and whatever a phone cast.
+    fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
+        self.halt(events);
+        super::connect(&self.host, self.port)?;
+        let device = CastDevice::connect_without_host_verification(self.host.clone(), self.port)?;
+        device.connection.connect(RECEIVER)?;
+        let status = device.receiver.get_status()?;
+        for app in apps_to_quit(&status.applications) {
+            info!(app = %app.display_name, "quitting the app on the speaker");
+            device.receiver.stop_app(app.session_id.as_str())?;
+        }
+        Ok(())
+    }
 }
 
 impl CastPlayer {
@@ -423,6 +437,14 @@ impl CastPlayer {
             .find(|a| a.app_id == DEFAULT_MEDIA_RECEIVER);
         Ok(Session { device, app })
     }
+}
+
+/// The idle screen of a Chromecast; quitting it only makes the TV blink.
+const BACKDROP: &str = "E8C28D3C";
+
+/// Every running app but the idle screen.
+fn apps_to_quit(apps: &[Application]) -> Vec<&Application> {
+    apps.iter().filter(|app| app.app_id != BACKDROP).collect()
 }
 
 /// The Default Media Receiver, launched when `app` is not running yet, and

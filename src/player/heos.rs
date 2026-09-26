@@ -225,6 +225,12 @@ impl Speaker for HeosPlayer {
         Ok(())
     }
 
+    fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
+        self.halt(events);
+        self.set_play_state("stop")?;
+        Ok(())
+    }
+
     /// Plain HEOS speakers have no control port; the connection is refused
     /// and the power key only stops them.
     fn standby(&mut self) -> Result<()> {

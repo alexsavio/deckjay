@@ -241,6 +241,11 @@ trait Speaker {
     fn standby(&mut self) -> Result<()> {
         Ok(())
     }
+    /// The power key: stops whatever the device plays, also what another app
+    /// or an earlier run of kids-deck started.
+    fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
+        self.stop(events)
+    }
 }
 
 fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
@@ -291,14 +296,15 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
     }
 }
 
-/// A failed standby still leaves the speaker stopped, so it is only logged.
+/// Standby is tried even when the stop failed: a receiver's control port
+/// can answer while its HEOS part does not. A failed standby is only logged.
 fn power_off(speaker: &mut dyn Speaker, events: &mut Emitter) -> Result<()> {
-    speaker.stop(events)?;
+    let stopped = speaker.stop_everything(events);
     if let Err(err) = speaker.standby() {
         warn!("cannot put the speaker in standby: {err:#}");
     }
     events.emit(PlayerEvent::Stopped);
-    Ok(())
+    stopped
 }
 
 /// Both speaker protocols take 0.0 to 1.0.

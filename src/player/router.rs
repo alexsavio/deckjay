@@ -70,6 +70,17 @@ impl Speaker for Router {
         self.active().stop(events)
     }
 
+    /// Both the speaker and the Spotify device: the power key stops all.
+    fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
+        let output = self.output.stop_everything(events);
+        if let Some(spotify) = &mut self.spotify
+            && let Err(err) = spotify.stop_everything(events)
+        {
+            warn!("cannot stop Spotify: {err:#}");
+        }
+        output
+    }
+
     /// The speaker's box goes to standby even after Spotify played, since
     /// Spotify often plays on that same box.
     fn standby(&mut self) -> Result<()> {
@@ -125,6 +136,13 @@ mod tests {
 
         fn standby(&mut self) -> Result<()> {
             self.log.borrow_mut().push(format!("{} standby", self.name));
+            Ok(())
+        }
+
+        fn stop_everything(&mut self, _: &mut Emitter) -> Result<()> {
+            self.log
+                .borrow_mut()
+                .push(format!("{} stop all", self.name));
             Ok(())
         }
     }
@@ -216,7 +234,8 @@ mod tests {
             [
                 "output stop",
                 "spotify play",
-                "spotify stop",
+                "output stop all",
+                "spotify stop all",
                 "output standby"
             ]
         );

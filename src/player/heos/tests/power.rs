@@ -2,7 +2,6 @@
 
 use std::io::Read;
 use std::net::TcpListener;
-use std::sync::mpsc;
 
 use super::*;
 
@@ -21,17 +20,29 @@ fn standby_sends_the_receiver_its_standby_command() {
 }
 
 #[test]
-fn a_speaker_without_a_control_port_fails_standby_but_stops() {
+fn a_speaker_without_a_control_port_still_stops() {
     let unused = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = unused.local_addr().unwrap().port();
+    let closed = unused.local_addr().unwrap().port();
     drop(unused);
-    let mut player = HeosPlayer::new("127.0.0.1".into(), port);
-    player.control_port = port;
-    let (tx, events) = mpsc::channel();
-    let mut emitter = Emitter::new(tx);
+    let mut rig = super::Rig::new(super::ONE_PLAYER);
+    rig.player.control_port = closed;
 
-    assert!(player.standby().is_err());
-    crate::player::power_off(&mut player, &mut emitter).unwrap();
+    assert!(rig.player.standby().is_err());
+    crate::player::power_off(&mut rig.player, &mut rig.emitter).unwrap();
 
-    assert_eq!(events.try_iter().last(), Some(PlayerEvent::Stopped));
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_play_state?pid=7&state=stop"
+    );
+    assert_eq!(rig.events().last(), Some(&PlayerEvent::Stopped));
+}
+
+#[test]
+fn the_power_key_stops_the_receiver_even_with_nothing_of_ours() {
+    let mut rig = super::Rig::new(super::ONE_PLAYER);
+    rig.player.stop_everything(&mut rig.emitter).unwrap();
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_play_state?pid=7&state=stop"
+    );
 }

@@ -374,3 +374,28 @@ fn stop_with_the_receiver_gone_only_forgets_the_item() {
     assert_eq!(player.poll_interval(), None);
     assert_eq!(events.try_iter().count(), 0);
 }
+
+fn app(app_id: &str, name: &str) -> Application {
+    Application {
+        app_id: app_id.into(),
+        session_id: format!("session-{app_id}"),
+        transport_id: format!("transport-{app_id}"),
+        namespaces: Vec::new(),
+        display_name: name.into(),
+        status_text: String::new(),
+    }
+}
+
+#[test]
+fn the_power_key_quits_every_app_but_the_idle_screen() {
+    let apps = [
+        app("E8C28D3C", "Backdrop"),
+        app("CC1AD845", "Default Media Receiver"),
+        app("CC32E753", "Spotify"),
+    ];
+    let quit: Vec<&str> = apps_to_quit(&apps)
+        .iter()
+        .map(|a| a.display_name.as_str())
+        .collect();
+    assert_eq!(quit, ["Default Media Receiver", "Spotify"]);
+}

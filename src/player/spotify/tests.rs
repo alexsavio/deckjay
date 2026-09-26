@@ -203,3 +203,25 @@ fn stop_pauses_a_playing_device_and_forgets_it() {
     rig.player.stop(&mut rig.emitter).unwrap();
     assert_eq!(rig.fake.requests_to("/v1/me/player/pause").len(), 1);
 }
+
+#[test]
+fn the_power_key_pauses_our_device_whatever_it_plays() {
+    let mut rig = Rig::new("den");
+    let playing_on = |device: &str| {
+        json!({"device": {"id": device}, "is_playing": true,
+               "context": {"uri": "spotify:album:someone-else"}, "progress_ms": 1, "item": {"name": "Song"}})
+    };
+
+    rig.fake.script().player = Some(playing_on("dev-kitchen"));
+    rig.player.stop_everything(&mut rig.emitter).unwrap();
+    assert!(
+        rig.fake.requests_to("/v1/me/player/pause").is_empty(),
+        "another device"
+    );
+
+    rig.fake.script().player = Some(playing_on("dev-den"));
+    rig.player.stop_everything(&mut rig.emitter).unwrap();
+    let pauses = rig.fake.requests_to("/v1/me/player/pause");
+    assert_eq!(pauses.len(), 1);
+    assert_eq!(pauses[0].param("device_id").as_deref(), Some("dev-den"));
+}

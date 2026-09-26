@@ -192,9 +192,12 @@ Rendering:
   a free control key (XL), else the top-right item key when more than 6
   item keys remain (MK.2), else none; `Layout::slots` lists the item keys
   left for items and navigation. It sends `PlayerCmd::Off` (the player loop
-  calls `Speaker::stop`, then `Speaker::standby`: HEOS sends `PWSTANDBY` to
-  the receiver's control port 23) and dims the deck; `Ui::wake` swallows
-  the next press. Decks with fewer than 2 rows are ignored.
+  calls `Speaker::stop_everything`, which also stops what kids-deck did not
+  start, e.g. after a restart: Cast quits every app but the idle screen,
+  HEOS sends `set_play_state stop`, Spotify pauses its device; then
+  `Speaker::standby`: HEOS sends `PWSTANDBY` to the receiver's control port
+  23) and dims the deck; `Ui::wake` swallows the next press. Decks with
+  fewer than 2 rows are ignored.
 - `icons/` draws every icon procedurally (4x supersampling); there are no
   image or font assets. `glyphs.rs` has the kind glyphs (note, book, star,
   waves, mic, Spotify); `decorate` adds the "playing" frame, the kind badge,

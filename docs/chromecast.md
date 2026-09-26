@@ -442,3 +442,13 @@ Protocol sources:
 [msgutil]: https://chromium.googlesource.com/openscreen/+/refs/heads/main/cast/common/channel/message_util.h
 [chromium]: https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/media_router/common/providers/cast/channel/cast_message_util.cc
 [rustcast]: https://docs.rs/rust_cast/0.21.0/rust_cast/
+
+## Power key
+
+The deck's power key stops whatever the speaker plays, not only what
+kids-deck started (after a restart kids-deck does not know what plays, and
+a phone may have cast something). It asks the receiver for its running
+apps and quits each one (`receiver.stop_app`), except the Backdrop idle
+screen (`E8C28D3C`) of a Chromecast. A Nest or Lenovo display then goes
+back to its idle screen. Checked by hand on the Lenovo; the JBL is not
+tested.
