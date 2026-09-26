@@ -511,7 +511,6 @@ impl FakeCast {
         CastPlayer::plain("127.0.0.1".into(), self.port, Duration::from_millis(200))
     }
 
-    /// The `type` of every request read so far, in order.
     fn request_types(&self) -> Vec<String> {
         self.requests
             .lock()
@@ -522,7 +521,6 @@ impl FakeCast {
     }
 }
 
-/// The Default Media Receiver, running.
 fn media_receiver() -> Value {
     json!([{
         "appId": DEFAULT_MEDIA_RECEIVER,

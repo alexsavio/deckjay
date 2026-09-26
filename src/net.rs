@@ -92,7 +92,6 @@ impl BaseUrl {
         })
     }
 
-    /// The URL, or why the route to the speaker cannot be found.
     pub fn try_get(&mut self) -> Result<String> {
         match self {
             BaseUrl::Fixed(url) => Ok(url.clone()),

@@ -440,7 +440,6 @@ fn spotify_output(cfg: &Config) -> Option<player::spotify::Connect> {
     })
 }
 
-/// Where the speaker downloads the music from; see [`BaseUrl`].
 fn base_url(cfg: &Config) -> BaseUrl {
     if cfg.speaker_type == SpeakerType::Local {
         // Nothing downloads from us: the music URLs are never used.

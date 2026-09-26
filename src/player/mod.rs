@@ -261,7 +261,6 @@ trait Speaker {
 }
 
 fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
-    // When the polls started failing, while they do.
     let mut failing_since: Option<Instant> = None;
     loop {
         let next = match speaker.poll_interval() {

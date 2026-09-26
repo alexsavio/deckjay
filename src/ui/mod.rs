@@ -273,7 +273,6 @@ impl Ui {
         changed
     }
 
-    /// Whether the player thread ended; see [`PlayerGone`].
     pub fn player_gone(&self) -> bool {
         self.gone.is_some()
     }

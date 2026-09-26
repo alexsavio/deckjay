@@ -389,8 +389,7 @@ enum Poll {
     FailAndIdle,
 }
 
-/// A speaker that follows a script, to drive `run` without a network. It
-/// polls every millisecond and gives up on failing polls after `GRACE`.
+/// A speaker that follows a script, to drive `run` without a network.
 struct Scripted {
     polls: VecDeque<Poll>,
     active: bool,

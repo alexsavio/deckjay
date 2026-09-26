@@ -262,7 +262,6 @@ fn an_offline_start_publishes_the_cache() {
     run.stop();
 }
 
-/// Fills the cache with episodes 1 and 2, then breaks `feed.json`.
 fn broken_manifest(world: &World) -> Snapshot {
     world.set_feed(&[1, 2]);
     let online = start(world.settings(&world.feed_url(), 2), timing());

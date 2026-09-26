@@ -139,12 +139,10 @@ pub(super) struct CastPlayer {
     last_place: Option<Place>,
 }
 
-/// How the connection to the speaker is made.
 enum Transport {
     /// TLS without a certificate check, as every Cast sender does: a
     /// speaker's certificate is self-signed.
     Tls,
-    /// Plain TCP, to the fake speaker in tests.
     #[cfg(test)]
     Plain,
 }
@@ -176,7 +174,6 @@ impl CastPlayer {
         }
     }
 
-    /// A player for a fake speaker on plain TCP that answers within `io_timeout`.
     #[cfg(test)]
     fn plain(host: String, port: u16, io_timeout: Duration) -> CastPlayer {
         CastPlayer {
@@ -492,7 +489,6 @@ impl CastPlayer {
         events.place(at, false);
     }
 
-    /// Connects and finds the running media app, if any.
     fn open(&self) -> Result<Session> {
         let mut s = self.dial()?;
         s.connection.connect(RECEIVER)?;
@@ -504,8 +500,6 @@ impl CastPlayer {
         Ok(s)
     }
 
-    /// A fresh connection, with a timeout on the connect and on every read
-    /// and write.
     fn dial(&self) -> Result<Session> {
         let tcp = super::connect(&self.host, self.port)?;
         tcp.set_read_timeout(Some(self.io_timeout))?;
@@ -525,7 +519,6 @@ impl CastPlayer {
     }
 }
 
-/// TLS to the speaker without a certificate check (see [`Transport::Tls`]).
 fn tls(tcp: TcpStream, host: &str) -> Result<StreamOwned<ClientConnection, TcpStream>> {
     let config = ClientConfig::builder()
         .dangerous()
@@ -546,8 +539,6 @@ fn apps_to_quit(apps: &[Application]) -> Vec<&Application> {
     apps.iter().filter(|app| app.app_id != BACKDROP).collect()
 }
 
-/// The Default Media Receiver, launched when it is not running yet, and
-/// connected.
 fn media_app(s: &Session) -> Result<Application> {
     let app = match &s.app {
         Some(app) => app.clone(),
