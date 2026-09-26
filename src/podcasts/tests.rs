@@ -235,6 +235,12 @@ fn an_offline_start_publishes_the_cache() {
     let online = start(world.settings(&world.feed_url(), 2), timing());
     let filled = online.snapshot_until(titles_are(&["Episode 2", "Episode 1"]));
     online.stop();
+    // A finished download that the manifest does not list yet.
+    let unlisted = world
+        .cache
+        .path()
+        .join("maus/20250103-episode-3-3a3b3c4d.mp3");
+    fs::write(&unlisted, b"abc").unwrap();
 
     let offline = world.settings(&format!("{}/feed.xml", closed_port()), 2);
     let cached = load_cached(&offline);
@@ -252,6 +258,83 @@ fn an_offline_start_publishes_the_cache() {
         quiet.is_err(),
         "an offline refresh changed files: {quiet:?}"
     );
+    assert!(unlisted.exists(), "an offline refresh deleted a file");
+    run.stop();
+}
+
+/// Fills the cache with episodes 1 and 2, then breaks `feed.json`.
+fn broken_manifest(world: &World) -> Snapshot {
+    world.set_feed(&[1, 2]);
+    let online = start(world.settings(&world.feed_url(), 2), timing());
+    let filled = online.snapshot_until(titles_are(&["Episode 2", "Episode 1"]));
+    online.stop();
+    fs::write(world.cache.path().join("maus").join("feed.json"), "{").unwrap();
+    filled
+}
+
+#[test]
+fn a_broken_manifest_and_a_dead_feed_delete_nothing() {
+    let world = World::new();
+    let filled = broken_manifest(&world);
+    let offline = world.settings(&format!("{}/feed.xml", closed_port()), 2);
+    let run = start(offline, timing());
+
+    run.snapshot_until(|_| true);
+    let quiet = run.events.recv_timeout(GRACE * 3);
+
+    assert!(
+        quiet.is_err(),
+        "an offline refresh changed files: {quiet:?}"
+    );
+    let picture = filled.feeds[0].picture.clone().unwrap();
+    for file in [
+        world.cache.path().join(rel_of(&filled, "Episode 1")),
+        world.cache.path().join(rel_of(&filled, "Episode 2")),
+        picture,
+    ] {
+        assert!(file.exists(), "{} was deleted", file.display());
+    }
+    run.stop();
+}
+
+#[test]
+fn a_broken_manifest_is_written_again_from_the_feed_and_the_files() {
+    let world = World::new();
+    let filled = broken_manifest(&world);
+    let settings = world.settings(&world.feed_url(), 2);
+    let run = start(settings.clone(), timing());
+
+    let snapshot = run.snapshot_until(titles_are(&["Episode 2", "Episode 1"]));
+
+    assert_eq!(snapshot, filled);
+    let Event::Add(added) = run.next_event() else {
+        panic!("expected the files to be published again");
+    };
+    assert!(added.contains(&rel_of(&filled, "Episode 1")));
+    assert!(added.contains(&rel_of(&filled, "Episode 2")));
+    let quiet = run.events.recv_timeout(GRACE * 2);
+    assert!(quiet.is_err(), "a file was deleted: {quiet:?}");
+    assert_eq!(load_cached(&settings), filled);
+    run.stop();
+}
+
+#[test]
+fn the_refresh_that_rewrites_a_broken_manifest_deletes_nothing() {
+    let world = World::new();
+    let filled = broken_manifest(&world);
+    let one_refresh = Timing {
+        refresh: Duration::from_secs(60),
+        ..timing()
+    };
+    let run = start(world.settings(&world.feed_url(), 1), one_refresh);
+
+    run.snapshot_until(titles_are(&["Episode 2"]));
+    assert!(matches!(run.next_event(), Event::Add(_)));
+    let quiet = run.events.recv_timeout(GRACE * 3);
+
+    assert!(quiet.is_err(), "a file was touched: {quiet:?}");
+    let old = world.cache.path().join(rel_of(&filled, "Episode 1"));
+    assert!(old.exists(), "deleted while the manifest was broken");
     run.stop();
 }
 

@@ -62,26 +62,26 @@ pub fn feed_dir(cache_dir: &Path, slug: &str) -> Result<PathBuf> {
     Ok(cache_dir.join(slug))
 }
 
-/// A missing manifest is an empty cache; a broken one is logged and ignored,
-/// so its episodes are downloaded again.
-pub fn load(dir: &Path) -> Manifest {
+/// A missing manifest is an empty cache. `None` (logged) when it cannot be
+/// read or parsed: the folder may then hold cached files no manifest lists.
+pub fn load(dir: &Path) -> Option<Manifest> {
     let path = dir.join(MANIFEST);
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Manifest::default(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Some(Manifest::default()),
         Err(err) => {
             tracing::warn!("cannot read {}: {err}", path.display());
-            return Manifest::default();
+            return None;
         }
     };
     match serde_json::from_str::<Manifest>(&text) {
-        Ok(manifest) => sanitized(manifest),
+        Ok(manifest) => Some(sanitized(manifest)),
         Err(err) => {
             tracing::warn!(
                 "ignoring the broken podcast manifest {}: {err}",
                 path.display()
             );
-            Manifest::default()
+            None
         }
     }
 }
@@ -266,8 +266,8 @@ fn fold(c: char) -> Vec<char> {
 }
 
 /// Files in `dir` that match the cache's patterns, are not in `keep`, and are
-/// not the manifest. With `keep_parts`, unfinished downloads stay too.
-pub fn unwanted(dir: &Path, keep: &HashSet<String>, keep_parts: bool) -> Vec<String> {
+/// not the manifest.
+pub fn unwanted(dir: &Path, keep: &HashSet<String>) -> Vec<String> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -277,7 +277,6 @@ pub fn unwanted(dir: &Path, keep: &HashSet<String>, keep_parts: bool) -> Vec<Str
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| match kind(name) {
             None | Some(Kind::Manifest) => false,
-            Some(Kind::Part) => !keep_parts && !keep.contains(name),
             Some(_) => !keep.contains(name),
         })
         .collect();
@@ -408,16 +407,31 @@ mod tests {
 
         save(&folder, &manifest).unwrap();
 
-        assert_eq!(load(&folder), manifest);
+        assert_eq!(load(&folder), Some(manifest));
         assert!(!folder.join(part_name(MANIFEST)).exists());
     }
 
     #[test]
-    fn missing_or_corrupt_manifests_are_empty() {
+    fn a_missing_manifest_is_empty_and_a_corrupt_one_is_none() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(load(dir.path()), Manifest::default());
+        assert_eq!(load(dir.path()), Some(Manifest::default()));
         fs::write(dir.path().join(MANIFEST), b"{\"title\": ").unwrap();
-        assert_eq!(load(dir.path()), Manifest::default());
+        assert_eq!(load(dir.path()), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_manifest_is_none() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        save(dir.path(), &Manifest::default()).unwrap();
+        let path = dir.path().join(MANIFEST);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let loaded = load(dir.path());
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(loaded, None);
     }
 
     #[test]
@@ -434,7 +448,7 @@ mod tests {
         };
         save(dir.path(), &manifest).unwrap();
 
-        let loaded = load(dir.path());
+        let loaded = load(dir.path()).unwrap();
 
         assert_eq!(loaded.picture, None);
         assert_eq!(loaded.episodes.len(), 1);
@@ -489,17 +503,13 @@ mod tests {
         .into();
 
         assert_eq!(
-            unwanted(root, &keep, false),
+            unwanted(root, &keep),
             [
                 ".20241201-stale-3a3b3c4d.mp3.part",
                 ".feed.json.part",
                 "20250101-old-0a0b0c0d.mp3",
                 "p-99887766.jpg",
             ]
-        );
-        assert_eq!(
-            unwanted(root, &keep, true),
-            ["20250101-old-0a0b0c0d.mp3", "p-99887766.jpg"]
         );
     }
 

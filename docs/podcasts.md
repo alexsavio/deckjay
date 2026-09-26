@@ -55,7 +55,10 @@ A refresh reads each feed, keeps the newest `keep` episodes that fit in
 ones, and writes `feed.json` in the feed's folder. Downloads go to a `.part`
 file first and continue with an HTTP range after a break. A feed that
 cannot be read keeps all its cached episodes, even over the budget, so a
-broken feed never empties the shelf.
+broken feed never empties the shelf. Nothing in a feed's folder is deleted
+while the feed or its `feed.json` cannot be read. A broken `feed.json`
+takes the feed's episodes off the shelf until a refresh reads the feed and
+writes it again, reusing the episode files already there.
 
 Episodes that fall out of the plan are deleted 60 seconds later; then the
 web server stops serving them. The episode that is loaded (playing or
