@@ -171,7 +171,8 @@ State:
   `ItemId`, an index into the `Library` that is never reused while the
   program runs; `ItemKey` (`<source>/<path>`, e.g. `music/01 Animal Songs`)
   is the name that survives a restart.
-- While the loaded item resumes (`Ui::seeking`), ⏮ / ⏭ send
+- While the loaded item is spoken word (`Kind::seeks`: audiobooks,
+  podcasts, stories; `Ui::seeking`), ⏮ / ⏭ send
   `PlayerCmd::Seek(∓seek_seconds)` in place of `Prev` / `Next` and show
   ⏪ / ⏩ (`Face::SeekBack` / `SeekForward`), except on HEOS, which cannot
   seek. A seek stops at 0; past a track's end it acts as the track's end

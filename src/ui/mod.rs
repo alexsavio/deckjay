@@ -79,7 +79,8 @@ pub enum Face {
     Pause,
     Prev,
     Next,
-    /// ⏮ and ⏭ while an audiobook or a podcast plays: they jump in it.
+    /// ⏮ and ⏭ while an audiobook, a podcast or a story plays: they jump
+    /// in it.
     SeekBack,
     SeekForward,
     Volume {
@@ -365,7 +366,7 @@ impl Ui {
         self.seek_seconds > 0
             && self
                 .current
-                .is_some_and(|id| self.library.item(id).kind.resumes())
+                .is_some_and(|id| self.library.item(id).kind.seeks())
     }
 
     /// What pressing `id` plays: its tracks, from where it stopped if it

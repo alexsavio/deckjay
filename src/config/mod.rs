@@ -71,7 +71,8 @@ pub struct Config {
     /// How much one press of a volume key changes the volume.
     #[serde(default = "default_volume_step")]
     pub volume_step: f32,
-    /// How far ⏪ and ⏩ jump in an audiobook or a podcast, in seconds.
+    /// How far ⏪ and ⏩ jump in an audiobook, a podcast or a story, in
+    /// seconds.
     #[serde(default = "default_seek_seconds")]
     pub seek_seconds: u16,
 

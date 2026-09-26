@@ -135,12 +135,12 @@ the destination come from the app entry of `RECEIVER_STATUS`):
   `STOP` only for a station the receiver will not pause (see
   [Radio](#radio)) and before another speaker takes over (item 9 of
   [Sequence](#sequence)).
-- ⏪ / ⏩ (⏮ / ⏭ while an audiobook or a podcast plays): `GET_STATUS`, then
-  a `SEEK` to `currentTime` ± `seek_seconds`, with no `resumeState`, so the
-  play or pause state stays. The target stops at 0 and at the track's
-  length when the status has one; at the end the receiver goes on with the
-  next queue item by itself. Tested on the pure `seek_target` only, not on
-  a receiver.
+- ⏪ / ⏩ (⏮ / ⏭ while an audiobook, a podcast or a story plays):
+  `GET_STATUS`, then a `SEEK` to `currentTime` ± `seek_seconds`, with no
+  `resumeState`, so the play or pause state stays. The target stops at 0
+  and at the track's length when the status has one; at the end the
+  receiver goes on with the next queue item by itself. Tested on the pure
+  `seek_target` only, not on a receiver.
 
 `MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
 (`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,

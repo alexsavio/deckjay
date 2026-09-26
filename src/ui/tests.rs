@@ -317,6 +317,27 @@ fn prev_and_next_jump_in_an_audiobook_and_skip_music_tracks() {
 }
 
 #[test]
+fn prev_and_next_jump_in_a_story_too() {
+    let (mut ui, cmds, _events) = ui_with(
+        Library::with_shelves(vec![("stories", Kind::Story, items(Kind::Story, 0..1))]),
+        "",
+    );
+    let layout = ui.layout(3, 5);
+    let (prev, next) = (
+        key_of(&ui, &layout, Face::Prev),
+        key_of(&ui, &layout, Face::Next),
+    );
+
+    ui.press(&layout, 0);
+    assert_eq!(ui.faces(&layout)[prev], Face::SeekBack);
+    assert_eq!(ui.faces(&layout)[next], Face::SeekForward);
+    ui.press(&layout, prev);
+    ui.press(&layout, next);
+
+    assert_eq!(skips_sent(&cmds), [("seek", -10), ("seek", 10)]);
+}
+
+#[test]
 fn on_heos_prev_and_next_skip_chapters_in_an_audiobook() {
     let (mut ui, cmds, layout) = music_and_book_ui("speaker_type = \"heos\"\n");
     let (prev, next) = (

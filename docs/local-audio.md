@@ -84,10 +84,11 @@ target; the place reported, and counted on from, is where it landed
 track, or a file that cannot seek, plays the track from its beginning, with
 a warning.
 
-⏪ and ⏩ (⏮ and ⏭ while an audiobook or a podcast plays) open the current
-track again the same way, `seek_seconds` from the place the sound card got
-to: 0 at the most, and past the track's end as if it ended (the next track,
-or the end of the album). A track that was paused stays paused.
+⏪ and ⏩ (⏮ and ⏭ while an audiobook, a podcast or a story plays) open the
+current track again the same way, `seek_seconds` from the place the sound
+card got to: 0 at the most, and past the track's end as if it ended (the
+next track, or the end of the album). A track that was paused stays
+paused.
 
 Where seeks land on the 3 s `steps.*` fixtures (`tests/resume.rs`, targets
 0.5, 1.5 and 2.5 s):

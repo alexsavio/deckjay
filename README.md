@@ -14,7 +14,7 @@ or on a Mac. Written in Rust.
  [A][A][A][A][⏻]     A = an album, book or story: press to play, again to pause
  [A][A][A][A][S]     S = the next shelf; ⏻ = power: stops all, dims the deck
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume;
-                     in a book or podcast ⏮ ⏭ become ⏪ ⏩: 10 s back or on
+                     in a book, podcast or story ⏮ ⏭ show ⏪ ⏩: 10 s back or on
 ```
 
 ## ✨ Features
@@ -32,8 +32,8 @@ or on a Mac. Written in Rust.
   Small badges tell the kinds apart, a bar shows how far a book got, and a
   dot marks podcast episodes not heard yet.
 - 🔖 **Books resume:** audiobooks and podcast episodes play on from where they
-  stopped, also after a restart. In them ⏪ and ⏩ jump 10 s back or on
-  (`seek_seconds`).
+  stopped, also after a restart. In books, podcasts and stories ⏪ and ⏩
+  jump 10 s back or on (`seek_seconds`).
 - 🧒 **Made for children:** a volume cap, a power key that stops everything
   and dims the deck (the next press only lights it again), a deck that
   keeps working when it is unplugged and plugged back in, and goes dark

@@ -36,7 +36,8 @@ max_volume = 0.4
 start_volume = 0.2
 volume_step = 0.05
 
-# How far the ⏪ and ⏩ keys jump in an audiobook or a podcast, in seconds
+# How far the ⏪ and ⏩ keys jump in an audiobook, a podcast or a story, in
+# seconds
 # (1 to 300: a longer jump skips whole scenes, and a number in milliseconds
 # by mistake fails at start). HEOS cannot seek: there these keys skip
 # chapters.

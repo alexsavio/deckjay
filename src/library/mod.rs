@@ -117,6 +117,12 @@ impl Kind {
     pub fn resumes(self) -> bool {
         matches!(self, Kind::Audiobook | Kind::Podcast)
     }
+
+    /// Whether ⏮ and ⏭ jump in the item instead of skipping tracks: the
+    /// spoken kinds, where a track is a long chapter.
+    pub fn seeks(self) -> bool {
+        matches!(self, Kind::Audiobook | Kind::Podcast | Kind::Story)
+    }
 }
 
 impl From<SourceKind> for Kind {
