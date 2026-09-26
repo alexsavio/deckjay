@@ -6,10 +6,13 @@
 
 A player for small children who cannot read yet: they press a picture on
 an Elgato Stream Deck, and their music, audiobook, story, podcast or radio
-station plays. It plays on a Chromecast built-in speaker, a Denon or
-Marantz HEOS receiver, a Spotify Connect device, or the computer's own
-sound output. It runs on Linux (a Raspberry Pi next to the speaker, or any
-PC) and on macOS. Written in Rust.
+station plays.
+
+It plays on a Chromecast built-in speaker, a Denon or Marantz HEOS
+receiver, a Spotify Connect device, or the computer's own sound output.
+
+It runs on Linux (a Raspberry Pi next to the speaker, or any PC) and on
+macOS. Written in Rust.
 
 ```text
  [A][A][A][A][⏻]     A = an album, book or story: press to play, again to pause
@@ -27,7 +30,7 @@ PC) and on macOS. Written in Rust.
   Connect device).
 - 📚 **Shelves:** each source is a shelf; one key moves to the next shelf, and
   a shelf with more items than keys pages. Decks from the 6-key Mini to the
-  32-key XL work; the layout adapts.
+  36-key Plus XL work; the layout adapts.
 - 🎨 **Pictures, no text:** album covers, a `key.png` of your own, or a big
   glyph of the kind (note, book, star, radio waves, microphone) on a colour.
   Small badges tell the kinds apart, a bar shows how far a book got, and a
@@ -46,8 +49,16 @@ PC) and on macOS. Written in Rust.
 
 ## 🧰 What you need
 
-- An **Elgato Stream Deck**: MK.2, Scissor Keys, XL, Mini, Neo, Plus or a
-  module. The web simulator stands in for it while you try things out.
+- An **Elgato Stream Deck** with screens and at least two rows of keys:
+  the original, MK.2, Scissor Keys, Mini, Neo, XL, Plus, Plus XL, or an
+  MK.2, Mini or XL module (not the Pedal: it has no screens). Tested on a
+  real MK.2; the others through their key layouts and the web simulator,
+  which also stands in for a deck while you try things out.
+- **Other decks** (for example from Ajazz, Mirabox or Loupedeck) are not
+  supported yet, and pull requests that add one are welcome: the device
+  code sits behind a small `Backend` trait in `src/deck/` (`hid.rs` for
+  USB decks, `remote.rs` for the simulator), so a new deck is one new
+  backend.
 - A computer for the Stream Deck, on the same network as the speaker:
   **Linux** (a **Raspberry Pi 3** or newer with 64-bit Raspberry Pi OS, or
   a PC) or a **Mac**. Windows is not supported.
@@ -95,33 +106,39 @@ service that starts at boot.
 
 The program serves your music folders over HTTP and tells the speaker which
 file to play. The speaker downloads the files itself, so playback keeps going
-even if the computer is busy. A Chromecast gets the whole album as a queue. A
-HEOS device plays one file at a time, so the program starts the next track
-when one ends (with a gap of about a second). With `speaker_type = "local"`
-the program decodes and plays the files itself, on the sound output that
-`audio_device` names.
+even if the computer is busy.
+
+- **Chromecast:** gets the whole album as a queue.
+- **HEOS:** plays one file at a time, so the program starts the next track
+  when one ends (with a gap of about a second).
+- **Local audio** (`speaker_type = "local"`): the program decodes and plays
+  the files itself, on the sound output that `audio_device` names.
 
 `config.example.toml` explains every setting. The main ones:
-`speaker_type` (`"cast"`, `"heos"` or `"local"`), `speaker_host` (the
-speaker's IP address), `max_volume`, and one `[[source]]` table per folder,
-podcast, radio or Spotify shelf.
+
+- `speaker_type`: `"cast"`, `"heos"` or `"local"`.
+- `speaker_host`: the speaker's IP address.
+- `max_volume`: the cap for the volume keys.
+- One `[[source]]` table per folder, podcast, radio or Spotify shelf.
 
 ## 🍓 Run on a Raspberry Pi
 
 [`docs/raspberry-pi.md`](docs/raspberry-pi.md) installs kids-deck on a
 headless Raspberry Pi with Raspberry Pi OS: a service that starts at boot
 and starts again when it fails, the music on the SD card, and logs in the
-system journal with a size cap. Most steps also fit another Linux computer
-with systemd. It also shows how to run it in Docker instead
-(`just deploy`).
+system journal with a size cap.
+
+Most steps also fit another Linux computer with systemd. The guide also
+shows how to run it in Docker instead (`just deploy`).
 
 ## 💻 Develop
 
 [`docs/development.md`](docs/development.md) sets up the project on your
 computer and runs it without a Stream Deck, with the web Stream Deck
-simulator (`just sim`), or with a real deck. It also lists the `just`
-recipes, the checks before a commit, the release steps and a map of the
-code.
+simulator (`just sim`), or with a real deck.
+
+It also lists the `just` recipes, the checks before a commit, the release
+steps and a map of the code.
 
 ## 📝 Notes
 
@@ -129,16 +146,15 @@ code.
   CI (Ubuntu) and in Docker with the web simulator, playing on a Lenovo
   smart display (Cast). The Raspberry Pi guide is not tested on a real Pi
   yet.
-- **Supported decks:** anything the `elgato-streamdeck` crate knows with at
-  least two rows: MK.2, Scissor Keys, XL, Mini, Neo, Plus and the modules.
-  The layout adapts to the number of keys.
 - **Volume cap** only applies to the deck's keys. The speaker's own buttons,
   its app (JBL One, HEOS) and voice assistants can still go louder.
-- **HEOS:** `just doctor` lists the HEOS players the device knows. The
-  program uses the player whose IP is `speaker_host`, else the first one. It
-  cannot tell a track that ended from a track stopped in the HEOS app: both
-  start the next track. Tested on a Denon AVR-X1600H. Turn on "Network
-  Control: Always On" on the receiver, or it cannot be reached in standby.
+- **HEOS** (tested on a Denon AVR-X1600H):
+  - Turn on "Network Control: Always On" on the receiver, or it cannot be
+    reached in standby.
+  - `just doctor` lists the HEOS players the device knows. The program uses
+    the player whose IP is `speaker_host`, else the first one.
+  - It cannot tell a track that ended from a track stopped in the HEOS app:
+    both start the next track.
 - **"No route to host" on macOS** while `ping` works: macOS blocks the
   program's local network access. Allow Local Network access for your
   terminal app, or run with `just sim` in Docker.
@@ -148,32 +164,37 @@ code.
   to play the format: check your model's list for ogg/opus and flac. Local
   playback cannot decode Opus; it skips those tracks.
 
-## 🔌 Speaker protocols
+## 📖 More docs
 
-[`docs/heos.md`](docs/heos.md) and [`docs/chromecast.md`](docs/chromecast.md)
-describe the HEOS CLI and the Google Cast protocol as kids-deck uses them:
-the commands it sends, the order, the quirks of real devices, and how to test
-by hand. [`docs/local-audio.md`](docs/local-audio.md) describes local
-playback: decoding, sound outputs and the Raspberry Pi's audio devices.
-
-[`docs/podcasts.md`](docs/podcasts.md) explains podcast sources and their
-cache, [`docs/radio.md`](docs/radio.md) internet radio stations, and
-[`docs/spotify.md`](docs/spotify.md) the Spotify app, sign-in and devices.
+- [`docs/heos.md`](docs/heos.md) and
+  [`docs/chromecast.md`](docs/chromecast.md): the HEOS CLI and the Google
+  Cast protocol as kids-deck uses them: the commands it sends, the order,
+  the quirks of real devices, and how to test by hand.
+- [`docs/local-audio.md`](docs/local-audio.md): local playback: decoding,
+  sound outputs and the Raspberry Pi's audio devices.
+- [`docs/podcasts.md`](docs/podcasts.md): podcast sources and their cache.
+- [`docs/radio.md`](docs/radio.md): internet radio stations.
+- [`docs/spotify.md`](docs/spotify.md): the Spotify app, sign-in and
+  devices.
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. Before a pull request, run `just ci`
-(format check, clippy with the pedantic lints, tests and API docs) and
-keep the Markdown lines within 80 columns (`rumdl check`). Commit messages
-follow [Conventional Commits](https://www.conventionalcommits.org), from
-which `CHANGELOG.md` is generated. Versions are
-[CalVer](https://calver.org) `YYYY.MM.MICRO`; `just release-next` makes a
-release. [`docs/development.md`](docs/development.md) has the setup and the
-code map; `CLAUDE.md` describes the architecture in more depth.
+Issues and pull requests are welcome. Before a pull request:
 
-Code that talks to real devices (Chromecast, HEOS, the USB deck) is tested
-against fakes; please say in a pull request what you checked on real
-hardware.
+- Run `just ci`: format check, clippy with the pedantic lints, tests and
+  API docs.
+- Keep the Markdown lines within 80 columns (`rumdl check`).
+- Write the commit messages as
+  [Conventional Commits](https://www.conventionalcommits.org):
+  `CHANGELOG.md` is generated from them.
+- Code that talks to real devices (Chromecast, HEOS, the USB deck) is
+  tested against fakes: say in the pull request what you checked on real
+  hardware.
+
+Versions are [CalVer](https://calver.org) `YYYY.MM.MICRO`;
+`just release-next` makes a release.
+[`docs/development.md`](docs/development.md) has the setup and the code
+map, and `CLAUDE.md` describes the architecture in more depth.
 
 ## 📄 License
 
