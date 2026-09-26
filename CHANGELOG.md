@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.PATCH).
 
 ## [Unreleased]
 
@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Show stations and playlists in the check and logs
 - Let the power key stop what kids-deck did not start
 
+### 💼 Other
+
+- Release CalVer versions to GitHub and crates.io
+
 ### 🚜 Refactor
 
 - Apply code review findings
@@ -67,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Describe radio playback in the architecture notes
 - Say which Spotify devices stay reachable
 - Add an MIT license and a README for the public
+- Add development and Raspberry Pi guides
 
 ### ⚙️ Miscellaneous Tasks
 
