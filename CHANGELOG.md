@@ -35,6 +35,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Add a power key that stops everything and dims the deck
 - Let a source folder be one key
 - Jump back and forward in audiobooks and podcasts
+- Turn the deck dark when kids-deck stops
 
 ### 🐛 Bug Fixes
 
