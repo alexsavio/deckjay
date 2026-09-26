@@ -11,8 +11,10 @@ Authentics 300) or Denon / Marantz HEOS, or on the computer's own sound output
 (`speaker_type` = `cast`, `heos` or `local` in `config.toml`).
 Develop natively on macOS (Docker Desktop cannot pass USB through), or run
 everything in Docker with the web Stream Deck simulator (`just sim`). Docker
-also builds the Raspberry Pi 3 (`linux/arm64`) image. `README.md` has setup,
-deploy steps and the per-file code map.
+also builds the Raspberry Pi 3 (`linux/arm64`) image. `README.md` is the
+overview and install; `docs/development.md` has the dev setup, the
+simulator and the per-file code map; `docs/raspberry-pi.md` installs a
+headless Pi as a systemd service (and the Docker deploy).
 
 ## Commands
 
@@ -47,10 +49,18 @@ deploy steps and the per-file code map.
   `just pi-music-prune` does (`rsync --delete`, asks first).
 - Recipes in the root justfile run in `bash -euo pipefail` (`set shell`), so
   any failing command, also on the left of a pipe, stops the recipe.
-- `just test|build|lint|format|typecheck` sit in the claude-files managed
-  block and call `.claude/just/rust.just`, a gitignored symlink, so they fail
-  without claude-files installed. The project recipes below the block call
-  cargo directly. Do not edit the managed block.
+- The claude-files managed block at the top of the justfile only loads the
+  optional `claude` and `rs` modules (gitignored symlinks); every project
+  recipe, `test|build|lint|format|typecheck` too, calls cargo directly, so
+  the justfile works without claude-files. Do not edit the block:
+  `just claude::resync` writes it and leaves out recipes the justfile has.
+- Releases: CalVer `YYYY.MM.MICRO` (e.g. `2026.9.0`), tag `v2026.9.0`.
+  `just release-next` (or `just release VERSION`) sets the version, runs
+  `just ci`, writes `CHANGELOG.md`, commits, tags and pushes both at once.
+  The tag starts `.github/workflows/release.yml`: binaries for Linux x86_64
+  and arm64 (built on Ubuntu 22.04 for glibc 2.35) and macOS arm64, the
+  GitHub release, then `cargo publish` with the `CARGO_REGISTRY_TOKEN`
+  secret. `just publish-dry` checks the package first.
 
 Toolchain: `rust-toolchain.toml` pins 1.98, `Cargo.toml` has
 `rust-version = "1.98"`, the Dockerfile builds on `rust:1.98-trixie`. Bump
@@ -256,7 +266,8 @@ work together with `#[serde(flatten)]`, so source tables list their keys.
 - The UI guesses the result of a key press before the speaker answers, so
   the player must deliver the next event after every command, even when it
   repeats the last one (`player::run` resets `Emitter::last`).
-- Keep `Cargo.lock` in git: the Docker build uses `--locked`.
+- Keep `Cargo.lock` in git: the Docker build, the release builds and
+  `cargo publish` use `--locked`.
 - `CHANGELOG.md` is generated from the Conventional Commit messages by
   git-cliff (`cliff.toml`, the `changelog` workflow); do not edit it by hand.
   CI (`.github/workflows/ci.yml`) runs fmt, clippy, rustdoc, rumdl, the
