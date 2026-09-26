@@ -81,7 +81,7 @@ and it takes `mediaSessionId` from `MEDIA_STATUS`.
 | `media.load_with_opts(…)` (station) | the app | success or failure |
 | `media.get_status(transportId, None)` | the app | first entry |
 | `media.pause` / `media.play` | the app | success or failure |
-| `media.seek(…)` (resume only) | the app | success or failure |
+| `media.seek(…)` (resume, ⏪ ⏩) | the app | success or failure |
 | `media.stop` (station, stop) | the app | success or failure |
 
 ```json
@@ -131,9 +131,16 @@ the destination come from the app entry of `RECEIVER_STATUS`):
   0.0 unless an item resumes inside a track (see
   [Resume inside a track](#resume-inside-a-track)).
 - kids-deck never sends `QUEUE_*`, `CLOSE`, `PING` or `PONG`, `SEEK` only
-  right after a `LOAD` that resumes inside a track, and `STOP` only for a
-  station the receiver will not pause (see [Radio](#radio)) and before
-  another speaker takes over (item 9 of [Sequence](#sequence)).
+  right after a `LOAD` that resumes inside a track and for ⏪ / ⏩, and
+  `STOP` only for a station the receiver will not pause (see
+  [Radio](#radio)) and before another speaker takes over (item 9 of
+  [Sequence](#sequence)).
+- ⏪ / ⏩ (⏮ / ⏭ while an audiobook or a podcast plays): `GET_STATUS`, then
+  a `SEEK` to `currentTime` ± `seek_seconds`, with no `resumeState`, so the
+  play or pause state stays. The target stops at 0 and at the track's
+  length when the status has one; at the end the receiver goes on with the
+  next queue item by itself. Tested on the pure `seek_target` only, not on
+  a receiver.
 
 `MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
 (`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,

@@ -147,6 +147,7 @@ impl Speaker for SpotifyPlayer {
                 Some(id) => self.client()?.previous(&id),
                 None => Ok(()),
             },
+            PlayerCmd::Seek(_) => Ok(()),
             PlayerCmd::SetVolume(volume) => {
                 if let Some(id) = self.device_id()
                     && let Err(err) = self.client()?.set_volume(&id, percent(volume))

@@ -214,7 +214,8 @@ impl Speaker for CastPlayer {
                 Ok(())
             }
             PlayerCmd::Off => Speaker::stop(self, events),
-            PlayerCmd::Next | PlayerCmd::Prev if self.live.is_some() => Ok(()),
+            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_) if self.live.is_some() => Ok(()),
+            PlayerCmd::Seek(by) => self.seek(by, events),
             PlayerCmd::Next | PlayerCmd::Prev => {
                 let s = self.open()?;
                 let Some((_, entry)) = media_status(&s)? else {
@@ -419,6 +420,26 @@ impl CastPlayer {
         Ok(())
     }
 
+    /// Moves the place in our track `by` seconds; see [`seek_target`].
+    fn seek(&mut self, by: i32, events: &mut Emitter) -> Result<()> {
+        let s = self.open()?;
+        let Some((tid, entry)) = media_status(&s)? else {
+            return Ok(());
+        };
+        let Some(to) = seek_target(&entry, &self.tracks, by) else {
+            return Ok(());
+        };
+        // `None` keeps the play or pause state.
+        s.device.media.seek(
+            tid,
+            entry.media_session_id,
+            Some(to.position.as_secs_f32()),
+            None,
+        )?;
+        self.note_place(to, events);
+        Ok(())
+    }
+
     fn note_place(&mut self, at: Place, events: &mut Emitter) {
         self.last_place = Some(at);
         events.place(at, false);
@@ -578,6 +599,23 @@ fn skip_target(entry: &StatusEntry, tracks: &[TrackInfo], forward: bool) -> Opti
     } else {
         Some(current.saturating_sub(1))
     }
+}
+
+/// The place `by` seconds from the entry's: 0 at the most, and the end of
+/// the track when its length is known, where the receiver goes on with the
+/// next queue item. `None` when the media is not ours.
+fn seek_target(entry: &StatusEntry, tracks: &[TrackInfo], by: i32) -> Option<Place> {
+    let at = place(entry, tracks)?;
+    let step = Duration::from_secs(u64::from(by.unsigned_abs()));
+    let position = if by < 0 {
+        at.position.saturating_sub(step)
+    } else {
+        at.position + step
+    };
+    Some(Place {
+        position: at.duration.map_or(position, |length| position.min(length)),
+        ..at
+    })
 }
 
 /// Returns the transport id and first media status entry of the running media app.

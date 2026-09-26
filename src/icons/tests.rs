@@ -78,6 +78,17 @@ fn every_page_fills_a_dot() {
 }
 
 #[test]
+fn the_seek_keys_differ_from_the_skip_keys_and_each_other() {
+    let keys = [prev(SIZE), next(SIZE), rewind(SIZE), fast_forward(SIZE)];
+    for (i, a) in keys.iter().enumerate() {
+        assert_eq!(a.dimensions(), (SIZE, SIZE));
+        for b in &keys[i + 1..] {
+            assert!(!same_pixels(a, b), "two keys look the same");
+        }
+    }
+}
+
+#[test]
 fn a_thumbnail_is_a_square_of_the_key_size() {
     for (w, h) in [(3000, 2000), (500, 1600), (300, 300), (50, 40)] {
         let cover = DynamicImage::new_rgb8(w, h);

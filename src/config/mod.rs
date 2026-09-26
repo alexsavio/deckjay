@@ -71,6 +71,9 @@ pub struct Config {
     /// How much one press of a volume key changes the volume.
     #[serde(default = "default_volume_step")]
     pub volume_step: f32,
+    /// How far ⏪ and ⏩ jump in an audiobook or a podcast, in seconds.
+    #[serde(default = "default_seek_seconds")]
+    pub seek_seconds: u16,
 
     /// Stream Deck screen brightness in percent.
     #[serde(default = "default_brightness")]
@@ -126,6 +129,9 @@ fn default_start_volume() -> f32 {
 }
 fn default_volume_step() -> f32 {
     0.05
+}
+fn default_seek_seconds() -> u16 {
+    10
 }
 fn default_brightness() -> u8 {
     60
@@ -189,6 +195,11 @@ impl Config {
         // The UI rounds volumes to a 0.001 grid, so a smaller step would never move.
         if !(0.01..=0.5).contains(&cfg.volume_step) {
             bail!("volume_step must be between 0.01 and 0.5");
+        }
+        // Past 5 minutes a jump skips whole scenes; the cap also catches a
+        // value meant in milliseconds.
+        if !(1..=300).contains(&cfg.seek_seconds) {
+            bail!("seek_seconds must be between 1 and 300");
         }
         if cfg.start_volume.is_nan() {
             bail!("start_volume must be a number");
@@ -337,6 +348,20 @@ mod tests {
     fn rejects_nan_volume_step() {
         let err = parse("volume_step = nan\n").unwrap_err();
         assert!(err.to_string().contains("volume_step"), "{err:#}");
+    }
+
+    #[test]
+    fn seeks_ten_seconds_by_default() {
+        assert_eq!(parse("").unwrap().seek_seconds, 10);
+        assert_eq!(parse("seek_seconds = 30\n").unwrap().seek_seconds, 30);
+    }
+
+    #[test]
+    fn rejects_seek_seconds_out_of_range() {
+        for value in [0, 301] {
+            let err = parse(&format!("seek_seconds = {value}\n")).unwrap_err();
+            assert!(err.to_string().contains("seek_seconds"), "{value}: {err:#}");
+        }
     }
 
     #[test]

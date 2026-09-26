@@ -112,6 +112,7 @@ mod tests {
                 PlayerCmd::TogglePause => "pause",
                 PlayerCmd::Next => "next",
                 PlayerCmd::Prev => "prev",
+                PlayerCmd::Seek(_) => "seek",
                 PlayerCmd::SetVolume(_) => "volume",
                 PlayerCmd::Off => "off",
             };

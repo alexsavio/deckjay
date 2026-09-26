@@ -395,6 +395,90 @@ fn prev_goes_back_early_in_a_track_and_restarts_it_later() {
 }
 
 #[test]
+fn seek_jumps_in_the_track_and_stops_at_its_start() {
+    let mut rig = Rig::new();
+    let tracks = vec![
+        rig.track("1.wav", 20.0, 1000),
+        rig.track("2.wav", 2.0, 2000),
+    ];
+    rig.play_album(tracks, 1.0).unwrap();
+    rig.listen(1.0);
+    rig.events();
+
+    rig.send(PlayerCmd::Seek(5)).unwrap();
+    assert_eq!(rig.events(), [PlayerEvent::Playing(ITEM)]);
+    assert_eq!(rig.player.current, Some(0));
+    let at = rig.engine().position();
+    assert!(
+        (5.9..=6.3).contains(&at.as_secs_f64()),
+        "5 s on from about 1 s: {at:?}"
+    );
+    assert_eq!(levels(&rig.listen(at.as_secs_f64() + 0.2), 1.0), [1000]);
+
+    rig.send(PlayerCmd::Seek(-10)).unwrap();
+    assert_eq!(rig.player.current, Some(0));
+    assert_eq!(
+        rig.engine().position(),
+        Duration::ZERO,
+        "no further back than the start"
+    );
+}
+
+#[test]
+fn seek_past_the_end_plays_the_next_track_and_ends_the_album_on_the_last() {
+    let mut rig = Rig::new();
+    let tracks = vec![rig.track("1.wav", 2.0, 1000), rig.track("2.wav", 2.0, 2000)];
+    rig.play_album(tracks, 1.0).unwrap();
+    rig.events();
+
+    rig.send(PlayerCmd::Seek(10)).unwrap();
+    assert_eq!(rig.player.current, Some(1));
+    assert_eq!(rig.engine().position(), Duration::ZERO);
+    assert_eq!(levels(&rig.listen(0.2), 1.0), [2000]);
+    rig.events();
+
+    rig.send(PlayerCmd::Seek(10)).unwrap();
+    assert_eq!(rig.events(), [PlayerEvent::Stopped]);
+    assert_eq!(rig.player.current, None);
+}
+
+#[test]
+fn seek_keeps_a_paused_track_paused() {
+    let mut rig = Rig::new();
+    let tracks = vec![rig.track("1.wav", 20.0, 1000)];
+    rig.play_album(tracks, 1.0).unwrap();
+    rig.listen(0.5);
+    rig.send(PlayerCmd::TogglePause).unwrap();
+    rig.events();
+
+    rig.send(PlayerCmd::Seek(3)).unwrap();
+    assert_eq!(rig.events(), [PlayerEvent::Paused(ITEM)], "never Playing");
+    let at = rig.engine().position();
+    assert!(at.as_secs_f64() >= 3.3, "3 s on from about 0.5 s: {at:?}");
+    for _ in 0..5 {
+        assert!(levels(&rig.fill(), 1.0).is_empty());
+    }
+    assert_eq!(rig.engine().position(), at, "a pause keeps the place");
+}
+
+#[test]
+fn seek_past_the_end_of_a_track_of_unknown_length_plays_the_next() {
+    let mut rig = Rig::new();
+    let tracks = vec![rig.track("1.wav", 2.0, 1000), rig.track("2.wav", 2.0, 2000)];
+    rig.play_album(tracks, 1.0).unwrap();
+    rig.listen(0.5);
+    // As for a file that does not tell its length: the seek past its end
+    // fails, and `open_at` starts the track over.
+    rig.player.duration = None;
+    rig.events();
+
+    rig.send(PlayerCmd::Seek(10)).unwrap();
+    assert_eq!(rig.player.current, Some(1));
+    assert_eq!(rig.engine().position(), Duration::ZERO);
+    assert_eq!(levels(&rig.listen(0.2), 1.0), [2000]);
+}
+
+#[test]
 fn toggle_pause_pauses_resumes_and_restarts_a_finished_album() {
     let mut rig = Rig::new();
     rig.send(PlayerCmd::TogglePause).unwrap();

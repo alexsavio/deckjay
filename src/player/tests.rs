@@ -362,6 +362,25 @@ fn keeps_the_last_album_and_only_the_last_volume_after_it() {
     );
 }
 
+#[test]
+fn adds_up_seeks_in_a_row_only() {
+    use PlayerCmd::{Play, Seek, TogglePause};
+    let out = coalesce(vec![Seek(-10), Seek(-10), Seek(10), TogglePause, Seek(10)]);
+    assert!(
+        matches!(out.as_slice(), [Seek(-10), TogglePause, Seek(10)]),
+        "{out:?}"
+    );
+
+    let out = coalesce(vec![Seek(10), album(), Seek(10), Seek(10)]);
+    assert!(matches!(out.as_slice(), [Play { .. }, Seek(20)]), "{out:?}");
+
+    let out = coalesce(vec![Seek(10), Seek(-10), TogglePause]);
+    assert!(
+        matches!(out.as_slice(), [TogglePause]),
+        "back and on again is no jump: {out:?}"
+    );
+}
+
 enum Poll {
     Answer,
     Fail,

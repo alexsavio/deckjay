@@ -36,7 +36,7 @@ use image::{Rgb, RgbImage};
 use tracing::{info, warn};
 
 use self::layout::{Action, Control, Layout};
-use crate::config::Config;
+use crate::config::{Config, SpeakerType};
 use crate::deck::Deck;
 use crate::icons::{self, Decor};
 use crate::library::{self, ItemId, Kind, Library, Media};
@@ -78,6 +78,9 @@ pub enum Face {
     Pause,
     Prev,
     Next,
+    /// ⏮ and ⏭ while an audiobook or a podcast plays: they jump in it.
+    SeekBack,
+    SeekForward,
     Volume {
         up: bool,
         level: u8,
@@ -94,6 +97,9 @@ pub struct Ui {
     max_volume: f32,
     volume_step: f32,
     volume: f32,
+    /// Seconds ⏪ and ⏩ jump; 0 for a speaker that cannot seek (HEOS), whose
+    /// ⏮ and ⏭ keep skipping tracks.
+    seek_seconds: u16,
 
     /// The library shelves the deck shows: those with items.
     deck_shelves: Vec<usize>,
@@ -165,6 +171,11 @@ impl Ui {
             events,
             max_volume: cfg.max_volume,
             volume_step: cfg.volume_step,
+            seek_seconds: if cfg.speaker_type == SpeakerType::Heos {
+                0
+            } else {
+                cfg.seek_seconds
+            },
             volume: cfg.start_volume,
             current: None,
             playing: false,
@@ -315,6 +326,14 @@ impl Ui {
                 self.send(PlayerCmd::TogglePause);
                 self.playing = !self.playing;
             }
+            Control::Next | Control::Prev if self.seeking() => {
+                let by = i32::from(self.seek_seconds);
+                self.send(PlayerCmd::Seek(if control == Control::Next {
+                    by
+                } else {
+                    -by
+                }));
+            }
             Control::Next if active => self.send(PlayerCmd::Next),
             Control::Prev if active => self.send(PlayerCmd::Prev),
             Control::VolumeUp | Control::VolumeDown => {
@@ -334,6 +353,14 @@ impl Ui {
             }
             _ => {}
         }
+    }
+
+    /// Whether ⏮ and ⏭ jump in the loaded item instead of skipping tracks.
+    fn seeking(&self) -> bool {
+        self.seek_seconds > 0
+            && self
+                .current
+                .is_some_and(|id| self.library.item(id).kind.resumes())
     }
 
     /// What pressing `id` plays: its tracks, from where it stopped if it
@@ -515,6 +542,7 @@ impl Ui {
 
     fn faces(&self, layout: &Layout) -> Vec<Face> {
         let total = layout.item_keys + layout.cols;
+        let seeking = self.seeking();
         (0..total)
             .map(|key| match layout.action(key, self.shelf, self.page()) {
                 None => Face::Blank,
@@ -543,7 +571,9 @@ impl Ui {
                 Some(Action::Control(c)) => match c {
                     Control::PlayPause if self.playing => Face::Pause,
                     Control::PlayPause => Face::Play,
+                    Control::Prev if seeking => Face::SeekBack,
                     Control::Prev => Face::Prev,
+                    Control::Next if seeking => Face::SeekForward,
                     Control::Next => Face::Next,
                     Control::Power => Face::Power,
                     Control::VolumeDown | Control::VolumeUp => Face::Volume {
@@ -590,6 +620,8 @@ impl Ui {
             Face::Pause => icons::pause(size),
             Face::Prev => icons::prev(size),
             Face::Next => icons::next(size),
+            Face::SeekBack => icons::rewind(size),
+            Face::SeekForward => icons::fast_forward(size),
             Face::Volume { up, level } => {
                 icons::volume(size, *up, f32::from(*level) / VOLUME_LEVELS)
             }

@@ -171,12 +171,13 @@ impl Engine {
         Ok((engine, sink))
     }
 
-    /// Replaces whatever plays with `source`, from where it stands, unpaused.
-    pub(super) fn play(&mut self, source: Source) -> Result<()> {
+    /// Replaces whatever plays with `source`, from where it stands; `paused`
+    /// holds it silent at its start.
+    pub(super) fn play(&mut self, source: Source, paused: bool) -> Result<()> {
         self.next_generation();
         self.offset = source.start();
         self.cancel = source.cancel_handle();
-        self.shared.paused.store(false, Ordering::Release);
+        self.shared.paused.store(paused, Ordering::Release);
         self.jobs
             .send(Job::Play(self.generation, source))
             .map_err(|_| anyhow!("the decoder thread stopped"))

@@ -399,3 +399,39 @@ fn the_power_key_quits_every_app_but_the_idle_screen() {
         .collect();
     assert_eq!(quit, ["Default Media Receiver", "Spotify"]);
 }
+
+#[test]
+fn a_seek_moves_the_place_within_our_track() {
+    let tracks = tracks();
+    let secs =
+        |e: &StatusEntry, by| seek_target(e, &tracks, by).map(|at| at.position.as_secs_f32());
+    for state in [PlayerState::Playing, PlayerState::Paused] {
+        let e = timed(state, 1, 42.5, Some(300.0));
+        assert_eq!(secs(&e, 10), Some(52.5), "{state:?}");
+        assert_eq!(secs(&e, -10), Some(32.5), "{state:?}");
+        assert_eq!(seek_target(&e, &tracks, 10).unwrap().track, 1);
+    }
+}
+
+#[test]
+fn a_seek_stops_at_the_start_and_at_a_known_end() {
+    let tracks = tracks();
+    let secs =
+        |e: &StatusEntry, by| seek_target(e, &tracks, by).map(|at| at.position.as_secs_f32());
+    let early = timed(PlayerState::Playing, 0, 4.0, Some(300.0));
+    assert_eq!(secs(&early, -10), Some(0.0));
+    let late = timed(PlayerState::Playing, 2, 295.0, Some(300.0));
+    assert_eq!(secs(&late, 10), Some(300.0), "the receiver ends the track");
+    let untimed_length = timed(PlayerState::Playing, 2, 295.0, None);
+    assert_eq!(secs(&untimed_length, 10), Some(305.0));
+}
+
+#[test]
+fn no_seek_when_idle_or_not_ours() {
+    let tracks = tracks();
+    let idle = timed(PlayerState::Idle, 0, 10.0, Some(300.0));
+    assert_eq!(seek_target(&idle, &tracks, 10), None);
+    let mut foreign = entry(PlayerState::Playing, Some("http://example.com/radio.mp3"));
+    foreign.current_time = Some(10.0);
+    assert_eq!(seek_target(&foreign, &tracks, 10), None);
+}

@@ -258,6 +258,81 @@ fn played(cmds: &Receiver<PlayerCmd>) -> Vec<(ItemId, Start, bool)> {
         .collect()
 }
 
+/// A music album on key 0, then (after the shelf key) an audiobook on key 0.
+fn music_and_book_ui(config: &str) -> (Ui, Receiver<PlayerCmd>, Layout) {
+    let (ui, cmds, _events) = ui_with(
+        Library::with_shelves(vec![
+            ("music", Kind::Music, items(Kind::Music, 0..1)),
+            ("books", Kind::Audiobook, items(Kind::Audiobook, 1..2)),
+        ]),
+        config,
+    );
+    let layout = ui.layout(3, 5);
+    (ui, cmds, layout)
+}
+
+fn key_of(ui: &Ui, layout: &Layout, face: Face) -> usize {
+    ui.faces(layout)
+        .iter()
+        .position(|f| *f == face)
+        .unwrap_or_else(|| panic!("no key shows {face:?}"))
+}
+
+/// Prev, Next and Seek commands sent, as `-1`, `1` and the seconds.
+fn skips_sent(cmds: &Receiver<PlayerCmd>) -> Vec<(&'static str, i32)> {
+    cmds.try_iter()
+        .filter_map(|cmd| match cmd {
+            PlayerCmd::Prev => Some(("prev", 0)),
+            PlayerCmd::Next => Some(("next", 0)),
+            PlayerCmd::Seek(by) => Some(("seek", by)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn prev_and_next_jump_in_an_audiobook_and_skip_music_tracks() {
+    let (mut ui, cmds, layout) = music_and_book_ui("seek_seconds = 15\n");
+    let (prev, next) = (
+        key_of(&ui, &layout, Face::Prev),
+        key_of(&ui, &layout, Face::Next),
+    );
+
+    ui.press(&layout, 0);
+    ui.press(&layout, prev);
+    ui.press(&layout, next);
+    assert_eq!(ui.faces(&layout)[prev], Face::Prev);
+
+    ui.press(&layout, 9);
+    ui.press(&layout, 0);
+    assert_eq!(ui.faces(&layout)[prev], Face::SeekBack);
+    assert_eq!(ui.faces(&layout)[next], Face::SeekForward);
+    ui.press(&layout, prev);
+    ui.press(&layout, next);
+
+    assert_eq!(
+        skips_sent(&cmds),
+        [("prev", 0), ("next", 0), ("seek", -15), ("seek", 15)]
+    );
+}
+
+#[test]
+fn on_heos_prev_and_next_skip_chapters_in_an_audiobook() {
+    let (mut ui, cmds, layout) = music_and_book_ui("speaker_type = \"heos\"\n");
+    let (prev, next) = (
+        key_of(&ui, &layout, Face::Prev),
+        key_of(&ui, &layout, Face::Next),
+    );
+
+    ui.press(&layout, 9);
+    ui.press(&layout, 0);
+    assert_eq!(ui.faces(&layout)[prev], Face::Prev);
+    ui.press(&layout, prev);
+    ui.press(&layout, next);
+
+    assert_eq!(skips_sent(&cmds), [("prev", 0), ("next", 0)]);
+}
+
 #[test]
 fn an_audiobook_starts_where_it_stopped_and_music_from_the_start() {
     let (mut ui, cmds, _events) = ui_with(

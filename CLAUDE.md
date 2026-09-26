@@ -84,8 +84,10 @@ servers:
   calling `Speaker::stop` on the one that played when the other takes over.
   `mod.rs` owns the command loop for all speaker types: it coalesces commands
   (button mashing; a `SetVolume` before the last `Play` is dropped, since
-  `Play` carries the volume), calls the private `Speaker` trait, and polls
-  while `poll_interval()` is `Some`. A failed command emits `Stopped` and drops
+  `Play` carries the volume, and `Seek`s in a row add up, a sum of 0
+  dropped), calls the
+  private `Speaker` trait, and polls while `poll_interval()` is `Some`. A
+  failed command emits `Stopped` and drops
   the rest of its batch; 3 failed polls in a row end the album the same way.
   `Emitter` drops repeats of the last event, except for the first event after
   each command batch. Items played with `progress: true` also get
@@ -164,6 +166,11 @@ State:
   `ItemId`, an index into the `Library` that is never reused while the
   program runs; `ItemKey` (`<source>/<path>`, e.g. `music/01 Animal Songs`)
   is the name that survives a restart.
+- While the loaded item resumes (`Ui::seeking`), ⏮ / ⏭ send
+  `PlayerCmd::Seek(∓seek_seconds)` in place of `Prev` / `Next` and show
+  ⏪ / ⏩ (`Face::SeekBack` / `SeekForward`), except on HEOS, which cannot
+  seek. A seek stops at 0; past a track's end it acts as the track's end
+  (local audio starts the next track, Cast lets the receiver go on).
 
 Deck backends (`deck/`): `Deck` owns the per-`Face` image cache and what each
 key shows; the private `Backend` trait does device IO. `hid.rs` is the USB

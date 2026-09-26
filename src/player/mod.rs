@@ -131,6 +131,10 @@ pub enum PlayerCmd {
     /// Goes to the previous track. On Chromecast it restarts the current track
     /// instead once that has played for a few seconds.
     Prev,
+    /// Moves the place in the current track by this many seconds, back when
+    /// negative: 0 at the most, the next track's start past the end. Only
+    /// for tracks; HEOS and Spotify ignore it.
+    Seek(i32),
     /// 0.0 to 1.0.
     SetVolume(f32),
     /// The power key: stops what plays (an audiobook reports its place
@@ -395,7 +399,8 @@ impl Emitter {
 }
 
 /// Drops commands made pointless by later ones (e.g. a kid mashing buttons
-/// while the speaker was slow to answer).
+/// while the speaker was slow to answer), and adds up seeks in a row; a sum
+/// of 0 goes.
 fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
     let last_play = cmds
         .iter()
@@ -403,14 +408,19 @@ fn coalesce(cmds: Vec<PlayerCmd>) -> Vec<PlayerCmd> {
     let last_volume = cmds
         .iter()
         .rposition(|c| matches!(c, PlayerCmd::SetVolume(_)));
-    cmds.into_iter()
-        .enumerate()
-        .filter(|(i, c)| {
-            let after_play = last_play.is_none_or(|p| *i >= p);
-            after_play && (!matches!(c, PlayerCmd::SetVolume(_)) || Some(*i) == last_volume)
-        })
-        .map(|(_, c)| c)
-        .collect()
+    let kept = cmds.into_iter().enumerate().filter(|(i, c)| {
+        let after_play = last_play.is_none_or(|p| *i >= p);
+        after_play && (!matches!(c, PlayerCmd::SetVolume(_)) || Some(*i) == last_volume)
+    });
+    let mut out: Vec<PlayerCmd> = Vec::new();
+    for (_, cmd) in kept {
+        match (out.last_mut(), cmd) {
+            (Some(PlayerCmd::Seek(sum)), PlayerCmd::Seek(by)) => *sum = sum.saturating_add(by),
+            (_, cmd) => out.push(cmd),
+        }
+    }
+    out.retain(|cmd| !matches!(cmd, PlayerCmd::Seek(0)));
+    out
 }
 
 #[cfg(test)]

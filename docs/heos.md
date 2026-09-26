@@ -280,7 +280,9 @@ Written down in the module doc of `heos.rs`:
   kids-deck's use of them is tested against the fake receiver only.
 - No seek: an item that resumes starts its track from the beginning. A
   one-file book (`.m4b`) therefore starts over; a book split into chapter
-  files goes back to the start of the chapter.
+  files goes back to the start of the chapter. For the same reason ⏮ and ⏭
+  keep skipping tracks (chapters) on HEOS, also in an audiobook or a
+  podcast, where the other speakers jump `seek_seconds`.
 - A track that does not start within 15 s (`LOAD_TIMEOUT`) ends the album.
 - One connection stays open. The spec (§2.1.1) says the CLI module sleeps
   until the first connection comes, and advises controllers that reconnect

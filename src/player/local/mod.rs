@@ -100,9 +100,11 @@ impl Speaker for LocalPlayer {
                 let list = content.into_tracks()?;
                 self.begin(item, list.progress, volume, events);
                 self.tracks = list.tracks;
-                self.play_from(list.start, events)
+                self.play_from(list.start, false, events)
             }
-            PlayerCmd::Next | PlayerCmd::Prev if self.station.is_some() => self.check(),
+            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_) if self.station.is_some() => {
+                self.check()
+            }
             PlayerCmd::SetVolume(volume) => {
                 self.check()?;
                 self.volume = super::clamp_volume(volume);
@@ -120,7 +122,7 @@ impl Speaker for LocalPlayer {
                 self.check()?;
                 match self.current {
                     Some(track) if track + 1 < self.tracks.len() => {
-                        self.play_from(from_top(track + 1), events)
+                        self.play_from(from_top(track + 1), false, events)
                     }
                     _ => Ok(()),
                 }
@@ -135,10 +137,14 @@ impl Speaker for LocalPlayer {
                     .as_ref()
                     .map_or(Duration::ZERO, |o| o.engine.position());
                 if into >= RESTART_AFTER {
-                    self.play_from(from_top(track), events)
+                    self.play_from(from_top(track), false, events)
                 } else {
-                    self.play_from(from_top(track.saturating_sub(1)), events)
+                    self.play_from(from_top(track.saturating_sub(1)), false, events)
                 }
+            }
+            PlayerCmd::Seek(by) => {
+                self.check()?;
+                self.seek(by, events)
             }
         }
     }
@@ -154,9 +160,8 @@ impl Speaker for LocalPlayer {
             if self.station.is_some() {
                 warn!("the station stopped sending");
                 self.end_album(events);
-            } else if !self.start_track(from_top(track + 1), events)? {
-                events.finished();
-                self.end_album(events);
+            } else {
+                self.after_track(track, false, events)?;
             }
         } else {
             self.report_place(events);
@@ -220,7 +225,7 @@ impl LocalPlayer {
             // where a resuming item got to.
             _ if !self.tracks.is_empty() => {
                 let start = events.resume_point();
-                self.play_from(start, events)
+                self.play_from(start, false, events)
             }
             _ => {
                 events.emit(PlayerEvent::Stopped);
@@ -276,7 +281,7 @@ impl LocalPlayer {
             empty @ None => empty.insert((self.open)()?),
         };
         output.engine.set_volume(self.volume);
-        output.engine.play(source)?;
+        output.engine.play(source, false)?;
         info!(station = %station.name, "playing");
         self.current = Some(0);
         self.duration = None;
@@ -298,10 +303,10 @@ impl LocalPlayer {
         Ok(())
     }
 
-    /// Plays the first track from `start` on that can be decoded; with none
-    /// left, the album is over.
-    fn play_from(&mut self, start: Start, events: &mut Emitter) -> Result<()> {
-        if !self.start_track(start, events)? {
+    /// Plays the first track from `start` on that can be decoded, held at its
+    /// start if `paused`; with none left, the album is over.
+    fn play_from(&mut self, start: Start, paused: bool, events: &mut Emitter) -> Result<()> {
+        if !self.start_track(start, paused, events)? {
             self.end_album(events);
         }
         Ok(())
@@ -309,7 +314,7 @@ impl LocalPlayer {
 
     /// Starts the first track from `start.track` on that can be decoded, at
     /// about `start.position` if it is that track; false when there is none.
-    fn start_track(&mut self, start: Start, events: &mut Emitter) -> Result<bool> {
+    fn start_track(&mut self, start: Start, paused: bool, events: &mut Emitter) -> Result<bool> {
         let output = match &mut self.output {
             Some(output) => output,
             empty @ None => empty.insert((self.open)()?),
@@ -329,19 +334,72 @@ impl LocalPlayer {
                         position: source.start(),
                         duration,
                     };
-                    output.engine.play(source)?;
+                    output.engine.play(source, paused)?;
                     info!(album = %track.album, track = %track.title, "playing");
                     self.current = Some(index);
                     self.duration = duration;
-                    self.paused = false;
+                    self.paused = paused;
                     events.place(at, true);
-                    events.emit(PlayerEvent::Playing(self.item));
+                    events.emit(if paused {
+                        PlayerEvent::Paused(self.item)
+                    } else {
+                        PlayerEvent::Playing(self.item)
+                    });
                     return Ok(true);
                 }
                 Err(err) => warn!("skipping {}: {err:#}", track.path.display()),
             }
         }
         Ok(false)
+    }
+
+    /// What follows the end of `track`: the next track that can be decoded,
+    /// held at its start if `paused`, else the end of the album.
+    fn after_track(&mut self, track: usize, paused: bool, events: &mut Emitter) -> Result<()> {
+        if !self.start_track(from_top(track + 1), paused, events)? {
+            events.finished();
+            self.end_album(events);
+        }
+        Ok(())
+    }
+
+    /// Plays the current track from `by` seconds away from its place, 0 at
+    /// the most; a jump past its end is as if it ended. A paused track stays
+    /// paused.
+    fn seek(&mut self, by: i32, events: &mut Emitter) -> Result<()> {
+        let (Some(track), Some(output)) = (self.current, &self.output) else {
+            return Ok(());
+        };
+        let now = output.engine.position();
+        let step = Duration::from_secs(u64::from(by.unsigned_abs()));
+        let target = if by < 0 {
+            now.saturating_sub(step)
+        } else {
+            now + step
+        };
+        let paused = self.paused;
+        if self.duration.is_some_and(|length| target >= length) {
+            return self.after_track(track, paused, events);
+        }
+        self.play_from(
+            Start {
+                track,
+                position: target,
+            },
+            paused,
+            events,
+        )?;
+        // Past the end of a track of unknown length the seek fails and the
+        // track starts over, far before the target; a coarse seek lands
+        // within a packet of it.
+        let started_over = self
+            .output
+            .as_ref()
+            .is_some_and(|o| o.engine.position() + step / 2 < target);
+        if by > 0 && self.current == Some(track) && started_over {
+            self.after_track(track, paused, events)?;
+        }
+        Ok(())
     }
 
     fn end_album(&mut self, events: &mut Emitter) {

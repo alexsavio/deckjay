@@ -149,6 +149,10 @@ impl Speaker for HeosPlayer {
             PlayerCmd::SetVolume(volume) => self.set_volume(volume),
             PlayerCmd::TogglePause => self.toggle_pause(events),
             PlayerCmd::Next | PlayerCmd::Prev if self.stream.is_some() => Ok(()),
+            PlayerCmd::Seek(by) => {
+                debug!(by, "HEOS cannot seek");
+                Ok(())
+            }
             PlayerCmd::Off => Speaker::stop(self, events),
             PlayerCmd::Next => match self.current {
                 Some(c) if c.track + 1 < self.tracks.len() => self.play_track(c.track + 1, events),

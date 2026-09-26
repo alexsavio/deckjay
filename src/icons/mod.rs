@@ -145,6 +145,20 @@ pub fn prev(size: u32) -> RgbImage {
     c.finish(size)
 }
 
+pub fn rewind(size: u32) -> RgbImage {
+    let mut c = Canvas::new(size, BG_SKIP);
+    c.polygon(&[(0.50, 0.28), (0.50, 0.72), (0.18, 0.5)], WHITE);
+    c.polygon(&[(0.82, 0.28), (0.82, 0.72), (0.50, 0.5)], WHITE);
+    c.finish(size)
+}
+
+pub fn fast_forward(size: u32) -> RgbImage {
+    let mut c = Canvas::new(size, BG_SKIP);
+    c.polygon(&[(0.18, 0.28), (0.18, 0.72), (0.50, 0.5)], WHITE);
+    c.polygon(&[(0.50, 0.28), (0.50, 0.72), (0.82, 0.5)], WHITE);
+    c.finish(size)
+}
+
 /// Volume key with a level bar along the bottom (`level` 0.0–1.0 of the cap).
 pub fn volume(size: u32, up: bool, level: f32) -> RgbImage {
     let mut c = Canvas::new(size, BG_VOLUME);

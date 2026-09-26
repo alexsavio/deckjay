@@ -160,13 +160,15 @@ fn a_station_plays_until_its_stream_stays_gone() {
 }
 
 #[test]
-fn next_and_prev_do_nothing_on_a_station() {
+fn next_prev_and_seek_do_nothing_on_a_station() {
     let mut rig = Rig::new();
     let (url, _) = closing(tone(), "audio/mpeg");
     play_station(&mut rig, url).unwrap();
     rig.events();
     rig.send(PlayerCmd::Next).unwrap();
     rig.send(PlayerCmd::Prev).unwrap();
+    rig.send(PlayerCmd::Seek(10)).unwrap();
+    rig.send(PlayerCmd::Seek(-10)).unwrap();
     assert_eq!(rig.events(), []);
     assert_eq!(rig.player.current, Some(0));
     assert!(peak(&rig.listen(0.2)) > 0.1);
