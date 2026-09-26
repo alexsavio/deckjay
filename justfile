@@ -92,7 +92,10 @@ sim MODEL="mk2":
         HOST_IP=$( { [ -n "$iface" ] && ipconfig getifaddr "$iface"; } || hostname -I | awk '{print $1}')
     fi
     echo "Simulator: http://localhost:8090   Music for the speaker: http://$HOST_IP:8765"
-    HOST_IP="$HOST_IP" DECK_MODEL="{{MODEL}}" docker compose -f compose.sim.yaml up --build
+    files=(-f compose.sim.yaml)
+    # Volumes for sources outside ./music; see compose.sim.yaml.
+    if [ -f compose.sim.local.yaml ]; then files+=(-f compose.sim.local.yaml); fi
+    HOST_IP="$HOST_IP" DECK_MODEL="{{MODEL}}" docker compose "${files[@]}" up --build
 
 # Stop and remove the simulator containers
 sim-down:

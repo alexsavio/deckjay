@@ -8,3 +8,4 @@ music/
 .claude/
 .config/wt.toml
 .env
+compose.sim.local.yaml

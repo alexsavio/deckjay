@@ -105,7 +105,10 @@ of the USB deck when you start it with `--simulator URL`.
 - **All in Docker:** `just sim`, then open <http://localhost:8090>. The
   player and the simulator run in two containers. Pick another deck with
   `just sim xl` (models: `mk2` 3×5, `mini` 2×3, `neo` 2×4, `xl` 4×8,
-  `plus` 2×4). Stop with Ctrl-C and `just sim-down`.
+  `plus` 2×4). Stop with Ctrl-C and `just sim-down`. Sources outside
+  `./music` need a volume at the same path: put it in
+  `compose.sim.local.yaml` (git ignores it; `just sim` adds it; the
+  example is in `compose.sim.yaml`).
 - **Without Docker:** `cargo run -- simulator` in one terminal and
   `just run --simulator http://localhost:8090` in another.
 

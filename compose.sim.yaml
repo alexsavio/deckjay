@@ -28,8 +28,12 @@ services:
       - ./music:/app/music:ro
       - ./state:/app/state
       # Every [[source]] folder outside ./music needs a volume too, at the
-      # same path as on this computer, e.g.:
-      # - /Volumes/Stick/audiobooks:/Volumes/Stick/audiobooks:ro
+      # same path as on this computer. Put those in compose.sim.local.yaml
+      # (git ignores it; `just sim` adds it), e.g.:
+      #   services:
+      #     kids-deck:
+      #       volumes:
+      #         - /Volumes/Stick/audiobooks:/Volumes/Stick/audiobooks:ro
     environment:
       - RUST_LOG=${RUST_LOG:-info}
     depends_on:
