@@ -743,3 +743,33 @@ fn the_power_key_stops_everything_and_the_next_press_only_wakes() {
     ui.wake(&mut keys);
     assert_eq!(keys, [0]);
 }
+
+#[test]
+fn stop_turns_the_deck_dark_and_ends_run() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let info = crate::simulator::Model::Mk2.info();
+    std::thread::spawn(move || crate::simulator::serve(listener, info));
+    let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
+    let (mut ui, _cmds, _events) = test_ui(3, "");
+
+    ui.run(&mut deck, 60, &AtomicBool::new(true)).unwrap();
+
+    let body = ureq::get(format!("{url}/api/state"))
+        .call()
+        .unwrap()
+        .body_mut()
+        .read_to_string()
+        .unwrap();
+    let state: crate::simulator::State = serde_json::from_str(&body).unwrap();
+    assert_eq!(state.brightness, 0);
+    for key in 0..state.versions.len() {
+        assert!(
+            matches!(
+                ureq::get(format!("{url}/api/keys/{key}")).call(),
+                Err(ureq::Error::StatusCode(404))
+            ),
+            "key {key} still shows an image"
+        );
+    }
+}

@@ -28,6 +28,7 @@ pub use self::podcasts::PodcastThread;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -188,8 +189,9 @@ impl Ui {
         }
     }
 
-    /// Drives a connected deck until it is unplugged (returns the error then).
-    pub fn run(&mut self, deck: &mut Deck, brightness: u8) -> Result<()> {
+    /// Drives a connected deck until it is unplugged (returns the error
+    /// then), or until `stop` is set: the deck goes dark and it returns `Ok`.
+    pub fn run(&mut self, deck: &mut Deck, brightness: u8, stop: &AtomicBool) -> Result<()> {
         let mut dimmed = self.asleep;
         deck.set_brightness(if dimmed { 0 } else { brightness })?;
         let (rows, cols) = deck.layout();
@@ -199,6 +201,9 @@ impl Ui {
         self.draw(deck, &layout)?;
 
         loop {
+            if stop.load(Ordering::SeqCst) {
+                return deck.blank();
+            }
             let mut keys = deck.pressed_keys(Duration::from_millis(100))?;
             self.wake(&mut keys);
             let mut changed = self.update(&layout, &keys);
@@ -398,6 +403,11 @@ impl Ui {
     }
 
     /// Stops everything and dims the deck; the next press only wakes it.
+    /// Saves what the deck remembers now, before the program exits.
+    pub fn save_state(&mut self) {
+        self.store.save_now(Instant::now());
+    }
+
     fn power_off(&mut self) {
         info!("power key: everything stops");
         self.send(PlayerCmd::Off);

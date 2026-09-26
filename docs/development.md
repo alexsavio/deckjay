@@ -75,6 +75,9 @@ macOS asks two things the first time; allow both:
 On Linux, install `99-streamdeck.rules` (its first lines say how), so the
 program can use the deck without root.
 
+Ctrl-C (or closing the terminal) stops the program and turns the deck
+dark; `kids-deck --blank` does the same for a deck left lit.
+
 `just debug` logs more, including each file request the speaker makes.
 
 ## 📋 Commands

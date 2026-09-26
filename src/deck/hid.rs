@@ -21,7 +21,8 @@ pub(super) struct HidDeck {
 }
 
 impl HidDeck {
-    pub(super) fn open(hid: &mut HidApi) -> Result<Option<HidDeck>> {
+    /// `reset` clears the deck to the Elgato logo first.
+    pub(super) fn open(hid: &mut HidApi, reset: bool) -> Result<Option<HidDeck>> {
         refresh_device_list(hid)?;
         let Some((kind, serial)) = list_devices(hid)
             .into_iter()
@@ -34,7 +35,9 @@ impl HidDeck {
             reason = "StreamDeck::get_reader takes &Arc<Self>"
         )]
         let device = Arc::new(StreamDeck::connect(hid, kind, &serial)?);
-        device.reset()?;
+        if reset {
+            device.reset()?;
+        }
         let reader = device.get_reader();
         Ok(Some(HidDeck {
             device,
@@ -73,6 +76,11 @@ impl Backend for HidDeck {
     }
 
     fn flush(&self) -> Result<()> {
+        Ok(self.device.flush()?)
+    }
+
+    fn clear(&self) -> Result<()> {
+        self.device.clear_all_button_images()?;
         Ok(self.device.flush()?)
     }
 

@@ -26,6 +26,8 @@ trait Backend {
     fn encode(&self, image: RgbImage) -> Result<Vec<u8>>;
     fn write_image(&self, key: usize, data: &[u8]) -> Result<()>;
     fn flush(&self) -> Result<()>;
+    /// Removes every key image at once.
+    fn clear(&self) -> Result<()>;
     /// Waits up to `timeout` for input and returns the keys that were pressed down.
     fn pressed_keys(&self, timeout: Duration) -> Result<Vec<usize>>;
 }
@@ -41,7 +43,13 @@ pub struct Deck {
 impl Deck {
     /// Opens the first Stream Deck with a key grid, if one is plugged in.
     pub fn open_usb(hid: &mut HidApi) -> Result<Option<Deck>> {
-        Ok(hid::HidDeck::open(hid)?.map(Deck::new))
+        Ok(hid::HidDeck::open(hid, true)?.map(Deck::new))
+    }
+
+    /// As [`Deck::open_usb`], but leaves what the keys show: a reset would
+    /// light the Elgato logo on a deck about to go dark.
+    pub fn open_usb_as_is(hid: &mut HidApi) -> Result<Option<Deck>> {
+        Ok(hid::HidDeck::open(hid, false)?.map(Deck::new))
     }
 
     /// Connects to the simulator at `url` and clears its keys; `None` while
@@ -118,6 +126,14 @@ impl Deck {
         self.backend.flush()
     }
 
+    /// Turns the deck dark: no key images, brightness 0. The next
+    /// [`Deck::show`] sends every key again.
+    pub fn blank(&mut self) -> Result<()> {
+        self.backend.clear()?;
+        self.shown.fill(None);
+        self.backend.set_brightness(0)
+    }
+
     /// Waits up to `timeout` for input and returns the keys that were pressed down.
     pub fn pressed_keys(&self, timeout: Duration) -> Result<Vec<usize>> {
         self.backend.pressed_keys(timeout)
@@ -139,6 +155,8 @@ mod tests {
         encodes: usize,
         writes: Vec<usize>,
         unplugged: bool,
+        clears: usize,
+        brightness: Option<u8>,
     }
 
     struct FakeBackend(Rc<RefCell<Log>>);
@@ -156,7 +174,8 @@ mod tests {
             4
         }
 
-        fn set_brightness(&self, _: u8) -> Result<()> {
+        fn set_brightness(&self, percent: u8) -> Result<()> {
+            self.0.borrow_mut().brightness = Some(percent);
             Ok(())
         }
 
@@ -175,6 +194,11 @@ mod tests {
         }
 
         fn flush(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn clear(&self) -> Result<()> {
+            self.0.borrow_mut().clears += 1;
             Ok(())
         }
 
@@ -212,6 +236,21 @@ mod tests {
             .unwrap();
         assert_eq!(log.borrow().encodes, 2);
         assert_eq!(log.borrow().writes, [0, 1, 0, 0]);
+    }
+
+    #[test]
+    fn blank_clears_dims_and_sends_every_key_again_after() {
+        let (mut deck, log) = fake_deck();
+        deck.set_brightness(60).unwrap();
+        deck.show(0, &Face::Play, tile).unwrap();
+
+        deck.blank().unwrap();
+        assert_eq!(log.borrow().clears, 1);
+        assert_eq!(log.borrow().brightness, Some(0));
+
+        deck.show(0, &Face::Play, tile).unwrap();
+        assert_eq!(log.borrow().writes, [0, 0], "the key shows its face again");
+        assert_eq!(log.borrow().encodes, 1, "from the cached image");
     }
 
     #[test]

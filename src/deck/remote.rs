@@ -132,6 +132,14 @@ impl Backend for RemoteDeck {
         Ok(())
     }
 
+    /// Also puts the simulator's brightness back to 100.
+    fn clear(&self) -> Result<()> {
+        self.agent
+            .post(format!("{}/api/reset", self.base))
+            .send_empty()?;
+        Ok(())
+    }
+
     fn pressed_keys(&self, timeout: Duration) -> Result<Vec<usize>> {
         let wait_ms = timeout.as_millis();
         let body = self
@@ -259,6 +267,29 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn blank_turns_the_simulator_dark() {
+        let url = start_simulator(Model::Mk2.info());
+        let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
+        deck.set_brightness(60).unwrap();
+        deck.show(0, &Face::Play, || icons::play(72)).unwrap();
+
+        deck.blank().unwrap();
+
+        let body = ureq::get(format!("{url}/api/state"))
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap();
+        let state: simulator::State = serde_json::from_str(&body).unwrap();
+        assert_eq!(state.brightness, 0);
+        assert!(matches!(
+            ureq::get(format!("{url}/api/keys/0")).call(),
+            Err(ureq::Error::StatusCode(404))
+        ));
     }
 
     #[test]

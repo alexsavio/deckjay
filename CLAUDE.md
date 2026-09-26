@@ -74,6 +74,11 @@ servers:
 - **main** (`main.rs` → `ui/`, `deck/`): `DeckSource::open` retries every
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
+  SIGINT, SIGTERM and SIGHUP set a stop flag (`signal-hook`; a second one
+  ends the program at once): `Ui::run` turns the deck dark (`Deck::blank`)
+  and returns `Ok`, and `main` saves the state and exits. `--blank` does the
+  same for a deck left lit (systemd's `ExecStopPost`), opening it without
+  the reset that shows the Elgato logo.
 - **player** (`player/`, thread `cast`, `heos` or `local`): `main::output` turns
   the config into a `player::Output` (`Cast`/`Heos` carry host and port, `Local`
   only the device name), and `spawn_with` builds the speaker on the player

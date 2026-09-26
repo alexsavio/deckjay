@@ -203,6 +203,8 @@ SupplementaryGroups=plugdev audio
 StateDirectory=kids-deck
 WorkingDirectory=/var/lib/kids-deck
 ExecStart=/usr/local/bin/kids-deck /etc/kids-deck/config.toml
+# Turns the deck dark however kids-deck ended, a crash included.
+ExecStopPost=/usr/local/bin/kids-deck --blank
 Restart=always
 RestartSec=5
 # Wait up to a minute between starts when it keeps failing (systemd 254 or
@@ -238,6 +240,12 @@ systemctl status kids-deck
 
 The deck lights up with the covers. Unplug and plug the deck, or turn the
 speaker off and on: the program waits for them and goes on.
+
+When kids-deck stops (`systemctl stop`, a shutdown), it turns the deck
+dark itself. When it crashes or is killed (`kill -9`, out of memory), it
+cannot, so the `ExecStopPost` line runs `kids-deck --blank` after it; 5 s
+later systemd starts it again and the deck lights up. Unplugging the deck
+or turning the Pi off also leaves it dark.
 
 ## 📜 8. Keep the logs
 

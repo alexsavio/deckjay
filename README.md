@@ -35,8 +35,9 @@ or on a Mac. Written in Rust.
   stopped, also after a restart. In them ⏪ and ⏩ jump 10 s back or on
   (`seek_seconds`).
 - 🧒 **Made for children:** a volume cap, a power key that stops everything
-  and dims the deck (the next press only lights it again), and a deck that
-  keeps working when it is unplugged and plugged back in.
+  and dims the deck (the next press only lights it again), a deck that
+  keeps working when it is unplugged and plugged back in, and goes dark
+  when the program stops.
 - 🧪 **Test without hardware:** a web page that acts as a Stream Deck, and a
   preview picture of the layout.
 - 🍓 **Runs on a headless Raspberry Pi** as a service that starts at boot, or

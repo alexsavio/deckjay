@@ -36,6 +36,7 @@ aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"]
 base64 = "0.23"
 rss = { version = "2.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+signal-hook = { version = "0.4", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

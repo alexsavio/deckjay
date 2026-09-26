@@ -32,7 +32,8 @@ mod ui;
 
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -49,6 +50,7 @@ use crate::ui::Ui;
 const USAGE: &str = "\
 usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
                  [--check | --preview FILE.png]
+       kids-deck --blank
        kids-deck simulator [--model NAME] [--port PORT]
        kids-deck spotify-login [CONFIG] [--listen ADDR]
 
@@ -60,6 +62,8 @@ usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
                       overrides advertise_host in the config
   --check             list sources, Stream Decks and speaker status, then exit
   --preview FILE.png  draw the 15-key layout into a picture, then exit
+  --blank             turn the USB Stream Deck dark, then exit; kids-deck
+                      does this itself when it is stopped (Ctrl-C, SIGTERM)
 
   simulator           run the web Stream Deck simulator
   --model NAME        mk2 (default), mini, neo, xl or plus
@@ -99,6 +103,7 @@ fn main() -> Result<()> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--check" => check = true,
+            "--blank" => return blank_usb_deck(),
             "--simulator" => {
                 simulator_url = Some(args.next().context("--simulator needs a URL")?);
             }
@@ -157,18 +162,42 @@ fn main() -> Result<()> {
     ui.set_podcasts(start_podcasts(&cfg, &served));
     fetch_playlist_covers(&cfg);
 
-    // Keep looking for a deck; survive it being unplugged and plugged back in.
-    let mut source = match simulator_url {
+    let stop = stop_on_signals()?;
+    let source = match simulator_url {
         Some(url) => DeckSource::Simulator(url),
         None => DeckSource::Usb(elgato_streamdeck::new_hidapi()?),
     };
+    drive_decks(&mut ui, source, cfg.brightness, &stop);
+    info!("stopping");
+    ui.save_state();
+    Ok(())
+}
+
+/// Ctrl-C, closing the terminal, `systemctl stop` and `docker stop` set the
+/// flag, which turns the deck dark; a second signal ends the program at once.
+fn stop_on_signals() -> Result<Arc<AtomicBool>> {
+    let stop = Arc::new(AtomicBool::new(false));
+    for signal in [
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGHUP,
+    ] {
+        signal_hook::flag::register_conditional_shutdown(signal, 1, Arc::clone(&stop))?;
+        signal_hook::flag::register(signal, Arc::clone(&stop))?;
+    }
+    Ok(stop)
+}
+
+/// Keeps looking for a deck, and survives it being unplugged and plugged
+/// back in, until `stop` is set.
+fn drive_decks(ui: &mut Ui, mut source: DeckSource, brightness: u8, stop: &AtomicBool) {
     let mut waiting_logged = false;
-    loop {
+    while !stop.load(Ordering::SeqCst) {
         match source.open() {
             Ok(Some(mut deck)) => {
                 info!("deck connected: {}", deck.name());
                 waiting_logged = false;
-                if let Err(err) = ui.run(&mut deck, cfg.brightness) {
+                if let Err(err) = ui.run(&mut deck, brightness, stop) {
                     warn!("deck disconnected: {err:#}");
                 }
             }
@@ -181,8 +210,26 @@ fn main() -> Result<()> {
         }
         ui.handle_events();
         ui.take_snapshots();
-        std::thread::sleep(Duration::from_secs(2));
+        for _ in 0..20 {
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
+}
+
+/// For systemd's `ExecStopPost`, which runs however kids-deck ended, a crash
+/// included.
+fn blank_usb_deck() -> Result<()> {
+    let mut hid = elgato_streamdeck::new_hidapi()?;
+    if let Some(mut deck) = Deck::open_usb_as_is(&mut hid)? {
+        deck.blank()?;
+        info!("{} is dark", deck.name());
+    } else {
+        info!("no Stream Deck to turn off");
+    }
+    Ok(())
 }
 
 fn scan_sources(cfg: &Config) -> Library {
