@@ -15,7 +15,7 @@ permissions: {}
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  RUMDL_VERSION: "0.1.42"
+  RUMDL_VERSION: "0.2.46"
 
 jobs:
   check:

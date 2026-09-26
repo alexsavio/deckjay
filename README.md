@@ -89,7 +89,8 @@ program natively. Docker is only used to build the Raspberry Pi image.
    ```
 
    It lists your sources and what is in them, the Stream Decks it sees, and
-   whether the speaker answers. `just preview` draws the key layout into `layout.png`.
+   whether the speaker answers. `just preview` draws the key layout into
+   `layout.png`.
 6. Run it:
 
    ```sh
