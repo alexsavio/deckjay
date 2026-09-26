@@ -2,6 +2,7 @@ use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::thread;
+use std::time::Instant;
 
 use super::*;
 
@@ -128,6 +129,45 @@ fn broken_stations_are_errors_without_the_query() {
         assert!(err.contains(needle), "{path}: {err}");
         assert!(!err.contains("secret"), "{path}: {err}");
     }
+}
+
+/// Answers every request with the head of a playlist, then sends nothing
+/// for a minute.
+fn stalling_playlist() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/list.pls", listener.local_addr().unwrap());
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let _ = BufReader::new(&stream).read_line(&mut String::new());
+            let head =
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/x-scpls\r\nConnection: close\r\n\r\n";
+            let _ = stream.write_all(head.as_bytes());
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(60));
+                drop(stream);
+            });
+        }
+    });
+    url
+}
+
+#[test]
+fn a_playlist_that_stalls_fails_after_its_body_timeout() {
+    let url = stalling_playlist();
+    let started = Instant::now();
+    let err = resolve_within(
+        &crate::net::stream_agent(),
+        &url,
+        Duration::from_millis(200),
+    )
+    .unwrap_err();
+    let waited = started.elapsed();
+    assert!(waited < Duration::from_secs(2), "{waited:?}");
+    assert!(
+        format!("{err:#}").contains("cannot read the playlist"),
+        "{err:#}"
+    );
 }
 
 #[test]

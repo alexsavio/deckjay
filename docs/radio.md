@@ -39,17 +39,17 @@ over `http://` or `https://`. Each name must be unique in its source.
 ## From a station to its stream
 
 When the key is pressed, the player thread calls `radio::resolve` with
-`net::stream_agent` (10 s to connect, 30 s for the reply headers, no limit
-on the body):
+`net::stream_agent` (10 s to connect, 30 s for the reply headers) and 10 s
+for a playlist's body:
 
 1. `GET` the URL. ureq follows redirects. A reply that is not 2xx is an
    error.
 2. The `Content-Type` without its parameters decides. A playlist type
    (`audio/x-scpls`, `audio/x-mpegurl`, `application/vnd.apple.mpegurl`,
-   ...) is read (at most 64 KiB); `text/plain`, `application/octet-stream`
-   or none fall back to the URL's extension (`.pls`, `.m3u`, `.m3u8`). Any
-   other type is the stream: its URL and content type are the result, and
-   the body is dropped after the headers.
+   ...) is read (at most 64 KiB, within 10 s); `text/plain`,
+   `application/octet-stream` or none fall back to the URL's extension
+   (`.pls`, `.m3u`, `.m3u8`). Any other type is the stream: its URL and
+   content type are the result, and the body is dropped after the headers.
 3. An M3U with `#EXT-X-` lines is HLS: the playlist URL is the stream, with
    the content type `application/x-mpegURL`.
 4. Otherwise the playlist's first `http(s)` entry (`File1=` first in a
@@ -141,16 +141,18 @@ them.
   radio-browser).
 - The stream is fetched twice per key press: once to resolve it, once by
   the speaker (or `netread`).
-- A slow station server holds the player thread for up to 40 s while it
-  resolves (10 s connect, 30 s headers): key presses wait meanwhile.
+- A slow station server holds the player thread while it resolves, up to
+  50 s per request (10 s connect, 30 s headers, 10 s for a playlist's body)
+  and up to 4 requests (3 playlists deep): key presses wait meanwhile.
 - A station that cannot be resolved leaves the speaker as it was (Cast and
   HEOS go on with the item before, local playback closes the sound card),
   while the deck shows it stopped.
 
 ## Tests and what is unverified
 
-- `radio/tests.rs`: playlists, HLS and errors against a local web server;
-  `resolves_real_stations` (ignored) against real stations.
+- `radio/tests.rs`: playlists, HLS and errors against a local web server,
+  a playlist whose body never comes; `resolves_real_stations` (ignored)
+  against real stations.
 - `heos/tests/radio.rs`: the fake receiver gets `clear_queue` and
   `play_stream` of the resolved URL; the retry after a drop; a lasting
   stop; pause, stop instead of pause, play again; Next and Prev.
