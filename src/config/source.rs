@@ -33,6 +33,9 @@ pub struct Source {
     pub stations: Vec<Station>,
     /// For `type = "spotify"`.
     pub playlists: Vec<Playlist>,
+    /// The whole folder is one key, instead of one key per folder or file
+    /// in it.
+    pub one_key: bool,
 }
 
 /// A picture or a colour for a key; pictures are resolved like `path`.
@@ -91,6 +94,7 @@ impl Source {
             podcast: None,
             stations: Vec::new(),
             playlists: Vec::new(),
+            one_key: false,
         }
     }
 }
@@ -140,6 +144,8 @@ pub(super) struct Folder {
     color: Option<Color>,
     #[serde(default)]
     item: BTreeMap<String, Look>,
+    #[serde(default)]
+    one_key: bool,
 }
 
 /// Checks names and resolves relative paths against `base`; podcast caches
@@ -184,6 +190,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                         items: BTreeMap::new(),
                         podcast: None,
                         playlists: Vec::new(),
+                        one_key: false,
                     });
                 }
                 RawSource::Spotify(s) => {
@@ -194,6 +201,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                     check_unique(&name, &mut names)?;
                     return Ok(Source {
                         playlists: s.playlists(&name, base)?,
+                        one_key: false,
                         look: s.look().resolve(base),
                         name,
                         kind: SourceKind::Spotify,
@@ -223,6 +231,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                 podcast: None,
                 stations: Vec::new(),
                 playlists: Vec::new(),
+                one_key: folder.one_key,
             })
         })
         .collect()
@@ -252,6 +261,7 @@ fn podcast_source(
         items: BTreeMap::new(),
         stations: Vec::new(),
         playlists: Vec::new(),
+        one_key: false,
     })
 }
 
@@ -316,6 +326,7 @@ mod tests {
                     podcast: None,
                     stations: Vec::new(),
                     playlists: Vec::new(),
+                    one_key: false,
                 },
                 Source {
                     name: "books".into(),
@@ -326,6 +337,7 @@ mod tests {
                     podcast: None,
                     stations: Vec::new(),
                     playlists: Vec::new(),
+                    one_key: false,
                 },
                 Source {
                     name: "story".into(),
@@ -336,6 +348,7 @@ mod tests {
                     podcast: None,
                     stations: Vec::new(),
                     playlists: Vec::new(),
+                    one_key: false,
                 },
             ]
         );
@@ -455,5 +468,16 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.to_string().contains("cache_dir"), "{err:#}");
+    }
+
+    #[test]
+    fn a_folder_source_can_be_one_key() {
+        let got = sources(
+            "[[source]]\ntype = \"music\"\npath = \"band\"\none_key = true\n\
+             [[source]]\ntype = \"story\"\npath = \"s\"\n",
+        )
+        .unwrap();
+        assert!(got[0].one_key);
+        assert!(!got[1].one_key);
     }
 }

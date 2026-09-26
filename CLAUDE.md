@@ -115,7 +115,8 @@ Playback flow:
 
 1. `Library::scan` builds one `Shelf` per `[[source]]`. Folder sources
    (music, audiobook, story; `library/scan.rs`) give one `Item` with its
-   `Track`s per folder (tracks up to one folder down) or loose audio file;
+   `Track`s per folder (tracks up to one folder down) or loose audio file,
+   or with `one_key` one `Item` for the whole source folder;
    a folder that cannot be read is an empty shelf and a warning, not an
    error. Podcast sources start from their cache (`library/podcast.rs`),
    radio sources give one `Media::Stream` item per station and Spotify

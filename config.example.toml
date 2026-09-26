@@ -68,6 +68,9 @@ brightness = 60
 #       is cover.jpg / folder.jpg / any jpg or png in it. Number prefixes
 #       like "01 " set the order. Files: mp3, m4a, m4b, aac, flac, ogg, wav.
 #
+# one_key  Optional, true: the whole folder is one key that plays its audio
+#          files and those one folder down, in name order (e.g. all the
+#          albums of one band).
 # picture  Optional: the shelf key's picture (png or jpg), relative to this
 #          file or absolute. Without it, the key shows the kind of the
 #          source (a note, a book, a star) on a colour.

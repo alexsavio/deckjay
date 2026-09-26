@@ -32,7 +32,8 @@ const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
 /// sent to the speaker as the cover.
 const KEY_PICTURE: &str = "key";
 
-/// The items of `source`, in name order.
+/// The items of `source`, in name order; with `one_key`, the source folder
+/// itself is the only item.
 pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
     let entries = usable_entries(&source.path).with_context(|| {
         format!(
@@ -41,6 +42,9 @@ pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
             source.path.display()
         )
     })?;
+    if source.one_key {
+        return Ok(folder_item(source, &source.path).into_iter().collect());
+    }
     let top_files: Vec<PathBuf> = entries.iter().filter(|p| p.is_file()).cloned().collect();
     let items: Vec<Item> = entries
         .iter()
@@ -496,5 +500,35 @@ mod tests {
         assert_eq!(items[0].picture.as_deref(), Some(Path::new("/pics/a.png")));
         assert_eq!(items[1].color, Some(Color([1, 2, 3])));
         assert_eq!(items[2].color, Some(Color([4, 5, 6])));
+    }
+
+    #[test]
+    fn one_key_makes_the_whole_folder_one_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Band");
+        touch(&root.join("02 Hit.mp3"));
+        touch(&root.join("Album A/01.mp3"));
+        touch(&root.join("Album B/01.flac"));
+        touch(&root.join("Album B/Deeper/01.mp3"));
+        touch(&root.join("cover.jpg"));
+        let mut source = Source::plain("band", SourceKind::Music, &root);
+        source.one_key = true;
+
+        let items = scan(&source).unwrap();
+
+        assert_eq!(names(&items), ["Band"]);
+        assert_eq!(items[0].key.0, "band/Band");
+        assert_eq!(
+            rel_paths(&items[0]),
+            [
+                Path::new("band/02 Hit.mp3"),
+                Path::new("band/Album A/01.mp3"),
+                Path::new("band/Album B/01.flac"),
+            ]
+        );
+        assert_eq!(
+            items[0].cover_rel.as_deref(),
+            Some(Path::new("band/cover.jpg"))
+        );
     }
 }
