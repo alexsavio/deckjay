@@ -36,6 +36,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Let a source folder be one key
 - Jump back and forward in audiobooks and podcasts
 - Turn the deck dark when kids-deck stops
+- Make the deck simulator look like a real Stream Deck
 
 ### 🐛 Bug Fixes
 
@@ -77,6 +78,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Add development and Raspberry Pi guides
 - Play on a Bluetooth speaker and Spotify on the Pi
 - Rename the repository to kids-deck and say it runs on Linux
+- List the supported decks and split the README into short parts
 
 ### ⚙️ Miscellaneous Tasks
 
