@@ -323,14 +323,16 @@ start):
 
 ## Quirks and limits
 
-- **No read timeout (accepted limit).** rust_cast sets no timeout
-  anywhere, and kids-deck cannot reach its socket:
-  `connect_without_host_verification` opens it and keeps it private. The
-  3 s probe covers the connect only. A device that accepts the connection
-  and then goes silent blocks the player thread until the connection
-  closes or fails: no key press gets an answer and no poll runs until
-  then. Bounding it would need a worker thread per command that the
-  player gives up on; kids-deck does not do that.
+- **Timeouts.** rust_cast sets no timeout anywhere, so kids-deck opens
+  the socket itself (3 s to connect, `IO_TIMEOUT` of 15 s on each read and
+  write), wraps it in TLS without a certificate check, as
+  `connect_without_host_verification` does, and hands it to rust_cast's
+  channels through `MessageManager::new`. A device that accepts the
+  connection and then goes silent fails the command after one timeout.
+  The timeout bounds one read, not the whole wait for a reply: a device
+  that keeps sending unrelated messages could hold a command longer. The
+  tests drive the same code against a fake speaker over plain TCP
+  (`FakeCast` in `cast/tests.rs`).
 - **Idle between tracks.** `IDLE` with `loadingItemId` or `extendedStatus`
   counts as the next track loading, not the end of the album. Taken from
   rust_cast's field docs and Google's `MediaStatus`; not seen on a device.

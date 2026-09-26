@@ -104,9 +104,12 @@ servers:
   track change, pause, stop or the next item), apart from that dedup. The UI
   saves them in `state.json`. The network backends share `connect` (every resolved
   address, 3 s timeout); all three share `clamp_volume`.
-  - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
-    connection (after a TCP connect-timeout probe, because `rust_cast` has no
-    timeout) and drops it. Polls every 4 s while an album is active.
+  - `cast.rs`: connectionless; every command opens a fresh connection and
+    drops it. kids-deck opens the socket itself (3 s connect, 15 s read and
+    write timeouts, TLS without a certificate check) and hands it to the
+    `rust_cast` channels, because `rust_cast` sets no timeout. Tests drive
+    it against `FakeCast` over plain TCP. Polls every 4 s while an album is
+    active.
   - `heos.rs`: one persistent HEOS CLI connection (TCP 1255, JSON lines;
     the protocol is in `heos/cli.rs`), reconnects after errors.
     `play_stream` plays one URL and HEOS has no queue for URLs, so it polls

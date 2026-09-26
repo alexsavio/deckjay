@@ -10,17 +10,30 @@
 //! A radio station loads as one live item, without a queue. Pausing it
 //! stops it instead when the receiver refuses, and play/pause loads it
 //! again, so it always goes on live.
+//!
+//! kids-deck opens the socket itself and hands it to the `rust_cast` channels,
+//! so every read and write has a timeout: a speaker that accepts the
+//! connection and then goes quiet fails the command instead of holding the
+//! player thread for good.
 
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
-use rust_cast::CastDevice;
+use rust_cast::NoCertificateVerification;
+use rust_cast::channels::connection::ConnectionChannel;
 use rust_cast::channels::media::{
-    GenericMediaMetadata, IdleReason, Image, LoadOptions, Media, MediaQueue, Metadata,
-    MusicTrackMediaMetadata, PlayerState, QueueItem, QueueType, ResumeState, StatusEntry,
+    GenericMediaMetadata, IdleReason, Image, LoadOptions, Media, MediaChannel, MediaQueue,
+    Metadata, MusicTrackMediaMetadata, PlayerState, QueueItem, QueueType, ResumeState, StatusEntry,
     StreamType,
 };
-use rust_cast::channels::receiver::{Application, CastDeviceApp};
+use rust_cast::channels::receiver::{Application, CastDeviceApp, ReceiverChannel};
+use rust_cast::message_manager::MessageManager;
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, StreamOwned};
 use tracing::{debug, info, warn};
 
 use super::progress::{END_MARGIN, Place};
@@ -32,6 +45,11 @@ use crate::radio;
 const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
 /// Destination id of the platform receiver, for status, volume and app launch.
 const RECEIVER: &str = "receiver-0";
+/// Our own id on a connection.
+const SENDER: &str = "sender-0";
+/// Bounds each read and write on a connection. A LOAD is answered once the
+/// receiver has begun fetching the track, within a few seconds.
+const IO_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_secs(4);
 /// "Previous" restarts the current track if it has played longer than this.
 const RESTART_THRESHOLD_SECS: f32 = 5.0;
@@ -107,6 +125,8 @@ impl Live {
 pub(super) struct CastPlayer {
     host: String,
     port: u16,
+    transport: Transport,
+    io_timeout: Duration,
     /// Id of the item we started last.
     item: ItemId,
     /// Tracks of the album we started last.
@@ -119,9 +139,25 @@ pub(super) struct CastPlayer {
     last_place: Option<Place>,
 }
 
+/// How the connection to the speaker is made.
+enum Transport {
+    /// TLS without a certificate check, as every Cast sender does: a
+    /// speaker's certificate is self-signed.
+    Tls,
+    /// Plain TCP, to the fake speaker in tests.
+    #[cfg(test)]
+    Plain,
+}
+
+/// A connection's socket, whichever transport made it.
+trait Link: Read + Write {}
+impl<T: Read + Write> Link for T {}
+
 /// An open connection plus the running media app, if any.
 struct Session {
-    device: CastDevice<'static>,
+    connection: ConnectionChannel<'static, Box<dyn Link>>,
+    receiver: ReceiverChannel<'static, Box<dyn Link>>,
+    media: MediaChannel<'static, Box<dyn Link>>,
     app: Option<Application>,
 }
 
@@ -130,11 +166,23 @@ impl CastPlayer {
         CastPlayer {
             host,
             port,
+            transport: Transport::Tls,
+            io_timeout: IO_TIMEOUT,
             item: ItemId(0),
             tracks: Vec::new(),
             live: None,
             active: false,
             last_place: None,
+        }
+    }
+
+    /// A player for a fake speaker on plain TCP that answers within `io_timeout`.
+    #[cfg(test)]
+    fn plain(host: String, port: u16, io_timeout: Duration) -> CastPlayer {
+        CastPlayer {
+            transport: Transport::Plain,
+            io_timeout,
+            ..CastPlayer::new(host, port)
         }
     }
 }
@@ -161,12 +209,12 @@ impl Speaker for CastPlayer {
                 self.item = item;
                 self.tracks = list.tracks;
                 self.live = None;
-                s.device.receiver.set_volume(super::clamp_volume(volume))?;
-                self.load(s, list.start, events)
+                s.receiver.set_volume(super::clamp_volume(volume))?;
+                self.load(&s, list.start, events)
             }
             PlayerCmd::SetVolume(volume) => {
                 let s = self.open()?;
-                s.device.receiver.set_volume(super::clamp_volume(volume))?;
+                s.receiver.set_volume(super::clamp_volume(volume))?;
                 Ok(())
             }
             PlayerCmd::TogglePause => {
@@ -191,7 +239,7 @@ impl Speaker for CastPlayer {
                             PlayerState::Playing | PlayerState::Buffering
                         ) =>
                     {
-                        s.device.media.pause(tid, e.media_session_id)?;
+                        s.media.pause(tid, e.media_session_id)?;
                         if let Some(at) = place(&e, &self.tracks) {
                             self.note_place(at, events);
                         }
@@ -199,15 +247,15 @@ impl Speaker for CastPlayer {
                     }
                     // A station goes on live, below.
                     Some((tid, e)) if !live && matches!(e.player_state, PlayerState::Paused) => {
-                        s.device.media.play(tid, e.media_session_id)?;
+                        s.media.play(tid, e.media_session_id)?;
                         events.emit(PlayerEvent::Playing(self.item));
                     }
-                    _ if live => self.load_live(s, events)?,
+                    _ if live => self.load_live(&s, events)?,
                     // Finished or nothing loaded: start our album again, from
                     // the top or where a resuming item got to.
                     _ if !self.tracks.is_empty() => {
                         let start = events.resume_point();
-                        self.load(s, start, events)?;
+                        self.load(&s, start, events)?;
                     }
                     _ => events.emit(PlayerEvent::Stopped),
                 }
@@ -223,7 +271,7 @@ impl Speaker for CastPlayer {
                 };
                 match skip_target(&entry, &self.tracks, matches!(cmd, PlayerCmd::Next)) {
                     Some(track) => self.load(
-                        s,
+                        &s,
                         Start {
                             track,
                             ..Start::default()
@@ -274,13 +322,12 @@ impl Speaker for CastPlayer {
     /// Quits every app on the receiver: ours, and whatever a phone cast.
     fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
         self.halt(events);
-        super::connect(&self.host, self.port)?;
-        let device = CastDevice::connect_without_host_verification(self.host.clone(), self.port)?;
-        device.connection.connect(RECEIVER)?;
-        let status = device.receiver.get_status()?;
+        let s = self.dial()?;
+        s.connection.connect(RECEIVER)?;
+        let status = s.receiver.get_status()?;
         for app in apps_to_quit(&status.applications) {
             info!(app = %app.display_name, "quitting the app on the speaker");
-            device.receiver.stop_app(app.session_id.as_str())?;
+            s.receiver.stop_app(app.session_id.as_str())?;
         }
         Ok(())
     }
@@ -289,13 +336,13 @@ impl Speaker for CastPlayer {
 impl CastPlayer {
     /// Loads our album as a queue on the speaker, starting at `start.track`,
     /// `start.position` into it.
-    fn load(&mut self, s: Session, start: Start, events: &mut Emitter) -> Result<()> {
+    fn load(&mut self, s: &Session, start: Start, events: &mut Emitter) -> Result<()> {
         let index = start.track;
         let track = self
             .tracks
             .get(index)
             .ok_or_else(|| anyhow!("no track {index}"))?;
-        let app = media_app(&s.device, s.app)?;
+        let app = media_app(s)?;
 
         let queue = MediaQueue {
             items: self
@@ -312,7 +359,7 @@ impl CastPlayer {
             current_time: start.position.as_secs_f64(),
             ..LoadOptions::default()
         };
-        let status = s.device.media.load_with_queue(
+        let status = s.media.load_with_queue(
             app.transport_id.clone(),
             app.session_id.clone(),
             &track.to_media(),
@@ -320,7 +367,7 @@ impl CastPlayer {
             options,
         )?;
         if !start.position.is_zero() {
-            seek_after_load(&s.device, &app, status.entries.first(), start.position);
+            seek_after_load(s, &app, status.entries.first(), start.position);
         }
         info!(album = %track.album, track = %track.title, "playing");
         self.active = true;
@@ -346,15 +393,15 @@ impl CastPlayer {
         self.item = item;
         self.tracks = Vec::new();
         self.live = Some(Live::new(station, stream));
-        s.device.receiver.set_volume(super::clamp_volume(volume))?;
-        self.load_live(s, events)
+        s.receiver.set_volume(super::clamp_volume(volume))?;
+        self.load_live(&s, events)
     }
 
     /// Loads our station, live.
-    fn load_live(&mut self, s: Session, events: &mut Emitter) -> Result<()> {
+    fn load_live(&mut self, s: &Session, events: &mut Emitter) -> Result<()> {
         let live = self.live.as_ref().context("no station to play")?;
-        let app = media_app(&s.device, s.app)?;
-        s.device.media.load_with_opts(
+        let app = media_app(s)?;
+        s.media.load_with_opts(
             app.transport_id,
             app.session_id,
             &live.to_media(),
@@ -371,9 +418,9 @@ impl CastPlayer {
     /// live stream; polling stops with it, as nothing of ours plays then.
     fn pause_live(&mut self, s: &Session, tid: &str, entry: &StatusEntry) -> Result<()> {
         let id = entry.media_session_id;
-        if let Err(err) = s.device.media.pause(tid.to_string(), id) {
+        if let Err(err) = s.media.pause(tid.to_string(), id) {
             debug!("the receiver cannot pause the station, stopping it: {err:#}");
-            s.device.media.stop(tid.to_string(), id)?;
+            s.media.stop(tid.to_string(), id)?;
             self.active = false;
         }
         Ok(())
@@ -415,7 +462,7 @@ impl CastPlayer {
         }
         let live = self.live.as_ref().map(|l| l.url.as_str());
         if ours(&entry, &self.tracks, live) {
-            s.device.media.stop(tid, entry.media_session_id)?;
+            s.media.stop(tid, entry.media_session_id)?;
         }
         Ok(())
     }
@@ -430,7 +477,7 @@ impl CastPlayer {
             return Ok(());
         };
         // `None` keeps the play or pause state.
-        s.device.media.seek(
+        s.media.seek(
             tid,
             entry.media_session_id,
             Some(to.position.as_secs_f32()),
@@ -445,19 +492,50 @@ impl CastPlayer {
         events.place(at, false);
     }
 
+    /// Connects and finds the running media app, if any.
     fn open(&self) -> Result<Session> {
-        // Fail fast if the speaker is unreachable (rust_cast has no connect timeout).
-        super::connect(&self.host, self.port)?;
-
-        let device = CastDevice::connect_without_host_verification(self.host.clone(), self.port)?;
-        device.connection.connect(RECEIVER)?;
-        let status = device.receiver.get_status()?;
-        let app = status
+        let mut s = self.dial()?;
+        s.connection.connect(RECEIVER)?;
+        let status = s.receiver.get_status()?;
+        s.app = status
             .applications
             .into_iter()
             .find(|a| a.app_id == DEFAULT_MEDIA_RECEIVER);
-        Ok(Session { device, app })
+        Ok(s)
     }
+
+    /// A fresh connection, with a timeout on the connect and on every read
+    /// and write.
+    fn dial(&self) -> Result<Session> {
+        let tcp = super::connect(&self.host, self.port)?;
+        tcp.set_read_timeout(Some(self.io_timeout))?;
+        tcp.set_write_timeout(Some(self.io_timeout))?;
+        let link: Box<dyn Link> = match self.transport {
+            Transport::Tls => Box::new(tls(tcp, &self.host)?),
+            #[cfg(test)]
+            Transport::Plain => Box::new(tcp),
+        };
+        let manager = Rc::new(MessageManager::new(link));
+        Ok(Session {
+            connection: ConnectionChannel::new(SENDER, Rc::clone(&manager)),
+            receiver: ReceiverChannel::new(SENDER, RECEIVER, Rc::clone(&manager)),
+            media: MediaChannel::new(SENDER, manager),
+            app: None,
+        })
+    }
+}
+
+/// TLS to the speaker without a certificate check (see [`Transport::Tls`]).
+fn tls(tcp: TcpStream, host: &str) -> Result<StreamOwned<ClientConnection, TcpStream>> {
+    let config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+        .with_no_client_auth();
+    let name = ServerName::try_from(host)
+        .with_context(|| format!("{host:?} is not a host name or an address"))?
+        .to_owned();
+    let conn = ClientConnection::new(Arc::new(config), name)?;
+    Ok(StreamOwned::new(conn, tcp))
 }
 
 /// The idle screen of a Chromecast; quitting it only makes the TV blink.
@@ -468,33 +546,28 @@ fn apps_to_quit(apps: &[Application]) -> Vec<&Application> {
     apps.iter().filter(|app| app.app_id != BACKDROP).collect()
 }
 
-/// The Default Media Receiver, launched when `app` is not running yet, and
+/// The Default Media Receiver, launched when it is not running yet, and
 /// connected.
-fn media_app(device: &CastDevice<'static>, app: Option<Application>) -> Result<Application> {
-    let app = match app {
-        Some(app) => app,
-        None => device
+fn media_app(s: &Session) -> Result<Application> {
+    let app = match &s.app {
+        Some(app) => app.clone(),
+        None => s
             .receiver
             .launch_app(&CastDeviceApp::DefaultMediaReceiver)?,
     };
-    device.connection.connect(app.transport_id.clone())?;
+    s.connection.connect(app.transport_id.clone())?;
     Ok(app)
 }
 
 /// `rust_cast` sends every queue item with `startTime` 0, which a receiver may
 /// follow instead of the LOAD's `currentTime`, so a SEEK follows the LOAD. A
 /// failure only costs the place: the track plays from its beginning.
-fn seek_after_load(
-    device: &CastDevice<'static>,
-    app: &Application,
-    loaded: Option<&StatusEntry>,
-    to: Duration,
-) {
+fn seek_after_load(s: &Session, app: &Application, loaded: Option<&StatusEntry>, to: Duration) {
     let Some(loaded) = loaded else {
         debug!("no media session to seek in");
         return;
     };
-    let sought = device.media.seek(
+    let sought = s.media.seek(
         app.transport_id.clone(),
         loaded.media_session_id,
         Some(to.as_secs_f32()),
@@ -621,8 +694,8 @@ fn seek_target(entry: &StatusEntry, tracks: &[TrackInfo], by: i32) -> Option<Pla
 /// Returns the transport id and first media status entry of the running media app.
 fn media_status(s: &Session) -> Result<Option<(String, StatusEntry)>> {
     let Some(app) = &s.app else { return Ok(None) };
-    s.device.connection.connect(app.transport_id.clone())?;
-    let status = s.device.media.get_status(app.transport_id.clone(), None)?;
+    s.connection.connect(app.transport_id.clone())?;
+    let status = s.media.get_status(app.transport_id.clone(), None)?;
     Ok(status
         .entries
         .into_iter()
