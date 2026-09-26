@@ -14,6 +14,10 @@ receiver, a Spotify Connect device, or the computer's own sound output.
 It runs on Linux (a Raspberry Pi next to the speaker, or any PC) and on
 macOS. Written in Rust.
 
+![The web Stream Deck simulator: eight album keys, the first one playing, a
+power key, the next-shelf key, and the playback and volume keys
+below](docs/images/simulator.webp)
+
 ```text
  [A][A][A][A][⏻]     A = an album, book or story: press to play, again to pause
  [A][A][A][A][S]     S = the next shelf; ⏻ = power: stops all, dims the deck
