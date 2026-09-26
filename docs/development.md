@@ -139,7 +139,7 @@ crates.io. `just publish-dry` checks the package first.
 | `podcasts/` | The podcasts thread: feeds, download plan, cache and refresh |
 | `spotify/` | Spotify sign-in, saved login, Web API client and playlist covers |
 | `radio.rs` | Turns a station URL (or its `.pls` / `.m3u`) into the stream |
-| `net.rs` | HTTPS agents for feeds, radio and Spotify |
+| `net.rs` | HTTPS agents for feeds, radio and Spotify; the address the speaker downloads from (`BaseUrl`) |
 
 `CLAUDE.md` describes the architecture in more depth: the threads, the
 playback flow, the state and the rendering. The other files in `docs/`
