@@ -82,9 +82,10 @@ a listener token.
   to `stop` right after starting, so a stop within 10 s of the start sends
   the stream again, up to 3 `play_stream`s per key press. Details:
   [heos.md](heos.md#radio).
-- **Local**: a reader thread with a bounded buffer, a 10 s idle timeout and
-  up to 3 new connections in a row. Details:
-  [local-audio.md](local-audio.md#radio).
+- **Local**: a reader thread with a bounded buffer; a station that sends
+  nothing for 5 s fails, and once it has sent something, a 10 s idle
+  timeout and up to 3 new connections in a row, with a growing wait after
+  one that sent nothing. Details: [local-audio.md](local-audio.md#radio).
 
 ## Formats
 
@@ -158,8 +159,10 @@ them.
   stop; pause, stop instead of pause, play again; Next and Prev.
 - `cast/tests.rs`: which statuses count as our station; the `LOAD`'s media.
 - `local/tests/stream.rs`: `netread` against local servers that close, stall
-  or answer 404; the fake sound card plays a station, pauses it and joins it
-  again; `decodes_real_stations` (ignored) decodes two real MP3 stations.
+  or answer 404, a station that never sends a byte, the growing wait
+  between failed connections and its cancel; the fake sound card plays a
+  station, pauses it and joins it again; `decodes_real_stations` (ignored)
+  decodes two real MP3 stations.
 - `player/tests.rs`: a station that answers 404 reports `Stopped` on every
   speaker.
 

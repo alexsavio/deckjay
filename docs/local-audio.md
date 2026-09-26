@@ -132,31 +132,39 @@ station's URL becomes the stream URL is in [radio.md](radio.md).
 
 1. **Play:** on the player thread, resolve the station, refuse what
    symphonia cannot decode, connect to the stream (`NetRead::open`: a reply
-   that is not 2xx fails at once) and probe it (`Source::open_stream`, with
-   the content type as the hint). Only then does the sound card open, so a
-   station that fails any of these leaves it closed. Emits `Playing`; no
-   `Progress`, no `Finished`.
+   that is not 2xx fails at once, a station that sends nothing for 5 s
+   fails without a new connection) and probe it (`Source::open_stream`,
+   with the content type as the hint). Only then does the sound card open,
+   so a station that fails any of these leaves it closed. Emits `Playing`;
+   no `Progress`, no `Finished`.
 2. **Reading:** a `radio` thread reads the HTTP body in 16 KiB chunks into
    a bounded channel of 16 chunks (256 KiB, 16 s at 128 kbit/s); the
    decoder thread reads from it. When the body ends or breaks, or nothing
    comes for 10 s, `netread` connects again, at most 3 times in a row
-   (`Limits`); a connection that delivered for 30 s resets the count. MP3
-   decoding goes on across a new connection (tested); ADTS should too.
-   When the reconnects are used up, the stream ends like a track, and the
-   next poll ends the station with `Stopped`.
+   (`Limits`); a connection that delivered for 30 s resets the count. After
+   a connection that sent nothing, the next one waits 2 s, then 4 s, so a
+   short outage does not use up the reconnects at once. MP3 decoding goes
+   on across a new connection (tested); ADTS should too. When the
+   reconnects are used up, the stream ends like a track, and the next poll
+   ends the station with `Stopped`.
 3. **Pause:** the engine stops the stream (silence; the connection
    closes), the sound card stays open. **Play/pause** again connects anew,
    so the station goes on live. **Next / previous** do nothing.
 4. **Leaving the station** (another item, a pause, a failure): the engine
-   cancels the stream's reads. Without that, a decoder thread waiting for
-   a silent station would not see the next item for up to 40 s (10 s idle,
-   3 reconnects).
+   cancels the stream's reads, also during a wait before a new
+   connection. Without that, a decoder thread waiting for a station that
+   went silent would not see the next item for up to 46 s (10 s idle on
+   each of 4 connections, and the 2 s and 4 s waits).
 
-ureq has no timeout between two reads of a body. On a connection that stays
-open but sends nothing, the `radio` thread stays blocked in its read until
-the server or the network drops the connection; `netread` goes on with a
-new thread and connection after 10 s, and the old thread exits at its next
-read. The 10 s also cover the new connection itself, so a server that takes
+ureq has no timeout between two reads of a body, only a budget for the
+whole body, which `netread` sets to 3 h. On a connection that stays open but
+sends nothing, the `radio` thread stays blocked in its read until the
+server or the network drops the connection or the 3 h run out; `netread`
+goes on with a new thread and connection after 10 s, and the old thread
+exits at its next read. The budget also cuts a healthy stream every 3 h:
+that connection delivered for more than 30 s, so `netread` connects again
+at once with all 3 reconnects, and the station goes on after a short gap.
+The 10 s also cover the new connection itself, so a server that takes
 longer than that to answer uses up the reconnects; stations answer in well
 under a second.
 
