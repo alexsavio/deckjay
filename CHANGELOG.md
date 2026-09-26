@@ -34,6 +34,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Stop a speaker before another takes over
 - Add a power key that stops everything and dims the deck
 - Let a source folder be one key
+- Jump back and forward in audiobooks and podcasts
 
 ### 🐛 Bug Fixes
 
