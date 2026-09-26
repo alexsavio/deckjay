@@ -46,6 +46,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Keep a playing episode pinned and podcast tiles current
 - Show stations and playlists in the check and logs
 - Let the power key stop what kids-deck did not start
+- Let the rewind and forward keys jump in stories too
 
 ### 💼 Other
 
@@ -75,6 +76,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Add an MIT license and a README for the public
 - Add development and Raspberry Pi guides
 - Play on a Bluetooth speaker and Spotify on the Pi
+- Rename the repository to kids-deck and say it runs on Linux
 
 ### ⚙️ Miscellaneous Tasks
 
