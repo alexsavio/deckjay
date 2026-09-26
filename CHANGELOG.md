@@ -73,6 +73,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Say which Spotify devices stay reachable
 - Add an MIT license and a README for the public
 - Add development and Raspberry Pi guides
+- Play on a Bluetooth speaker and Spotify on the Pi
 
 ### ⚙️ Miscellaneous Tasks
 
