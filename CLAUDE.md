@@ -92,8 +92,11 @@ servers:
   `Play` carries the volume, and `Seek`s in a row add up, a sum of 0
   dropped), calls the
   private `Speaker` trait, and polls while `poll_interval()` is `Some`. A
-  failed command emits `Stopped` and drops
-  the rest of its batch; 3 failed polls in a row end the album the same way.
+  failed `Play`, `TogglePause` or `Off` (the commands the UI guesses the
+  result of) emits `Stopped` and drops the rest of its batch; a failed
+  volume, skip or seek is only logged and the album goes on; polls failing
+  for 20 s in a row (`POLL_FAILURE_GRACE`; local audio gives up after
+  300 ms, its failures being final) end the album the same way.
   `Emitter` drops repeats of the last event, except for the first event after
   each command batch. Items played with `progress: true` also get
   `PlayerEvent::Progress` (track, position, track length) and `Finished`;

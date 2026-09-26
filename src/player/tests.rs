@@ -381,6 +381,7 @@ fn adds_up_seeks_in_a_row_only() {
     );
 }
 
+#[derive(Clone, Copy)]
 enum Poll {
     Answer,
     Fail,
@@ -388,7 +389,8 @@ enum Poll {
     FailAndIdle,
 }
 
-/// A speaker that follows a script, to drive `run` without a network.
+/// A speaker that follows a script, to drive `run` without a network. It
+/// polls every millisecond and gives up on failing polls after `GRACE`.
 struct Scripted {
     polls: VecDeque<Poll>,
     active: bool,
@@ -398,6 +400,8 @@ struct Scripted {
     /// Gets a message each time the script goes idle.
     idle: Sender<()>,
 }
+
+const GRACE: Duration = Duration::from_millis(50);
 
 impl Scripted {
     fn new(polls: Vec<Poll>) -> (Scripted, Receiver<()>) {
@@ -439,6 +443,10 @@ impl Speaker for Scripted {
         self.active.then_some(Duration::from_millis(1))
     }
 
+    fn poll_failure_grace(&self) -> Duration {
+        GRACE
+    }
+
     fn reset(&mut self) {
         self.active = false;
     }
@@ -458,26 +466,50 @@ fn run_on_a_thread(
 }
 
 #[test]
-fn three_failed_polls_in_a_row_stop_the_album() {
-    use Poll::{Answer, Fail};
-    let (speaker, _idle) = Scripted::new(vec![Fail, Fail, Answer, Fail, Fail, Fail]);
+fn polls_failing_for_the_whole_grace_stop_the_album() {
+    // Far more failures than fit in the grace at one poll per millisecond.
+    let (speaker, _idle) = Scripted::new(vec![Poll::Fail; 10_000]);
     let polled = Arc::clone(&speaker.polled);
+    let started = Instant::now();
     let (cmds, events, thread) = run_on_a_thread(speaker);
     assert_eq!(
-        events.recv_timeout(Duration::from_secs(2)),
+        events.recv_timeout(Duration::from_secs(5)),
         Ok(PlayerEvent::Stopped)
+    );
+    assert!(
+        started.elapsed() >= GRACE,
+        "gave up after {:?}",
+        started.elapsed()
     );
     drop(cmds);
     thread.join().unwrap();
-    assert_eq!(
-        polled.load(Ordering::SeqCst),
-        6,
-        "a poll that works restarts the count, and polling ends with the album"
+    let polled = polled.load(Ordering::SeqCst);
+    assert!(
+        (2..10_000).contains(&polled),
+        "polling ends with the album, after {polled} polls"
     );
 }
 
 #[test]
-fn a_command_that_works_restarts_the_failed_poll_count() {
+fn a_poll_that_works_restarts_the_failure_clock() {
+    use Poll::{Answer, Fail};
+    // Two failures take a few milliseconds, never the whole grace.
+    let mut polls = Vec::new();
+    for _ in 0..40 {
+        polls.extend([Fail, Fail, Answer]);
+    }
+    let (speaker, idle) = Scripted::new(polls);
+    let polled = Arc::clone(&speaker.polled);
+    let (cmds, events, thread) = run_on_a_thread(speaker);
+    idle.recv_timeout(Duration::from_secs(5)).unwrap();
+    drop(cmds);
+    thread.join().unwrap();
+    assert_eq!(polled.load(Ordering::SeqCst), 121, "the whole script ran");
+    assert_eq!(events.try_iter().collect::<Vec<_>>(), []);
+}
+
+#[test]
+fn a_command_that_works_restarts_the_failure_clock() {
     use Poll::{Fail, FailAndIdle};
     let (speaker, idle) = Scripted::new(vec![Fail, FailAndIdle, Fail, FailAndIdle]);
     let (cmds, events, thread) = run_on_a_thread(speaker);
@@ -487,6 +519,31 @@ fn a_command_that_works_restarts_the_failed_poll_count() {
     drop(cmds);
     thread.join().unwrap();
     assert_eq!(events.try_iter().collect::<Vec<_>>(), []);
+}
+
+#[test]
+fn a_failed_volume_or_skip_keeps_the_album() {
+    let (mut speaker, idle) = Scripted::new(vec![Poll::Answer; 3]);
+    speaker.fail_commands = true;
+    let handled = Arc::clone(&speaker.handled);
+    let (cmds, events, thread) = run_on_a_thread(speaker);
+    for cmd in [
+        PlayerCmd::SetVolume(0.3),
+        PlayerCmd::Next,
+        PlayerCmd::Seek(10),
+    ] {
+        cmds.send(cmd).unwrap();
+    }
+    // The script only runs out while the album is still active and polled.
+    idle.recv_timeout(Duration::from_secs(2)).unwrap();
+    drop(cmds);
+    thread.join().unwrap();
+    assert_eq!(handled.load(Ordering::SeqCst), 3, "every command is tried");
+    assert_eq!(
+        events.try_iter().collect::<Vec<_>>(),
+        [],
+        "the UI guessed nothing, so nothing is undone"
+    );
 }
 
 #[test]
