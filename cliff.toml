@@ -40,7 +40,7 @@ render_always = true
 # An array of regex based postprocessors to modify the changelog.
 postprocessors = [
     # Replace the placeholder <REPO> with the GitHub URL.
-    { pattern = '<REPO>', replace = "https://github.com/alexsavio/kids-music-deck" },
+    { pattern = '<REPO>', replace = "https://github.com/alexsavio/kids-deck" },
 ]
 # Output file path
 output = "CHANGELOG.md"

@@ -1,14 +1,15 @@
 # 🎶 kids-deck
 
-[![CI](https://github.com/alexsavio/kids-music-deck/actions/workflows/ci.yml/badge.svg)](https://github.com/alexsavio/kids-music-deck/actions/workflows/ci.yml)
-[![zizmor](https://github.com/alexsavio/kids-music-deck/actions/workflows/zizmor.yml/badge.svg)](https://github.com/alexsavio/kids-music-deck/actions/workflows/zizmor.yml)
+[![CI](https://github.com/alexsavio/kids-deck/actions/workflows/ci.yml/badge.svg)](https://github.com/alexsavio/kids-deck/actions/workflows/ci.yml)
+[![zizmor](https://github.com/alexsavio/kids-deck/actions/workflows/zizmor.yml/badge.svg)](https://github.com/alexsavio/kids-deck/actions/workflows/zizmor.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A music player for small children who cannot read yet: they press a
-picture on an Elgato Stream Deck, and the music plays. The music plays on a
-Chromecast built-in speaker, a Denon or Marantz HEOS receiver, or the
-computer's own sound output. It runs on a Raspberry Pi next to the speaker,
-or on a Mac. Written in Rust.
+A player for small children who cannot read yet: they press a picture on
+an Elgato Stream Deck, and their music, audiobook, story, podcast or radio
+station plays. It plays on a Chromecast built-in speaker, a Denon or
+Marantz HEOS receiver, a Spotify Connect device, or the computer's own
+sound output. It runs on Linux (a Raspberry Pi next to the speaker, or any
+PC) and on macOS. Written in Rust.
 
 ```text
  [A][A][A][A][⏻]     A = an album, book or story: press to play, again to pause
@@ -47,8 +48,9 @@ or on a Mac. Written in Rust.
 
 - An **Elgato Stream Deck**: MK.2, Scissor Keys, XL, Mini, Neo, Plus or a
   module. The web simulator stands in for it while you try things out.
-- A computer next to the speaker: a **Raspberry Pi 3** or newer (64-bit
-  Raspberry Pi OS) or a **Mac**.
+- A computer for the Stream Deck, on the same network as the speaker:
+  **Linux** (a **Raspberry Pi 3** or newer with 64-bit Raspberry Pi OS, or
+  a PC) or a **Mac**. Windows is not supported.
 - A speaker: a **Chromecast built-in** device (tested on a Lenovo smart
   display; built for a JBL Authentics 300), a **Denon or Marantz HEOS**
   receiver (tested on a Denon AVR-X1600H), or the computer's own sound
@@ -59,24 +61,35 @@ or on a Mac. Written in Rust.
 
 ## 📦 Install
 
-Download the archive for your computer from the
-[releases page](https://github.com/alexsavio/kids-music-deck/releases):
-Linux x86_64, Linux arm64 (a Raspberry Pi with a 64-bit OS) or macOS on
-Apple silicon. Or build it with Rust 1.98 or newer:
+Get the program one of two ways:
 
-```sh
-cargo install kids-deck --locked
-```
+- **Download** the archive for your computer from the
+  [releases page](https://github.com/alexsavio/kids-deck/releases): Linux
+  x86_64, Linux arm64 (a Raspberry Pi with a 64-bit OS) or macOS on Apple
+  silicon. The Linux ones need glibc 2.35 or newer (Debian 12, Ubuntu
+  22.04, Raspberry Pi OS 12 or later), `libasound2` and `libudev1`.
+- **Build** it with Rust 1.98 or newer. On Linux, install
+  `libasound2-dev`, `libudev-dev` and `pkg-config` first.
 
-On Linux, install `libasound2-dev`, `libudev-dev` and `pkg-config` before
-you build, and install `99-streamdeck.rules` (in the archive and in this
-repository; its first lines say how) so the program does not need root.
-Then copy `config.example.toml` to `config.toml`, set the speaker and your
-music folders, and run `kids-deck` in that folder
-(`kids-deck path/to/config.toml` also works). On a Mac, allow Local Network
-access as [the development guide](docs/development.md#-run-with-a-stream-deck)
-explains. For a Raspberry Pi, follow
-[`docs/raspberry-pi.md`](docs/raspberry-pi.md).
+  ```sh
+  cargo install kids-deck --locked
+  ```
+
+Then:
+
+1. Copy `config.example.toml` (in the archive and in this repository) to
+   `config.toml`, and set the speaker and your music folders.
+2. On Linux, install `99-streamdeck.rules` (its first lines say how), so
+   the program can use the deck without root.
+3. Run `kids-deck` in that folder (`kids-deck path/to/config.toml` also
+   works). On a Mac, quit the Elgato Stream Deck app first, and allow
+   Local Network access as
+   [the development guide](docs/development.md#-run-with-a-stream-deck)
+   explains.
+
+For a Raspberry Pi without a screen, follow
+[`docs/raspberry-pi.md`](docs/raspberry-pi.md): it installs kids-deck as a
+service that starts at boot.
 
 ## 🔧 How it works
 
@@ -98,8 +111,9 @@ podcast, radio or Spotify shelf.
 [`docs/raspberry-pi.md`](docs/raspberry-pi.md) installs kids-deck on a
 headless Raspberry Pi with Raspberry Pi OS: a service that starts at boot
 and starts again when it fails, the music on the SD card, and logs in the
-system journal with a size cap. It also shows how to run it in Docker
-instead (`just deploy`).
+system journal with a size cap. Most steps also fit another Linux computer
+with systemd. It also shows how to run it in Docker instead
+(`just deploy`).
 
 ## 💻 Develop
 
@@ -111,6 +125,10 @@ code.
 
 ## 📝 Notes
 
+- **Tested on:** macOS on Apple silicon with a Stream Deck MK.2; Linux in
+  CI (Ubuntu) and in Docker with the web simulator, playing on a Lenovo
+  smart display (Cast). The Raspberry Pi guide is not tested on a real Pi
+  yet.
 - **Supported decks:** anything the `elgato-streamdeck` crate knows with at
   least two rows: MK.2, Scissor Keys, XL, Mini, Neo, Plus and the modules.
   The layout adapts to the number of keys.

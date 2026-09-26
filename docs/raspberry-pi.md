@@ -66,7 +66,7 @@ Download the arm64 archive of the newest release, check it, and install the
 program:
 
 ```sh
-base=https://github.com/alexsavio/kids-music-deck/releases/latest/download
+base=https://github.com/alexsavio/kids-deck/releases/latest/download
 curl -fsSLO "$base/kids-deck-aarch64-unknown-linux-gnu.tar.gz"
 curl -fsSLO "$base/SHA256SUMS.txt"
 sha256sum --check --ignore-missing SHA256SUMS.txt
@@ -187,7 +187,7 @@ Write the service file:
 sudo tee /etc/systemd/system/kids-deck.service >/dev/null <<'EOF'
 [Unit]
 Description=kids-deck Stream Deck music player
-Documentation=https://github.com/alexsavio/kids-music-deck
+Documentation=https://github.com/alexsavio/kids-deck
 # The speaker needs our LAN address, found from the route to it.
 Wants=network-online.target
 After=network-online.target sound.target

@@ -9,12 +9,12 @@ code in this repository.
 one plays the album on a network speaker, Chromecast built-in (built for a JBL
 Authentics 300) or Denon / Marantz HEOS, or on the computer's own sound output
 (`speaker_type` = `cast`, `heos` or `local` in `config.toml`).
-Develop natively on macOS (Docker Desktop cannot pass USB through), or run
-everything in Docker with the web Stream Deck simulator (`just sim`). Docker
-also builds the Raspberry Pi 3 (`linux/arm64`) image. `README.md` is the
-overview and install; `docs/development.md` has the dev setup, the
-simulator and the per-file code map; `docs/raspberry-pi.md` installs a
-headless Pi as a systemd service (and the Docker deploy).
+Develop natively on macOS or Linux (Docker Desktop cannot pass USB
+through), or run everything in Docker with the web Stream Deck simulator
+(`just sim`). Docker also builds the Raspberry Pi 3 (`linux/arm64`) image.
+`README.md` is the overview and install; `docs/development.md` has the dev
+setup, the simulator and the per-file code map; `docs/raspberry-pi.md`
+installs a headless Pi as a systemd service (and the Docker deploy).
 
 ## Commands
 
