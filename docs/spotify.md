@@ -117,7 +117,10 @@ Spotify Connect device matches" until someone casts Spotify to it again
 from the phone. So for Spotify pick a device with Spotify Connect built in
 that stays listed: the Denon or other HEOS receivers (with Network Control
 "Always On"), speakers such as the JBL Authentics, or a TV or streaming box
-that runs the Spotify app.
+that runs the Spotify app. A Bluetooth speaker has no Spotify
+Connect: let the Raspberry Pi be the Connect device instead, with
+raspotify, as
+[raspberry-pi.md](raspberry-pi.md#-spotify-on-the-pi-itself) explains.
 
 ## Limits
 

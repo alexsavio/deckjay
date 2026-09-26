@@ -51,7 +51,10 @@ or on a Mac. Written in Rust.
 - A speaker: a **Chromecast built-in** device (tested on a Lenovo smart
   display; built for a JBL Authentics 300), a **Denon or Marantz HEOS**
   receiver (tested on a Denon AVR-X1600H), or the computer's own sound
-  output (the Pi's headphone jack, HDMI or a USB sound card).
+  output (the Pi's headphone jack, HDMI, a USB sound card, or a paired
+  Bluetooth speaker: see
+  [`docs/raspberry-pi.md`](docs/raspberry-pi.md#-play-on-a-bluetooth-speaker),
+  not tested yet).
 
 ## 📦 Install
 

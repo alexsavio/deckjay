@@ -325,6 +325,129 @@ removes the change again.
   allow SSH (22/tcp) and, for a Chromecast or HEOS speaker, the music
   server (8765/tcp, `http_port`): the speaker downloads the music from it.
 
+## 🔵 Play on a Bluetooth speaker
+
+> **Not tested yet:** a real Bluetooth speaker, and raspotify together with
+> kids-deck. These steps follow the Debian packages, their manuals and a
+> test in a Debian container. One risk is known: after a playlist, the
+> first press on a book may fail because Spotify still holds the speaker.
+> The next press should play (see the end of
+> [Spotify on the Pi itself](#-spotify-on-the-pi-itself)).
+
+To kids-deck a paired Bluetooth speaker is one more sound output, so it
+plays with `speaker_type = "local"`. (On a Mac: pair the speaker in System
+Settings, then set `audio_device` to part of its name; `--check` lists the
+names.)
+
+Raspberry Pi OS Lite has no sound server, and PipeWire runs only in a
+user's login session, which the `kidsdeck` service user never has.
+`bluez-alsa` works without one: a system service that gives every member
+of the `audio` group an ALSA device named `bluealsa`.
+
+1. Install it. Debian's service sends audio (`a2dp-source`) with no
+   changes:
+
+   ```sh
+   sudo apt install -y bluez bluez-alsa-utils libasound2-plugin-bluez
+   sudo systemctl enable --now bluealsa
+   ```
+
+2. Pair the speaker. Put it in pairing mode, then:
+
+   ```sh
+   sudo bluetoothctl
+   scan on                 # wait for the speaker's name and address
+   pair XX:XX:XX:XX:XX:XX
+   trust XX:XX:XX:XX:XX:XX # it may connect again by itself later
+   connect XX:XX:XX:XX:XX:XX
+   exit
+   ```
+
+3. Make the speaker the Pi's default sound output, for kids-deck and every
+   other program:
+
+   ```sh
+   sudo tee /etc/asound.conf >/dev/null <<'EOF'
+   defaults.bluealsa.device "XX:XX:XX:XX:XX:XX"
+   pcm.!default {
+       type plug
+       slave.pcm "bluealsa"
+   }
+   EOF
+   ```
+
+4. Leave `audio_device` out of `/etc/kids-deck/config.toml` (it plays on
+   the default output), check, and restart:
+
+   ```sh
+   sudo systemctl stop kids-deck
+   sudo -u kidsdeck kids-deck --check /etc/kids-deck/config.toml
+   speaker-test -D default -c 2 -t sine -l 1   # a short tone on the speaker
+   sudo systemctl start kids-deck
+   ```
+
+Things to know:
+
+- Many Bluetooth speakers turn off after 10 to 20 minutes of silence.
+  Turned on again, most connect to the Pi by themselves (it is trusted);
+  if one does not, run `sudo bluetoothctl connect XX:XX:XX:XX:XX:XX`.
+  While the speaker is off, a press gives no sound.
+- On a Raspberry Pi 3, Bluetooth and Wi-Fi share one radio chip, and
+  Bluetooth audio can stutter while Wi-Fi is busy. Use a network cable, or
+  a USB Bluetooth adapter.
+- `max_volume` caps the deck's keys only; the speaker's own buttons can
+  still go louder.
+
+## 🟢 Spotify on the Pi itself
+
+A Bluetooth speaker has no Spotify Connect, so the Pi becomes the Spotify
+Connect device: [raspotify](https://github.com/dtcooper/raspotify) runs
+librespot as a service and plays on the Pi's default output, the
+Bluetooth speaker above. Unlike a Chromecast, it stays in Spotify's device
+list. Not tested with kids-deck yet (see the note at the top of
+[Play on a Bluetooth speaker](#-play-on-a-bluetooth-speaker)).
+
+1. Install raspotify (it has arm64 packages):
+
+   ```sh
+   sudo apt install -y curl
+   curl -sL https://dtcooper.github.io/raspotify/install.sh | sh
+   ```
+
+2. In `/etc/raspotify/conf`, set the name, and let it keep the Spotify
+   sign-in, so the Pi stays in your account's device list after a reboot:
+
+   ```sh
+   LIBRESPOT_NAME="kidsdeck"
+   #LIBRESPOT_DISABLE_CREDENTIAL_CACHE=
+   ```
+
+   (Put a `#` in front of the `LIBRESPOT_DISABLE_CREDENTIAL_CACHE=` line.)
+   Then `sudo systemctl restart raspotify`.
+
+3. Sign it in once: on a phone on the same network, open Spotify, tap the
+   devices icon and pick **kidsdeck**. It keeps the sign-in in
+   `/var/lib/raspotify`.
+
+4. In `/etc/kids-deck/config.toml`, set the device, and sign kids-deck in
+   to Spotify as in [Day to day](#-day-to-day):
+
+   ```toml
+   [spotify]
+   client_id = "..."
+   device = "kidsdeck"
+   ```
+
+   `--check` lists the Spotify devices your account sees; `kidsdeck` must
+   be one of them.
+
+kids-deck closes its sound output when a playlist starts, and pauses
+Spotify when an album, a book or a station starts. librespot should free
+the output when it pauses, but the pause reaches the Pi through Spotify's
+servers and can take a moment: the first press after a playlist may fail,
+and the next one play, because `bluez-alsa` may not let two programs use
+the speaker at once.
+
 ## 🧱 Build the binary yourself
 
 Build it on your computer with Docker; a Pi 3 has too little memory to
