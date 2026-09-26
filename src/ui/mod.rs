@@ -29,7 +29,7 @@ pub use self::podcasts::PodcastThread;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -41,8 +41,22 @@ use crate::config::{Config, SpeakerType};
 use crate::deck::Deck;
 use crate::icons::{self, Decor};
 use crate::library::{self, ItemId, Kind, Library, Media};
+use crate::net::BaseUrl;
 use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
 use crate::state::Store;
+
+/// The player thread ended, which only a panic does: nothing can play until
+/// the program restarts, so [`Ui::run`] returns this and `main` exits with it.
+#[derive(Debug, Clone, Copy)]
+pub struct PlayerGone;
+
+impl std::fmt::Display for PlayerGone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the player thread ended; kids-deck exits so the service can restart it")
+    }
+}
+
+impl std::error::Error for PlayerGone {}
 
 /// Volume bar resolution; keeps the number of distinct cached key images small.
 const VOLUME_LEVELS: f32 = 20.0;
@@ -92,9 +106,11 @@ pub enum Face {
 
 pub struct Ui {
     library: Library,
-    base_url: String,
+    base_url: BaseUrl,
     player: Sender<PlayerCmd>,
     events: Receiver<PlayerEvent>,
+    /// Set once the player thread hung up its events channel.
+    gone: Option<PlayerGone>,
 
     max_volume: f32,
     volume_step: f32,
@@ -136,7 +152,7 @@ impl Ui {
     pub fn new(
         cfg: &Config,
         library: Library,
-        base_url: String,
+        base_url: BaseUrl,
         player: Sender<PlayerCmd>,
         events: Receiver<PlayerEvent>,
         store: Store,
@@ -171,6 +187,7 @@ impl Ui {
             base_url,
             player,
             events,
+            gone: None,
             max_volume: cfg.max_volume,
             volume_step: cfg.volume_step,
             seek_seconds: if cfg.speaker_type == SpeakerType::Heos {
@@ -191,7 +208,9 @@ impl Ui {
     }
 
     /// Drives a connected deck until it is unplugged (returns the error
-    /// then), or until `stop` is set: the deck goes dark and it returns `Ok`.
+    /// then), until the player thread ended (the deck goes dark and it
+    /// returns [`PlayerGone`]), or until `stop` is set: the deck goes dark
+    /// and it returns `Ok`.
     pub fn run(&mut self, deck: &mut Deck, brightness: u8, stop: &AtomicBool) -> Result<()> {
         let mut dimmed = self.asleep;
         deck.set_brightness(if dimmed { 0 } else { brightness })?;
@@ -208,6 +227,10 @@ impl Ui {
             let mut keys = deck.pressed_keys(Duration::from_millis(100))?;
             self.wake(&mut keys);
             let mut changed = self.update(&layout, &keys);
+            if let Some(gone) = self.gone {
+                deck.blank()?;
+                return Err(gone.into());
+            }
             if self.take_snapshots() {
                 layout = self.layout(rows, cols);
                 self.fit(&layout);
@@ -250,10 +273,25 @@ impl Ui {
         changed
     }
 
+    /// Whether the player thread ended; see [`PlayerGone`].
+    pub fn player_gone(&self) -> bool {
+        self.gone.is_some()
+    }
+
     /// Applies status updates from the speaker. Returns true if anything changed.
     pub fn handle_events(&mut self) -> bool {
         let mut changed = false;
-        let events: Vec<PlayerEvent> = self.events.try_iter().collect();
+        let mut events = Vec::new();
+        loop {
+            match self.events.try_recv() {
+                Ok(event) => events.push(event),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.gone = Some(PlayerGone);
+                    break;
+                }
+            }
+        }
         for event in events {
             let (current, playing) = match event {
                 PlayerEvent::Playing(item) => (Some(item), true),
@@ -371,7 +409,7 @@ impl Ui {
 
     /// What pressing `id` plays: its tracks, from where it stopped if it
     /// resumes, or its stream.
-    fn content(&self, id: ItemId) -> player::Content {
+    fn content(&mut self, id: ItemId) -> player::Content {
         let item = self.library.item(id);
         if let Media::Spotify { uri } = &item.media {
             info!(item = %item.name, "playlist pressed");
@@ -531,17 +569,18 @@ impl Ui {
         }
     }
 
-    fn tracks(&self, id: ItemId) -> Vec<TrackInfo> {
+    fn tracks(&mut self, id: ItemId) -> Vec<TrackInfo> {
+        let base_url = self.base_url.get();
         let album = self.library.item(id);
         let cover_url = album
             .cover_rel
             .as_ref()
-            .map(|c| library::url_for(&self.base_url, c));
+            .map(|c| library::url_for(&base_url, c));
         album
             .tracks()
             .iter()
             .map(|t| TrackInfo {
-                url: library::url_for(&self.base_url, &t.rel_path),
+                url: library::url_for(&base_url, &t.rel_path),
                 path: t.path.clone(),
                 content_type: t.content_type.to_string(),
                 title: t.title.clone(),

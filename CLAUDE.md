@@ -73,7 +73,11 @@ servers:
 
 - **main** (`main.rs` → `ui/`, `deck/`): `DeckSource::open` retries every
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
-  `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
+  `PlayerEvent`s, redraws, and returns `Err` when the deck goes away. When
+  the player thread ended (its events channel hung up, which only a panic
+  does), `Ui::run` blanks the deck and returns `ui::PlayerGone`, and `main`
+  exits with it, so systemd restarts the service instead of leaving a deck
+  that draws but plays nothing.
   SIGINT, SIGTERM and SIGHUP set a stop flag (`signal-hook`; a second one
   ends the program at once): `Ui::run` turns the deck dark (`Deck::blank`)
   and returns `Ok`, and `main` saves the state and exits. `--blank` does the
@@ -150,8 +154,12 @@ Playback flow:
    the item stopped when `Kind::resumes` (audiobooks, podcasts).
    `Ui::tracks` turns tracks into `TrackInfo` URLs with `library::url_for`
    (per-segment percent-encoding) on `base_url`:
-   `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
-   `main::local_ip_towards(speaker)`.
+   `http://<host>:<http_port>/music` (`net::BaseUrl`), where `host` is
+   `advertise_host` or this machine's address on the route to the speaker,
+   found again at each press (a new DHCP address reaches the next album; the
+   speaker's name is resolved once). Without a route at start the program
+   warns and starts anyway; while there is none, a press uses the last URL
+   found and the play fails at the speaker.
 3. `PlayerCmd::Play` reaches the router: `Content::Spotify` goes to the
    Spotify player, the rest to the speaker backend. Cast launches the
    Default Media Receiver (`CC1AD845`) and loads the whole album as a
