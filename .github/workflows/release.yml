@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release again (e.g. v2026.9.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: kids-deck
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read  # actions/checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 has glibc 2.35, so the binaries also run on
+          # Debian 12 and 64-bit Raspberry Pi OS bookworm.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Check that the tag matches Cargo.toml
+        run: |
+          version=$(sed -n '/^\[package\]/,/^\[/{s/^version = "\(.*\)"/\1/p;}' Cargo.toml)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::the tag is $TAG but Cargo.toml has version $version"
+            exit 1
+          fi
+
+      # cpal needs ALSA and hidapi needs udev on Linux.
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+      # Installs the version pinned in rust-toolchain.toml.
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Package
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          dir="$BINARY_NAME-$TARGET"
+          mkdir "$dir"
+          cp "target/$TARGET/release/$BINARY_NAME" LICENSE README.md config.example.toml 99-streamdeck.rules "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.BINARY_NAME }}-*.tar.gz
+          retention-days: 1
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the release and upload its files
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Write checksums
+        working-directory: artifacts
+        run: sha256sum -- *.tar.gz > SHA256SUMS.txt
+
+      - uses: taiki-e/install-action@b651345a718c8f44efa2460560b3dbf29cbd7ee1  # v2
+        with:
+          tool: git-cliff@2.12.0
+
+      - name: Write release notes
+        run: git cliff --current --strip header > RELEASE_NOTES.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$TAG" artifacts/* --verify-tag --title "$TAG" \
+            --notes-file RELEASE_NOTES.md "${prerelease[@]}"
+
+  publish:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # actions/checkout
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      # `cargo publish` builds the packaged crate, which needs these too.
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked

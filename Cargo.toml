@@ -9,7 +9,6 @@ repository = "https://github.com/alexsavio/kids-music-deck"
 readme = "README.md"
 keywords = ["stream-deck", "music-player", "kids", "chromecast", "raspberry-pi"]
 categories = ["multimedia::audio"]
-publish = false
 
 [dependencies]
 anyhow = "1"
