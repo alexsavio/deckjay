@@ -1,42 +1,70 @@
 # kids-deck
 
-A music player for kids: album covers on an Elgato Stream Deck, music on a
-network speaker or on the computer's own sound output. Written in Rust. It
-works with Chromecast built-in speakers (built for a JBL Authentics 300),
-with Denon / Marantz HEOS receivers and speakers, and with the headphone
-jack, HDMI or USB sound card of the Raspberry Pi.
+[![CI](https://github.com/alexsavio/kids-music-deck/actions/workflows/ci.yml/badge.svg)](https://github.com/alexsavio/kids-music-deck/actions/workflows/ci.yml)
+[![zizmor](https://github.com/alexsavio/kids-music-deck/actions/workflows/zizmor.yml/badge.svg)](https://github.com/alexsavio/kids-music-deck/actions/workflows/zizmor.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A music player for small children who cannot read yet: they press a
+picture on an Elgato Stream Deck, and the music plays. The music plays on a
+Chromecast built-in speaker, a Denon or Marantz HEOS receiver, or the
+computer's own sound output. It runs on a Raspberry Pi next to the speaker,
+or on a Mac. Written in Rust.
 
 ```text
- [A][A][A][A][⏻]     A = album cover, press to play (press again to pause)
- [A][A][A][A][>]     > = more albums (only if they don't fit on one page)
+ [A][A][A][A][⏻]     A = an album, book or story: press to play, again to pause
+ [A][A][A][A][S]     S = the next shelf; ⏻ = power: stops all, dims the deck
  [⏮][⏯][⏭][-][+]    - / + = volume, with a level bar, capped by max_volume
-                     ⏻ = power: stops everything and dims the deck
 ```
 
-The power key stops what plays (a book keeps its place), puts a Denon or
-Marantz receiver in standby, and dims the deck. The next press only lights
-the deck again. It sits top right on 15-key decks and in the control row on
-the XL; the Mini, Neo and Plus have no room for it.
+## Features
 
-Music, audiobooks, stories and podcasts can come from several places, each
-one a `[[source]]` in `config.toml`. Podcast sources download the newest
-episodes of their feeds in the background. Each source is a shelf: the last
-item key shows the next shelf and switches to it. Audiobooks and podcast
-episodes play on from where they stopped, and their keys show a progress
-bar. The deck also remembers the shelf and page it showed, in the `state`
-folder.
+- **Many kinds of things to play**, each from its own `[[source]]` in
+  `config.toml`: music albums, audiobooks, stories and sound effects from any
+  folder or drive, podcasts (it downloads the newest episodes), internet
+  radio stations, and Spotify playlists (Premium, played on a Spotify
+  Connect device).
+- **Shelves:** each source is a shelf; one key moves to the next shelf, and
+  a shelf with more items than keys pages. Decks from the 6-key Mini to the
+  32-key XL work; the layout adapts.
+- **Pictures, no text:** album covers, a `key.png` of your own, or a big
+  glyph of the kind (note, book, star, radio waves, microphone) on a colour.
+  Small badges tell the kinds apart, a bar shows how far a book got, and a
+  dot marks podcast episodes not heard yet.
+- **Books resume:** audiobooks and podcast episodes play on from where they
+  stopped, also after a restart.
+- **Made for children:** a volume cap, a power key that stops everything
+  and dims the deck (the next press only lights it again), and a deck that
+  keeps working when it is unplugged and plugged back in.
+- **Test without hardware:** a web page that acts as a Stream Deck, and a
+  preview picture of the layout.
+- **Runs on a Raspberry Pi** in Docker, with the image built on your
+  computer.
+
+## What you need
+
+- An **Elgato Stream Deck**: MK.2, Scissor Keys, XL, Mini, Neo, Plus or a
+  module. The web simulator stands in for it while you try things out.
+- A computer next to the speaker: a **Raspberry Pi 3** or newer (64-bit
+  Raspberry Pi OS) or a **Mac**.
+- A speaker: a **Chromecast built-in** device (tested on a Lenovo smart
+  display; built for a JBL Authentics 300), a **Denon or Marantz HEOS**
+  receiver (tested on a Denon AVR-X1600H), or the computer's own sound
+  output (the Pi's headphone jack, HDMI or a USB sound card).
+
+## How it works
 
 The program serves your music folders over HTTP and tells the speaker which
 file to play. The speaker downloads the files itself, so playback keeps going
 even if the computer is busy. A Chromecast gets the whole album as a queue. A
 HEOS device plays one file at a time, so the program starts the next track
-when one ends (with a gap of about a second).
+when one ends (with a gap of about a second). With `speaker_type = "local"`
+the program decodes and plays the files itself, on the sound output that
+`audio_device` names.
 
-With `speaker_type = "local"` the program decodes and plays the files
-itself, on the sound output that `audio_device` names.
-
-Set `speaker_type = "heos"` for a HEOS device or `"local"` for the computer's
-own sound output in `config.toml`; the default is `"cast"`.
+`config.example.toml` explains every setting. The main ones:
+`speaker_type` (`"cast"`, `"heos"` or `"local"`), `speaker_host` (the
+speaker's IP address), `max_volume`, and one `[[source]]` table per folder,
+podcast, radio or Spotify shelf.
 
 ## Develop on macOS
 
@@ -195,3 +223,22 @@ cache, [`docs/radio.md`](docs/radio.md) internet radio stations, and
 | `spotify/` | Spotify sign-in, saved login, Web API client and playlist covers |
 | `radio.rs` | Turns a station URL (or its `.pls` / `.m3u`) into the stream |
 | `net.rs` | HTTPS agents for feeds, radio and Spotify |
+
+## Contributing
+
+Issues and pull requests are welcome. Before a pull request, run `just ci`
+(format check, clippy with the pedantic lints, tests and API docs) and
+keep the Markdown lines within 80 columns (`rumdl check`). Commit messages
+follow [Conventional Commits](https://www.conventionalcommits.org), from
+which `CHANGELOG.md` is generated. `CLAUDE.md` describes the architecture in
+more depth.
+
+Code that talks to real devices (Chromecast, HEOS, the USB deck) is tested
+against fakes; please say in a pull request what you checked on real
+hardware.
+
+## License
+
+[MIT](LICENSE). The crates kids-deck builds on keep their own licenses;
+most are MIT or Apache-2.0, and a few, such as symphonia and
+elgato-streamdeck, are MPL-2.0.

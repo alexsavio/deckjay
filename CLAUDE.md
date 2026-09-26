@@ -257,5 +257,10 @@ work together with `#[serde(flatten)]`, so source tables list their keys.
   the player must deliver the next event after every command, even when it
   repeats the last one (`player::run` resets `Emitter::last`).
 - Keep `Cargo.lock` in git: the Docker build uses `--locked`.
+- `CHANGELOG.md` is generated from the Conventional Commit messages by
+  git-cliff (`cliff.toml`, the `changelog` workflow); do not edit it by hand.
+  CI (`.github/workflows/ci.yml`) runs fmt, clippy, rustdoc, rumdl, the
+  tests on Linux and macOS, `cargo audit` and a Docker build; `zizmor`
+  checks the workflows.
 - On macOS, quit the Elgato Stream Deck app before running: it holds the HID
   device.

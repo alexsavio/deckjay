@@ -3,7 +3,12 @@ name = "kids-deck"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "A kids' music player: album covers on a Stream Deck, music on a Chromecast or HEOS network speaker"
+description = "A music player for small children: pictures on an Elgato Stream Deck, music on a Chromecast, a HEOS receiver or the computer's own sound output"
+license = "MIT"
+repository = "https://github.com/alexsavio/kids-music-deck"
+readme = "README.md"
+keywords = ["stream-deck", "music-player", "kids", "chromecast", "raspberry-pi"]
+categories = ["multimedia::audio"]
 publish = false
 
 [dependencies]
