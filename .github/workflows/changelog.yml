@@ -62,5 +62,9 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git add CHANGELOG.md
           git commit -m "chore: update changelog [skip ci]"
-          git pull --rebase
-          git push
+          # A push can land between the pull and ours; pull again and retry.
+          for attempt in 1 2 3; do
+            git pull --rebase && git push && exit 0
+            sleep $((attempt * 5))
+          done
+          exit 1

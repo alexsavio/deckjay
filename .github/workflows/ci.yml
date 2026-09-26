@@ -22,7 +22,7 @@ jobs:
     name: Check & Lint
     runs-on: ubuntu-latest
     permissions:
-      contents: read  # checkout of a private repo
+      contents: read  # actions/checkout
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
@@ -64,7 +64,7 @@ jobs:
     name: Test
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: read  # checkout of a private repo
+      contents: read  # actions/checkout
     needs: check
     strategy:
       matrix:
@@ -90,7 +90,7 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     permissions:
-      contents: read  # checkout of a private repo
+      contents: read  # actions/checkout
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
@@ -108,7 +108,7 @@ jobs:
     name: Docker image
     runs-on: ubuntu-latest
     permissions:
-      contents: read  # checkout of a private repo
+      contents: read  # actions/checkout
     needs: check
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
