@@ -163,7 +163,7 @@ pub fn load_cached(settings: &Settings) -> Snapshot {
         .filter_map(
             |feed| match cache::feed_dir(&settings.cache_dir, &feed.slug) {
                 Ok(dir) => {
-                    let manifest = cache::load(&dir);
+                    let manifest = cache::load(&dir).unwrap_or_default();
                     let episodes = cache::present(&dir, &manifest);
                     Some(feed_state(&dir, feed, &manifest, &episodes))
                 }

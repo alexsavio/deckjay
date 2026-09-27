@@ -6,6 +6,7 @@
 //! | `/moved/{*path}`  | 302 to `/{path}`                                        |
 //! | `/files/...`      | `ServeDir` over the folder given to [`FakeServer::start`], answers `Range` |
 //! | `/plain/{name}`   | the same file, always 200 with the whole body           |
+//! | `/gzip/{name}`    | the same file as is, with `Content-Encoding: gzip`      |
 //! | `/status/{code}`  | that status, empty body                                 |
 
 use std::fmt::Write as _;
@@ -19,7 +20,7 @@ use std::thread;
 use axum::Router;
 use axum::extract::{Path as UrlPath, State};
 use axum::http::StatusCode;
-use axum::http::header::{CONTENT_TYPE, LOCATION};
+use axum::http::header::{CONTENT_ENCODING, CONTENT_TYPE, LOCATION};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use image::{ImageFormat, Rgb, RgbImage};
@@ -48,6 +49,7 @@ impl FakeServer {
             .route("/feed.xml", get(feed))
             .route("/moved/{*path}", get(moved))
             .route("/plain/{name}", get(plain))
+            .route("/gzip/{name}", get(gzip))
             .route("/status/{code}", get(status))
             .nest_service("/files", ServeDir::new(files))
             .with_state(shared.clone());
@@ -89,6 +91,13 @@ async fn feed(State(shared): State<Shared>) -> Response {
 async fn plain(State(shared): State<Shared>, UrlPath(name): UrlPath<String>) -> Response {
     match std::fs::read(shared.files.join(name)) {
         Ok(body) => body.into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn gzip(State(shared): State<Shared>, UrlPath(name): UrlPath<String>) -> Response {
+    match std::fs::read(shared.files.join(name)) {
+        Ok(body) => ([(CONTENT_ENCODING, "gzip")], body).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }

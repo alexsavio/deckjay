@@ -73,7 +73,11 @@ servers:
 
 - **main** (`main.rs` → `ui/`, `deck/`): `DeckSource::open` retries every
   2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
-  `PlayerEvent`s, redraws, and returns `Err` when the deck goes away.
+  `PlayerEvent`s, redraws, and returns `Err` when the deck goes away. When
+  the player thread ended (its events channel hung up, which only a panic
+  does), `Ui::run` blanks the deck and returns `ui::PlayerGone`, and `main`
+  exits with it, so systemd restarts the service instead of leaving a deck
+  that draws but plays nothing.
   SIGINT, SIGTERM and SIGHUP set a stop flag (`signal-hook`; a second one
   ends the program at once): `Ui::run` turns the deck dark (`Deck::blank`)
   and returns `Ok`, and `main` saves the state and exits. `--blank` does the
@@ -92,11 +96,15 @@ servers:
   `Play` carries the volume, and `Seek`s in a row add up, a sum of 0
   dropped), calls the
   private `Speaker` trait, and polls while `poll_interval()` is `Some`. A
-  failed command emits `Stopped` and drops
-  the rest of its batch; 3 failed polls in a row end the album the same way.
-  Both then emit `PlayerEvent::Trouble(text)` with the reason: the UI shows
-  it where the deck can (the simulator page, through `Deck::notice`) until
-  something plays again, and marks the item pressed last for 4 s.
+  failed `Play`, `TogglePause` or `Off` (the commands the UI guesses the
+  result of) emits `Stopped` and drops the rest of its batch; a failed
+  volume, skip or seek is only logged and the album goes on; polls failing
+  for 20 s in a row (`POLL_FAILURE_GRACE`; local audio gives up after
+  300 ms, its failures being final) end the album the same way. A
+  `Stopped` from a failure is followed by `PlayerEvent::Trouble(text)` with
+  the reason: the UI shows it where the deck can (the simulator page,
+  through `Deck::notice`) until something plays again, and marks the item
+  pressed last for 4 s.
   `Emitter` drops repeats of the last event, except for the first event after
   each command batch. Items played with `progress: true` also get
   `PlayerEvent::Progress` (track, position, track length) and `Finished`;
@@ -104,9 +112,12 @@ servers:
   track change, pause, stop or the next item), apart from that dedup. The UI
   saves them in `state.json`. The network backends share `connect` (every resolved
   address, 3 s timeout); all three share `clamp_volume`.
-  - `cast.rs`: connectionless; every command opens a fresh `rust_cast`
-    connection (after a TCP connect-timeout probe, because `rust_cast` has no
-    timeout) and drops it. Polls every 4 s while an album is active.
+  - `cast.rs`: connectionless; every command opens a fresh connection and
+    drops it. kids-deck opens the socket itself (3 s connect, 15 s read and
+    write timeouts, TLS without a certificate check) and hands it to the
+    `rust_cast` channels, because `rust_cast` sets no timeout. Tests drive
+    it against `FakeCast` over plain TCP. Polls every 4 s while an album is
+    active.
   - `heos.rs`: one persistent HEOS CLI connection (TCP 1255, JSON lines;
     the protocol is in `heos/cli.rs`), reconnects after errors.
     `play_stream` plays one URL and HEOS has no queue for URLs, so it polls
@@ -147,8 +158,12 @@ Playback flow:
    the item stopped when `Kind::resumes` (audiobooks, podcasts).
    `Ui::tracks` turns tracks into `TrackInfo` URLs with `library::url_for`
    (per-segment percent-encoding) on `base_url`:
-   `http://<host>:<http_port>/music`, where `host` is `advertise_host` or
-   `main::local_ip_towards(speaker)`.
+   `http://<host>:<http_port>/music` (`net::BaseUrl`), where `host` is
+   `advertise_host` or this machine's address on the route to the speaker,
+   found again at each press (a new DHCP address reaches the next album; the
+   speaker's name is resolved once). Without a route at start the program
+   warns and starts anyway; while there is none, a press uses the last URL
+   found and the play fails at the speaker.
 3. `PlayerCmd::Play` reaches the router: `Content::Spotify` goes to the
    Spotify player, the rest to the speaker backend. Cast launches the
    Default Media Receiver (`CC1AD845`) and loads the whole album as a

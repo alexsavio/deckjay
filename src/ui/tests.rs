@@ -2,6 +2,7 @@ use std::sync::mpsc;
 
 use super::*;
 use crate::library::{Item, ItemKey, Kind, Media, Track};
+use crate::net::BaseUrl;
 
 fn items(kind: Kind, names: std::ops::Range<usize>) -> Vec<Item> {
     names
@@ -49,7 +50,7 @@ fn ui_with_store(
     let ui = Ui::new(
         &cfg,
         library,
-        "http://host/music".into(),
+        BaseUrl::fixed("http://host/music"),
         cmd_tx,
         event_rx,
         store,
@@ -802,6 +803,39 @@ fn the_power_key_stops_everything_and_the_next_press_only_wakes() {
     let mut keys = vec![0];
     ui.wake(&mut keys);
     assert_eq!(keys, [0]);
+}
+
+#[test]
+fn events_are_handled_until_the_player_hangs_up() {
+    let (mut ui, _cmds, events) = test_ui(3, "");
+    events.send(PlayerEvent::Playing(ItemId(1))).unwrap();
+    drop(events);
+    assert!(ui.handle_events());
+    assert_eq!(ui.current, Some(ItemId(1)), "the last events still count");
+    assert!(ui.player_gone());
+}
+
+#[test]
+fn a_player_thread_that_ended_turns_the_deck_dark_and_ends_run() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let info = crate::simulator::Model::Mk2.info();
+    std::thread::spawn(move || crate::simulator::serve(listener, info));
+    let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
+    let (mut ui, _cmds, events) = test_ui(3, "");
+    drop(events);
+
+    let err = ui.run(&mut deck, 60, &AtomicBool::new(false)).unwrap_err();
+    assert!(err.is::<PlayerGone>(), "{err:#}");
+
+    let body = ureq::get(format!("{url}/api/state"))
+        .call()
+        .unwrap()
+        .body_mut()
+        .read_to_string()
+        .unwrap();
+    let state: crate::simulator::State = serde_json::from_str(&body).unwrap();
+    assert_eq!(state.brightness, 0);
 }
 
 #[test]

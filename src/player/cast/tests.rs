@@ -1,6 +1,13 @@
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::Instant;
+
 use rust_cast::channels::media::{
     ExtendedPlayerState, ExtendedStatus, IdleReason, Media, PlayerState, StatusEntry, StreamType,
 };
+use rust_cast::message_manager::{CastMessage, CastMessagePayload, MessageManager};
+use serde_json::{Value, json};
 
 use super::*;
 
@@ -434,4 +441,169 @@ fn no_seek_when_idle_or_not_ours() {
     let mut foreign = entry(PlayerState::Playing, Some("http://example.com/radio.mp3"));
     foreign.current_time = Some(10.0);
     assert_eq!(seek_target(&foreign, &tracks, 10), None);
+}
+
+const RECEIVER_NAMESPACE: &str = "urn:x-cast:com.google.cast.receiver";
+const MEDIA_NAMESPACE: &str = "urn:x-cast:com.google.cast.media";
+
+/// A fake speaker on 127.0.0.1, over plain TCP, that speaks the Cast
+/// protocol through `rust_cast`'s own framing. It answers every receiver
+/// request with a `RECEIVER_STATUS` running `apps`, every media request with
+/// a `MEDIA_STATUS` of `media`, and nothing at all when `mute`. `requests`
+/// keeps every payload it read.
+struct FakeCast {
+    port: u16,
+    requests: Arc<Mutex<Vec<Value>>>,
+}
+
+impl FakeCast {
+    fn start(mute: bool, apps: Value, media: Value) -> FakeCast {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&requests);
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let manager = MessageManager::new(stream);
+                while let Ok(message) = manager.receive() {
+                    let CastMessagePayload::String(payload) = &message.payload else {
+                        continue;
+                    };
+                    let request: Value = serde_json::from_str(payload).unwrap();
+                    log.lock().unwrap().push(request.clone());
+                    // A CONNECT has no request id and gets no answer.
+                    let (Some(id), false) = (request.get("requestId"), mute) else {
+                        continue;
+                    };
+                    let reply = match message.namespace.as_str() {
+                        RECEIVER_NAMESPACE => json!({
+                            "requestId": id,
+                            "type": "RECEIVER_STATUS",
+                            "status": {
+                                "applications": apps,
+                                "volume": {"level": 0.3, "muted": false},
+                            },
+                        }),
+                        MEDIA_NAMESPACE => json!({
+                            "requestId": id,
+                            "type": "MEDIA_STATUS",
+                            "status": media,
+                        }),
+                        _ => continue,
+                    };
+                    let answer = CastMessage {
+                        namespace: message.namespace,
+                        source: message.destination,
+                        destination: message.source,
+                        payload: CastMessagePayload::String(reply.to_string()),
+                    };
+                    if manager.send(answer).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        FakeCast { port, requests }
+    }
+
+    fn player(&self) -> CastPlayer {
+        CastPlayer::plain("127.0.0.1".into(), self.port, Duration::from_millis(200))
+    }
+
+    fn request_types(&self) -> Vec<String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r["type"].as_str().unwrap().to_string())
+            .collect()
+    }
+}
+
+fn media_receiver() -> Value {
+    json!([{
+        "appId": DEFAULT_MEDIA_RECEIVER,
+        "sessionId": "session-1",
+        "transportId": "transport-1",
+        "namespaces": [{"name": MEDIA_NAMESPACE}],
+        "displayName": "Default Media Receiver",
+        "statusText": "Ready",
+    }])
+}
+
+#[test]
+fn a_speaker_that_accepts_and_never_answers_fails_within_the_timeout() {
+    let fake = FakeCast::start(true, json!([]), json!([]));
+    let mut player = fake.player();
+    let (tx, _events) = mpsc::channel();
+    let started = Instant::now();
+    let err = player
+        .handle(PlayerCmd::SetVolume(0.5), &mut Emitter::new(tx))
+        .unwrap_err();
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(200) && took < Duration::from_secs(3),
+        "failed after {took:?}: {err:#}"
+    );
+    assert_eq!(fake.request_types(), ["CONNECT", "GET_STATUS"]);
+}
+
+#[test]
+fn a_volume_change_travels_over_the_wire() {
+    let fake = FakeCast::start(false, json!([]), json!([]));
+    let mut player = fake.player();
+    let (tx, _events) = mpsc::channel();
+    player
+        .handle(PlayerCmd::SetVolume(0.5), &mut Emitter::new(tx))
+        .unwrap();
+    assert_eq!(
+        fake.request_types(),
+        ["CONNECT", "GET_STATUS", "SET_VOLUME"]
+    );
+    let level = fake.requests.lock().unwrap()[2]["volume"]["level"]
+        .as_f64()
+        .unwrap();
+    assert!((level - 0.5).abs() < 1e-6, "{level}");
+}
+
+#[test]
+fn a_poll_reads_our_track_playing_from_the_media_app() {
+    let media = json!([{
+        "mediaSessionId": 1,
+        "playbackRate": 1.0,
+        "playerState": "PLAYING",
+        "currentTime": 12.5,
+        "supportedMediaCommands": 15,
+        "media": {
+            "contentId": url(1),
+            "streamType": "BUFFERED",
+            "contentType": "audio/mpeg",
+            "duration": 300.0,
+        },
+    }]);
+    let fake = FakeCast::start(false, media_receiver(), media);
+    let mut player = fake.player();
+    player.item = ITEM;
+    player.tracks = tracks();
+    player.active = true;
+    let (tx, events) = mpsc::channel();
+    player.poll(&mut Emitter::new(tx)).unwrap();
+    assert_eq!(
+        events.try_iter().collect::<Vec<_>>(),
+        [PlayerEvent::Playing(ITEM)]
+    );
+    assert_eq!(
+        player.last_place,
+        Some(Place {
+            track: 1,
+            position: Duration::from_millis(12_500),
+            duration: Some(Duration::from_secs(300)),
+        })
+    );
+    assert_eq!(
+        fake.request_types(),
+        ["CONNECT", "GET_STATUS", "CONNECT", "GET_STATUS"],
+        "the platform receiver first, then the media app"
+    );
 }

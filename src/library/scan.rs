@@ -15,7 +15,9 @@
 //!   03 Lullaby.jpg          <- the cover of 03 Lullaby.mp3
 //! ```
 //!
-//! Items and tracks are sorted by name, so number prefixes control the order.
+//! Items and tracks sort by name in natural order: numbers by value (`2`
+//! before `10`), letters without regard to case. A folder's own files play
+//! before those of its sub folders.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -73,6 +75,8 @@ fn folder_item(source: &Source, dir: &Path) -> Option<Item> {
         .inspect_err(|err| tracing::warn!("skipping {}: {err}", dir.display()))
         .ok()?;
     let top_files: Vec<PathBuf> = entries.iter().filter(|p| p.is_file()).cloned().collect();
+    // Built in play order from sorted entries: sorting whole paths instead
+    // would put `Prolog.mp3` after `CD1/01.mp3`.
     let mut files = top_files.clone();
     for sub in entries.iter().filter(|p| p.is_dir()) {
         match usable_entries(sub) {
@@ -80,8 +84,6 @@ fn folder_item(source: &Source, dir: &Path) -> Option<Item> {
             Err(err) => tracing::warn!("skipping {}: {err}", sub.display()),
         }
     }
-    // Whole paths sort a folder's own files first, then CD1/ before CD2/.
-    files.sort();
 
     let tracks = tracks(source, &files);
     if tracks.is_empty() {
@@ -158,14 +160,52 @@ fn served_path(source: &Source, path: &Path) -> Option<PathBuf> {
     Some(Path::new(&source.name).join(path.strip_prefix(&source.path).ok()?))
 }
 
-/// Entries that are not hidden and have UTF-8 names, sorted by name.
+/// Entries that are not hidden and have UTF-8 names, in natural name order.
 fn usable_entries(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| !is_hidden(p) && has_utf8_name(p))
         .collect();
-    paths.sort();
+    paths.sort_by_cached_key(|p| natural_key(&file_name(p)));
     Ok(paths)
+}
+
+/// `Number` comes first, so a run of digits sorts before any text run at
+/// the same place.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Run {
+    /// Digits without leading zeros. The length compares first, so runs of
+    /// any length compare by value without parsing into an integer.
+    Number { len: usize, digits: String },
+    /// Lowercased.
+    Text(String),
+}
+
+/// Runs of digits compare by value (`Ch 2` before `Ch 10`), other runs
+/// without regard to case (`apple` before `Zebra`). The name itself comes
+/// last, so names that differ only in case or leading zeros still sort one
+/// fixed way.
+fn natural_key(name: &str) -> (Vec<Run>, String) {
+    let mut runs = Vec::new();
+    let mut rest = name;
+    while let Some(first) = rest.chars().next() {
+        let is_number = first.is_ascii_digit();
+        let end = rest
+            .find(|c: char| c.is_ascii_digit() != is_number)
+            .unwrap_or(rest.len());
+        let (run, tail) = rest.split_at(end);
+        runs.push(if is_number {
+            let value = run.trim_start_matches('0');
+            Run::Number {
+                len: value.len(),
+                digits: value.to_owned(),
+            }
+        } else {
+            Run::Text(run.to_lowercase())
+        });
+        rest = tail;
+    }
+    (runs, name.to_owned())
 }
 
 fn file_name(p: &Path) -> String {
@@ -380,6 +420,81 @@ mod tests {
         assert_eq!(content_type(Path::new("a.txt")), None);
     }
 
+    fn natural_order<'a>(names: &[&'a str]) -> Vec<&'a str> {
+        let mut names = names.to_vec();
+        names.sort_by_key(|n| natural_key(n));
+        names
+    }
+
+    #[test]
+    fn natural_key_splits_a_name_into_text_and_number_runs() {
+        let number = |digits: &str| Run::Number {
+            len: digits.len(),
+            digits: digits.to_owned(),
+        };
+        assert_eq!(
+            natural_key("Ch 007.MP3").0,
+            [
+                Run::Text("ch ".to_owned()),
+                number("7"),
+                Run::Text(".mp".to_owned()),
+                number("3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn natural_key_orders_numbers_by_value() {
+        assert_eq!(
+            natural_order(&["Ch 10", "Ch 2", "Ch 1", "Ch", "Ch 1b"]),
+            ["Ch", "Ch 1", "Ch 1b", "Ch 2", "Ch 10"]
+        );
+    }
+
+    #[test]
+    fn natural_key_ignores_case_and_breaks_ties_on_the_name() {
+        assert_eq!(
+            natural_order(&["b", "apple", "B", "Apple"]),
+            ["Apple", "apple", "B", "b"]
+        );
+    }
+
+    #[test]
+    fn natural_key_ignores_leading_zeros_and_breaks_ties_on_the_name() {
+        assert_eq!(natural_key("01").0, natural_key("1").0);
+        assert_eq!(natural_key("000").0, natural_key("0").0);
+        assert_eq!(
+            natural_order(&["10", "2", "1", "002", "01", "0", "000"]),
+            ["0", "000", "01", "1", "002", "2", "10"]
+        );
+    }
+
+    #[test]
+    fn natural_key_compares_digit_runs_longer_than_any_integer() {
+        let nines = "9".repeat(60);
+        let power = format!("1{}", "0".repeat(60));
+        let power_plus_one = format!("1{}1", "0".repeat(59));
+        let (nines, power, power_plus_one) = (&*nines, &*power, &*power_plus_one);
+        assert_eq!(
+            natural_order(&[power_plus_one, power, nines]),
+            [nines, power, power_plus_one]
+        );
+    }
+
+    #[test]
+    fn natural_key_folds_case_beyond_ascii() {
+        assert_eq!(
+            natural_order(&["äpfel 10", "Zebra", "Äpfel 9"]),
+            ["Zebra", "Äpfel 9", "äpfel 10"],
+            "letters beyond ASCII sort by code point, after z"
+        );
+        assert_eq!(
+            natural_key("Teil ٢").0,
+            [Run::Text("teil ٢".to_owned())],
+            "only ASCII digits are numbers"
+        );
+    }
+
     #[test]
     fn tracks_one_folder_down_belong_to_the_folder() {
         let dir = tempfile::tempdir().unwrap();
@@ -407,6 +522,66 @@ mod tests {
             items[0].cover_rel.as_deref(),
             Some(Path::new("music/Book/CD1/cover.png"))
         );
+    }
+
+    #[test]
+    fn numbered_tracks_play_in_number_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Book/Ch 10.mp3"));
+        touch(&root.join("Book/Ch 2.mp3"));
+        touch(&root.join("Book/Ch 1.mp3"));
+
+        let items = music(root);
+
+        let titles: Vec<&str> = items[0].tracks().iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, ["Ch 1", "Ch 2", "Ch 10"]);
+    }
+
+    #[test]
+    fn a_folders_own_files_play_before_its_sub_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Book/CD2/01.mp3"));
+        touch(&root.join("Book/CD1/01.mp3"));
+        touch(&root.join("Book/Prolog.mp3"));
+
+        let items = music(root);
+
+        assert_eq!(
+            rel_paths(&items[0]),
+            [
+                Path::new("music/Book/Prolog.mp3"),
+                Path::new("music/Book/CD1/01.mp3"),
+                Path::new("music/Book/CD2/01.mp3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn sub_folders_play_in_number_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Box/CD10/01.mp3"));
+        touch(&root.join("Box/CD2/01.mp3"));
+
+        assert_eq!(
+            rel_paths(&music(root)[0]),
+            [
+                Path::new("music/Box/CD2/01.mp3"),
+                Path::new("music/Box/CD10/01.mp3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn items_sort_without_regard_to_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Zebra.mp3"));
+        touch(&root.join("apple.mp3"));
+
+        assert_eq!(names(&music(root)), ["apple", "Zebra"]);
     }
 
     #[test]

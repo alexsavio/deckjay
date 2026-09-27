@@ -22,20 +22,40 @@ fn closing(body: &'static [u8], content_type: &'static str) -> (String, Arc<Atom
 }
 
 /// Each connection gets `body`, then nothing more for a minute.
-fn stalling(body: &'static [u8]) -> String {
+fn stalling(body: &'static [u8]) -> (String, Arc<AtomicUsize>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&hits);
     let base = web(move |_, stream: &mut TcpStream| {
+        counted.fetch_add(1, Ordering::SeqCst);
         head(stream, 200, "audio/mpeg");
         let _ = stream.write_all(body);
         let _ = stream.flush();
         thread::sleep(Duration::from_secs(60));
     });
-    format!("{base}/live")
+    (format!("{base}/live"), hits)
+}
+
+/// The first connection gets `abc` and closes; every later one gets a 404.
+fn gone_after_one_connection() -> (String, Arc<AtomicUsize>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&hits);
+    let base = web(move |_, stream| {
+        if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+            head(stream, 200, "audio/mpeg");
+            let _ = stream.write_all(b"abc");
+        } else {
+            head(stream, 404, "text/html");
+        }
+    });
+    (format!("{base}/live"), hits)
 }
 
 fn limits(idle_ms: u64, reconnects: u32) -> Limits {
     Limits {
         idle: Duration::from_millis(idle_ms),
+        first_byte: Duration::from_millis(idle_ms),
         reconnects,
+        backoff: Duration::from_millis(10),
     }
 }
 
@@ -52,12 +72,70 @@ fn a_stream_that_closes_is_fetched_again_three_times() {
 
 #[test]
 fn a_stream_that_sends_nothing_is_fetched_again() {
-    let url = stalling(b"abc");
+    let (url, hits) = stalling(b"abc");
     let mut stream = NetRead::open(&url, limits(100, 1)).unwrap();
     let mut heard = Vec::new();
     let err = stream.read_to_end(&mut heard).unwrap_err();
     assert_eq!(heard, b"abcabc");
     assert!(err.to_string().contains("sent nothing"), "{err}");
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_station_that_never_sends_a_byte_fails_soon_without_new_connections() {
+    let limits = Limits {
+        first_byte: Duration::from_millis(100),
+        ..limits(5000, 3)
+    };
+    for (url, hits) in [stalling(b""), closing(b"", "audio/mpeg")] {
+        let started = Instant::now();
+        let err = NetRead::open(&url, limits).err().unwrap();
+        let waited = started.elapsed();
+        assert!(waited < Duration::from_secs(1), "{waited:?}");
+        assert!(format!("{err:#}").contains("sent nothing"), "{err:#}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "{err:#}");
+    }
+}
+
+#[test]
+fn new_connections_that_fail_wait_longer_each_time() {
+    let (url, hits) = gone_after_one_connection();
+    let limits = Limits {
+        backoff: Duration::from_millis(50),
+        ..limits(5000, 3)
+    };
+    let mut stream = NetRead::open(&url, limits).unwrap();
+    let started = Instant::now();
+    let mut heard = Vec::new();
+    let err = stream.read_to_end(&mut heard).unwrap_err();
+    let waited = started.elapsed();
+    assert_eq!(heard, b"abc");
+    assert!(err.to_string().contains("3 new connections"), "{err}");
+    assert_eq!(hits.load(Ordering::SeqCst), 4);
+    // The first reconnect follows a connection that sent bytes, so it does
+    // not wait; the two after it wait 2 and 4 backoffs.
+    assert!(waited >= Duration::from_millis(300), "{waited:?}");
+}
+
+#[test]
+fn cancel_ends_the_wait_before_a_new_connection() {
+    let (url, _) = gone_after_one_connection();
+    let limits = Limits {
+        backoff: Duration::from_secs(10),
+        ..limits(5000, 3)
+    };
+    let mut stream = NetRead::open(&url, limits).unwrap();
+    let cancel = stream.cancel_handle();
+    let reader = thread::spawn(move || {
+        let mut heard = Vec::new();
+        stream.read_to_end(&mut heard).unwrap();
+        heard
+    });
+    thread::sleep(Duration::from_millis(200));
+    let started = Instant::now();
+    cancel.cancel();
+    assert_eq!(reader.join().unwrap(), b"abc");
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]
@@ -71,8 +149,9 @@ fn a_stream_that_is_not_there_fails_at_once() {
 
 #[test]
 fn cancel_ends_a_read_that_waits() {
-    let url = stalling(b"");
+    let (url, _) = stalling(b"abc");
     let mut stream = NetRead::open(&url, Limits::default()).unwrap();
+    stream.read_exact(&mut [0; 3]).unwrap();
     let cancel = stream.cancel_handle();
     let reader = thread::spawn(move || {
         let started = Instant::now();
@@ -211,6 +290,23 @@ fn he_aac_and_hls_stations_do_not_open_the_sound_card() {
     }
     assert_eq!(rig.opened.get(), 0);
     assert_eq!(rig.events(), []);
+}
+
+#[test]
+fn a_silent_station_fails_soon_and_does_not_open_the_sound_card() {
+    let mut rig = Rig::new();
+    rig.player.limits = Limits {
+        first_byte: Duration::from_millis(100),
+        ..Limits::default()
+    };
+    let (url, hits) = stalling(b"");
+    let started = Instant::now();
+    let err = play_station(&mut rig, url).unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(format!("{err:#}").contains("sent nothing"), "{err:#}");
+    assert_eq!(rig.opened.get(), 0);
+    // One for resolving the station, one for probing it.
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
 }
 
 #[test]

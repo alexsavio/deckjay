@@ -2,6 +2,8 @@
 //! Station lists often give a `.pls` or `.m3u` playlist that names the
 //! stream; speakers want the stream itself and its content type.
 
+use std::time::Duration;
+
 use anyhow::{Context, Result, bail};
 use ureq::Agent;
 
@@ -9,6 +11,9 @@ use ureq::Agent;
 const PLAYLIST_LIMIT: u64 = 64 * 1024;
 /// A playlist may name another playlist, but not endlessly.
 const MAX_PLAYLISTS: usize = 3;
+/// The player thread waits for a playlist, so a server that sends the head
+/// and then stalls must not hold it for good.
+const PLAYLIST_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 /// What Cast wants for HLS.
 pub const HLS: &str = "application/x-mpegURL";
 
@@ -28,12 +33,20 @@ impl Stream {
 
 /// Follows `url` through `.pls` and `.m3u` playlists to the stream. `agent`
 /// should have no body deadline (`net::stream_agent`): the reply of a stream
-/// is dropped after its headers.
+/// is dropped after its headers, and each playlist's body gets
+/// `PLAYLIST_BODY_TIMEOUT`.
 pub fn resolve(agent: &Agent, url: &str) -> Result<Stream> {
+    resolve_within(agent, url, PLAYLIST_BODY_TIMEOUT)
+}
+
+fn resolve_within(agent: &Agent, url: &str, body_timeout: Duration) -> Result<Stream> {
     let mut url = url.to_string();
     for _ in 0..=MAX_PLAYLISTS {
         let mut reply = agent
             .get(&url)
+            .config()
+            .timeout_recv_body(Some(body_timeout))
+            .build()
             .call()
             .with_context(|| format!("cannot reach {}", without_query(&url)))?;
         let status = reply.status();
