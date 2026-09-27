@@ -12,7 +12,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 
-use super::{Brightness, Info};
+use super::{Brightness, Info, Notice};
 
 const PAGE: &str = include_str!("page.html");
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -32,6 +32,7 @@ pub(super) fn router(info: Info) -> Router {
         .route("/api/reset", post(reset))
         .route("/api/keys/{n}", get(key_image).put(set_key_image))
         .route("/api/brightness", put(set_brightness))
+        .route("/api/notice", put(set_notice))
         .route("/api/presses", get(presses))
         .route("/api/press/{n}", post(press))
         .route("/api/state", get(state))
@@ -51,6 +52,7 @@ struct Deck {
     last_version: u64,
     presses: Vec<usize>,
     brightness: u8,
+    notice: Option<String>,
     /// `/api/presses` calls still waiting.
     polling: usize,
     /// When the last `/api/presses` call ended.
@@ -68,6 +70,7 @@ impl Sim {
                 last_version: 0,
                 presses: Vec::new(),
                 brightness: 100,
+                notice: None,
                 polling: 0,
                 last_poll: None,
             }),
@@ -152,6 +155,7 @@ async fn reset(State(sim): State<Arc<Sim>>) -> StatusCode {
     deck.versions.fill(0);
     deck.presses.clear();
     deck.brightness = 100;
+    deck.notice = None;
     StatusCode::NO_CONTENT
 }
 
@@ -193,6 +197,14 @@ async fn set_brightness(
     StatusCode::NO_CONTENT
 }
 
+async fn set_notice(
+    State(sim): State<Arc<Sim>>,
+    Json(Notice { text }): Json<Notice>,
+) -> StatusCode {
+    sim.deck().notice = text;
+    StatusCode::NO_CONTENT
+}
+
 #[derive(Deserialize)]
 struct PressesQuery {
     wait_ms: Option<u64>,
@@ -226,6 +238,7 @@ async fn state(State(sim): State<Arc<Sim>>) -> Json<super::State> {
         brightness: deck.brightness,
         connected: deck.connected(Instant::now()),
         versions: deck.versions.clone(),
+        notice: deck.notice.clone(),
     })
 }
 

@@ -142,13 +142,16 @@ pub enum PlayerCmd {
     Off,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerEvent {
     /// The item with this id is playing.
     Playing(ItemId),
     Paused(ItemId),
     /// Nothing playing any more (album finished, stopped elsewhere, or failed).
     Stopped,
+    /// Why a command failed or the speaker was given up, for the deck to
+    /// show; it follows the `Stopped`.
+    Trouble(String),
     /// How far an item that asked for progress got: `track` indexes its
     /// tracks, `duration` is that track's length when known.
     Progress {
@@ -275,6 +278,7 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
                         warn!("speaker command failed: {err:#}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
+                        events.trouble(format!("{err:#}"));
                         // The rest were guesses from a state the UI no longer
                         // shows, and each would wait out its own timeout.
                         break;
@@ -291,6 +295,7 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
                         warn!("the speaker stopped answering: {err:#}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
+                        events.trouble(format!("the speaker stopped answering: {err:#}"));
                         failed_polls = 0;
                     }
                 }
@@ -356,10 +361,15 @@ impl Emitter {
             let report = self.progress.flush(Instant::now());
             self.send(report);
         }
-        if self.last != Some(event) {
-            self.last = Some(event);
+        if self.last.as_ref() != Some(&event) {
+            self.last = Some(event.clone());
             let _ = self.tx.send(event);
         }
+    }
+
+    /// Tells the UI why the last command failed or the speaker was given up.
+    fn trouble(&self, text: String) {
+        self.send(Some(PlayerEvent::Trouble(text)));
     }
 
     /// `item` starts; the item it replaces reports its latest place first.

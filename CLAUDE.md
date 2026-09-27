@@ -94,6 +94,9 @@ servers:
   private `Speaker` trait, and polls while `poll_interval()` is `Some`. A
   failed command emits `Stopped` and drops
   the rest of its batch; 3 failed polls in a row end the album the same way.
+  Both then emit `PlayerEvent::Trouble(text)` with the reason: the UI shows
+  it where the deck can (the simulator page, through `Deck::notice`) until
+  something plays again, and marks the item pressed last for 4 s.
   `Emitter` drops repeats of the last event, except for the first event after
   each command batch. Items played with `progress: true` also get
   `PlayerEvent::Progress` (track, position, track length) and `Finished`;
@@ -191,9 +194,11 @@ grid is checked too: at least 2 rows, at most 64 keys, keys of 16 to 512 px.
 Simulator (`simulator/`): `kids-deck simulator` runs an axum server on its
 own single-thread tokio runtime with the page (`page.html`) and the
 `/api/*` routes; the route table is the module doc of `simulator/mod.rs`, and
-`Info` / `Brightness` / `State` are shared with the client. The page polls
-`/api/state` and reloads a key image when its version changes; versions come
-from one counter that never repeats, so a reset cannot hide a change.
+`Info` / `Brightness` / `Notice` / `State` are shared with the client. The
+page polls `/api/state` and reloads a key image when its version changes;
+versions come from one counter that never repeats, so a reset cannot hide a
+change. It also shows the player's notice (`PUT /api/notice`, the reason of
+the last failed command) under the deck; a reset clears it.
 
 Rendering:
 
@@ -224,7 +229,9 @@ Rendering:
 - `icons/` draws every icon procedurally (4x supersampling); there are no
   image or font assets. `glyphs.rs` has the kind glyphs (note, book, star,
   waves, mic, Spotify); `decorate` adds the "playing" frame, the kind badge,
-  the progress bar and the "new" dot to a tile. Item tiles: the item's
+  the progress bar, the "new" dot and the trouble mark (a red disc with an
+  exclamation mark, on the item pressed last for 4 s after a command
+  failed) to a tile. Item tiles: the item's
   picture (`[source.item]` or `key.png`), else its cover, else the kind
   glyph on its colour. Covers get a kind badge when the deck has shelves of
   more than one kind.

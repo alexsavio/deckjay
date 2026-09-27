@@ -192,6 +192,34 @@ fn new_dot_only_touches_the_top_right_region_and_is_red() {
 }
 
 #[test]
+fn trouble_mark_sits_in_the_middle_and_is_red() {
+    let tile = gradient_tile(SIZE);
+    let decorated = decorate(
+        &tile,
+        Decor {
+            trouble: true,
+            ..Decor::default()
+        },
+    );
+    let diffs = diff_positions(&tile, &decorated);
+    assert!(!diffs.is_empty(), "the trouble mark drew nothing");
+    let (low, high) = (f64::from(SIZE) * 0.2, f64::from(SIZE) * 0.8);
+    let mut saw_red = false;
+    for (x, y) in diffs {
+        let (x, y) = (f64::from(x), f64::from(y));
+        assert!(
+            (low..=high).contains(&x) && (low..=high).contains(&y),
+            "mark pixel outside the middle: ({x}, {y})"
+        );
+        let p = decorated.get_pixel(x as u32, y as u32);
+        if p[0] > p[1].saturating_add(40) && p[0] > p[2].saturating_add(40) {
+            saw_red = true;
+        }
+    }
+    assert!(saw_red, "no reddish pixel in the trouble mark");
+}
+
+#[test]
 fn decorations_stay_inside_the_highlight_frame() {
     let tile = gradient_tile(SIZE);
     let decorated = decorate(
@@ -201,6 +229,7 @@ fn decorations_stay_inside_the_highlight_frame() {
             badge: Some(Glyph::Mic),
             progress: Some(6),
             new: true,
+            trouble: true,
         },
     );
     let t = inset(SIZE);
@@ -334,6 +363,7 @@ fn contact_sheet() {
             badge: Some(Glyph::Spotify),
             progress: Some(7),
             new: true,
+            trouble: true,
         },
     ));
     tiles.push(shelf(&cover, 1, 4));

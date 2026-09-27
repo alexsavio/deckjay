@@ -9,7 +9,7 @@ use image::{ImageFormat, Rgb, RgbImage};
 use serde::de::DeserializeOwned;
 
 use super::api::MAX_QUEUED;
-use super::{Brightness, Info, Model, State, serve};
+use super::{Brightness, Info, Model, Notice, State, serve};
 
 fn start(info: Info) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -94,6 +94,29 @@ fn a_key_image_comes_back_unchanged_with_a_new_version() {
 
     put_key(&url, 3, &png(20));
     assert!(state(&url).versions[3] > first[3]);
+}
+
+#[test]
+fn a_notice_shows_in_the_state_until_it_is_taken_back_or_reset() {
+    let url = start(Model::Mk2.info());
+    assert_eq!(state(&url).notice, None);
+    let put = |text: Option<&str>| {
+        let body = serde_json::to_string(&Notice {
+            text: text.map(str::to_owned),
+        })
+        .unwrap();
+        ureq::put(format!("{url}/api/notice"))
+            .header("content-type", "application/json")
+            .send(body)
+            .unwrap();
+    };
+    put(Some("no sound output found"));
+    assert_eq!(state(&url).notice.as_deref(), Some("no sound output found"));
+    put(None);
+    assert_eq!(state(&url).notice, None);
+    put(Some("the speaker stopped answering"));
+    ureq::post(format!("{url}/api/reset")).send_empty().unwrap();
+    assert_eq!(state(&url).notice, None);
 }
 
 #[test]

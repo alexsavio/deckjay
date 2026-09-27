@@ -12,6 +12,7 @@
 //! | PUT    | `/api/keys/{n}`             | PNG body; 404 if `n` is not a key, 415 if not a PNG |
 //! | GET    | `/api/keys/{n}`             | the key's PNG; 404 if it has none                   |
 //! | PUT    | `/api/brightness`           | [`Brightness`] as JSON                              |
+//! | PUT    | `/api/notice`               | [`Notice`] as JSON: a line the page shows under the deck, or none |
 //! | GET    | `/api/presses?wait_ms=N`    | JSON array of pressed keys; waits up to `N` ms (max 10 000) for one |
 //! | POST   | `/api/press/{n}`            | queues a press of key `n`; 404 if `n` is not a key  |
 //! | GET    | `/api/state`                | [`State`] as JSON, polled by the page               |
@@ -41,6 +42,13 @@ pub struct Brightness {
     pub percent: u8,
 }
 
+/// Body of `PUT /api/notice`: why the player's last command failed, for
+/// the page to show under the deck, or nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notice {
+    pub text: Option<String>,
+}
+
 /// Reply of `GET /api/state`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
@@ -50,6 +58,8 @@ pub struct State {
     pub connected: bool,
     /// Bumped on every image change of the key; 0 means no image yet.
     pub versions: Vec<u64>,
+    /// The player's last failure, while it stands.
+    pub notice: Option<String>,
 }
 
 /// Stream Deck models the simulator can copy (sizes from `elgato-streamdeck`).

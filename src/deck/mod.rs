@@ -30,6 +30,12 @@ trait Backend {
     fn clear(&self) -> Result<()>;
     /// Waits up to `timeout` for input and returns the keys that were pressed down.
     fn pressed_keys(&self, timeout: Duration) -> Result<Vec<usize>>;
+    /// Shows `text` beside the keys, where the device has room for it: the
+    /// simulator page does, a USB deck does not.
+    fn notice(&self, text: Option<&str>) -> Result<()> {
+        let _ = text;
+        Ok(())
+    }
 }
 
 pub struct Deck {
@@ -38,6 +44,8 @@ pub struct Deck {
     encoded: HashMap<Face, Vec<u8>>,
     /// What each key currently shows.
     shown: Vec<Option<Face>>,
+    /// The notice the device shows.
+    noticed: Option<String>,
 }
 
 impl Deck {
@@ -70,6 +78,7 @@ impl Deck {
             backend: Box::new(backend),
             encoded: HashMap::new(),
             shown: vec![None; rows * cols],
+            noticed: None,
         }
     }
 
@@ -126,12 +135,23 @@ impl Deck {
         self.backend.flush()
     }
 
-    /// Turns the deck dark: no key images, brightness 0. The next
+    /// Turns the deck dark: no key images, no notice, brightness 0. The next
     /// [`Deck::show`] sends every key again.
     pub fn blank(&mut self) -> Result<()> {
         self.backend.clear()?;
         self.shown.fill(None);
+        self.noticed = None;
         self.backend.set_brightness(0)
+    }
+
+    /// Shows `text` beside the keys where the device can; sent only when it
+    /// changes.
+    pub fn notice(&mut self, text: Option<&str>) -> Result<()> {
+        if self.noticed.as_deref() != text {
+            self.backend.notice(text)?;
+            self.noticed = text.map(str::to_owned);
+        }
+        Ok(())
     }
 
     /// Waits up to `timeout` for input and returns the keys that were pressed down.
@@ -157,6 +177,7 @@ mod tests {
         unplugged: bool,
         clears: usize,
         brightness: Option<u8>,
+        notices: Vec<Option<String>>,
     }
 
     struct FakeBackend(Rc<RefCell<Log>>);
@@ -176,6 +197,11 @@ mod tests {
 
         fn set_brightness(&self, percent: u8) -> Result<()> {
             self.0.borrow_mut().brightness = Some(percent);
+            Ok(())
+        }
+
+        fn notice(&self, text: Option<&str>) -> Result<()> {
+            self.0.borrow_mut().notices.push(text.map(str::to_owned));
             Ok(())
         }
 
@@ -214,6 +240,27 @@ mod tests {
 
     fn tile() -> RgbImage {
         RgbImage::new(4, 4)
+    }
+
+    #[test]
+    fn a_notice_is_sent_once_per_change_and_blank_forgets_it() {
+        let (mut deck, log) = fake_deck();
+        deck.notice(Some("no sound output")).unwrap();
+        deck.notice(Some("no sound output")).unwrap();
+        deck.notice(None).unwrap();
+        deck.notice(None).unwrap();
+        deck.notice(Some("gone")).unwrap();
+        deck.blank().unwrap();
+        deck.notice(Some("gone")).unwrap();
+        assert_eq!(
+            log.borrow().notices,
+            [
+                Some("no sound output".to_string()),
+                None,
+                Some("gone".to_string()),
+                Some("gone".to_string())
+            ]
+        );
     }
 
     #[test]
@@ -272,6 +319,7 @@ mod tests {
             current: false,
             progress: None,
             new: false,
+            trouble: false,
         };
         deck.show(0, &gone, tile).unwrap();
         deck.show(1, &Face::Play, tile).unwrap();

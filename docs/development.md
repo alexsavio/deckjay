@@ -32,7 +32,11 @@ output.
 
 `kids-deck simulator` is a web page that acts as a Stream Deck: it shows
 the key images, and a click on a key is a key press. The player uses it in
-place of the USB deck when you start it with `--simulator URL`.
+place of the USB deck when you start it with `--simulator URL`. When a
+press fails (no sound output in Docker, a speaker that does not answer),
+the page shows the player's warning under the deck until something plays
+again, and the pressed key wears a red mark for a few seconds, as it does
+on a real deck.
 
 - **All in Docker:** `just sim`, then open <http://localhost:8090>. The
   player and the simulator run in two containers. Pick another deck with
