@@ -131,6 +131,25 @@ guarded was inserted below the /// symphonia has no HE-AAC (SBR) and
 no HLS. line, which documents decodable, not guarded. Move guarded
 above it so the doc sits on decodable again.
 
+- Show why a press failed on the simulator page and mark the key (#2)
+
+- feat(simulator): show why a press failed on the page and mark the key
+
+A failed press left the deck showing "stopped" and the page saying
+"Player connected", with the reason only in the player's log. The player
+now follows the Stopped with PlayerEvent::Trouble(text); the UI sends the
+text to the deck backend, which the simulator shows under the keys until
+something plays again, and the item pressed last wears a red mark with an
+exclamation mark for 4 s, on the real deck too.
+
+- test(player): check the trouble event when the speaker stops answering
+
+polls_failing_for_the_whole_grace_stop_the_album now asserts the
+Trouble event that follows Stopped when the speaker gives up on polls,
+matching the assertion already made for the command-failure branch.
+
+- docs: drop comments that restate the code next to them
+
 ### 🚜 Refactor
 
 - Apply code review findings
