@@ -490,6 +490,12 @@ fn polls_failing_for_the_whole_grace_stop_the_album() {
         events.recv_timeout(Duration::from_secs(5)),
         Ok(PlayerEvent::Stopped)
     );
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(5)),
+        Ok(PlayerEvent::Trouble(
+            "the speaker stopped answering: no answer".into()
+        ))
+    );
     assert!(
         started.elapsed() >= GRACE,
         "gave up after {:?}",
