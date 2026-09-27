@@ -392,7 +392,6 @@ impl Emitter {
         }
     }
 
-    /// Tells the UI why the last command failed or the speaker was given up.
     fn trouble(&self, text: String) {
         self.send(Some(PlayerEvent::Trouble(text)));
     }

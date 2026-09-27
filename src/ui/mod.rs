@@ -372,7 +372,6 @@ impl Ui {
         }
     }
 
-    /// Whether `id` wears the trouble mark.
     fn marked(&self, id: ItemId) -> bool {
         self.trouble.as_ref().is_some_and(|t| t.item == Some(id))
     }

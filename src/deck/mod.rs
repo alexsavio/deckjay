@@ -44,7 +44,6 @@ pub struct Deck {
     encoded: HashMap<Face, Vec<u8>>,
     /// What each key currently shows.
     shown: Vec<Option<Face>>,
-    /// The notice the device shows.
     noticed: Option<String>,
 }
 
@@ -144,8 +143,6 @@ impl Deck {
         self.backend.set_brightness(0)
     }
 
-    /// Shows `text` beside the keys where the device can; sent only when it
-    /// changes.
     pub fn notice(&mut self, text: Option<&str>) -> Result<()> {
         if self.noticed.as_deref() != text {
             self.backend.notice(text)?;
