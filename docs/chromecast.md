@@ -209,12 +209,15 @@ Every command opens its own connection and drops it at the end, without a
    another sender in the last 10 s of a book counts as its end, and a book
    whose length the receiver never reported ends only with `FINISHED`.
    This is read from the docs, not seen on a device.
-8. **Errors:** a failed command makes `player::run` log a warning, call
-   `reset` (polling stops), emit `Stopped` and drop the other key presses
-   that came with it: each would open a connection and wait out its own
-   timeout. A failed poll is logged at debug level; three in a row
-   (`MAX_FAILED_POLLS`) end the album the same way, about 20 s after the
-   speaker went away. A poll or command that works restarts the count.
+8. **Errors:** a failed `Play`, play/pause or power command (the ones the
+   UI shows the result of before the speaker answers) makes `player::run`
+   log a warning, call `reset` (polling stops), emit `Stopped` and drop the
+   other key presses that came with it: each would open a connection and
+   wait out its own timeout. A failed volume change, skip or seek is only
+   logged: the album plays on, and the polls tell if the speaker is gone.
+   A failed poll is logged at debug level; polls failing for 20 s in a row
+   (`POLL_FAILURE_GRACE`) end the album the same way. A poll or command
+   that works restarts the clock.
 9. **Stop** (`Speaker::stop`, before another speaker takes over): only
    while an item of ours is active. Media `GET_STATUS` (an item that
    reports progress takes its place from it), then `STOP` to the media
@@ -320,14 +323,16 @@ start):
 
 ## Quirks and limits
 
-- **No read timeout (accepted limit).** rust_cast sets no timeout
-  anywhere, and kids-deck cannot reach its socket:
-  `connect_without_host_verification` opens it and keeps it private. The
-  3 s probe covers the connect only. A device that accepts the connection
-  and then goes silent blocks the player thread until the connection
-  closes or fails: no key press gets an answer and no poll runs until
-  then. Bounding it would need a worker thread per command that the
-  player gives up on; kids-deck does not do that.
+- **Timeouts.** rust_cast sets no timeout anywhere, so kids-deck opens
+  the socket itself (3 s to connect, `IO_TIMEOUT` of 15 s on each read and
+  write), wraps it in TLS without a certificate check, as
+  `connect_without_host_verification` does, and hands it to rust_cast's
+  channels through `MessageManager::new`. A device that accepts the
+  connection and then goes silent fails the command after one timeout.
+  The timeout bounds one read, not the whole wait for a reply: a device
+  that keeps sending unrelated messages could hold a command longer. The
+  tests drive the same code against a fake speaker over plain TCP
+  (`FakeCast` in `cast/tests.rs`).
 - **Idle between tracks.** `IDLE` with `loadingItemId` or `extendedStatus`
   counts as the next track loading, not the end of the album. Taken from
   rust_cast's field docs and Google's `MediaStatus`; not seen on a device.

@@ -23,9 +23,10 @@ speaker_host = "192.168.1.50"
 # Port of the built-in web server the speaker downloads the music from.
 # http_port = 8765
 
-# The address the speaker uses to reach this computer. Detected automatically;
-# set it only if detection picks the wrong network interface. An IPv4 address
-# or a host name, without "http://" or a port.
+# The address the speaker uses to reach this computer. Found from the route
+# to the speaker at each album, so a new DHCP address needs no restart; set
+# it only if that picks the wrong network interface. An IPv4 address or a
+# host name, without "http://" or a port.
 # advertise_host = "192.168.1.20"
 
 # Volume is 0.0–1.0 of the speaker's range. max_volume is a hard ceiling for
@@ -72,8 +73,10 @@ brightness = 60
 #       folder in it is one key: its audio files and those one folder down
 #       (CD1/, CD2/). A loose audio file is one key too, with the picture of
 #       the same name as its cover (Song.mp3 and Song.jpg). A folder's cover
-#       is cover.jpg / folder.jpg / any jpg or png in it. Number prefixes
-#       like "01 " set the order. Files: mp3, m4a, m4b, aac, flac, ogg, wav.
+#       is cover.jpg / folder.jpg / any jpg or png in it. Names sort in
+#       natural order: numbers by value (2 comes before 10), upper and lower
+#       case alike. A folder's own files play before those of its sub
+#       folders. Files: mp3, m4a, m4b, aac, flac, ogg, wav.
 #
 # one_key  Optional, true: the whole folder is one key that plays its audio
 #          files and those one folder down, in name order (e.g. all the

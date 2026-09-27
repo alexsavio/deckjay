@@ -181,15 +181,19 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    progress event put it more than 10 s (`END_MARGIN`) before the track's
    length: that was a stop pressed in the HEOS app, and the item keeps its
    place. With the length unknown, every such stop counts as the end.
-8. **Errors:** a failed command (I/O error, timeout, `result: fail`) makes
-   `player::run` log a warning, call `reset` (the album is no longer
-   active), emit `Stopped` and drop the other key presses that came with
-   it: each would wait out its own timeout. A `fail` reply keeps the
+8. **Errors:** a failed `Play`, play/pause or power command (I/O error,
+   timeout, `result: fail`; the commands the UI shows the result of before
+   the receiver answers) makes `player::run` log a warning, call `reset`
+   (the album is no longer active), emit `Stopped` and drop the other key
+   presses that came with it: each would wait out its own timeout. A
+   failed volume change or skip is only logged: the album plays on, and
+   the polls tell if the receiver is gone. A `fail` reply keeps the
    connection; an I/O error drops it and the next call reconnects. A
-   failed poll is logged at debug level; three in a row
-   (`MAX_FAILED_POLLS`) end the album the same way, about 12 to 18 s after
-   the speaker went away. A poll or command that works restarts the
-   count. A failed `play_stream` from a poll ends the album.
+   failed poll is logged at debug level; polls failing for 20 s in a row
+   (`POLL_FAILURE_GRACE`) end the album the same way, however fast the
+   failures come (a refused connection fails at once, a hung one after
+   its 5 s timeout). A poll or command that works restarts the clock. A
+   failed `play_stream` from a poll ends the album.
 9. **Stop** (`Speaker::stop`, before another speaker takes over): only
    while an album or station is active. `set_play_state stop` (an item that
    reports progress first offers its latest place); polling stops, and the
@@ -290,7 +294,7 @@ Written down in the module doc of `heos.rs`:
 - Timeouts: 3 s to connect to each address; 5 s for each read, each
   write, and the whole wait for one reply. A key press gets its answer
   within one of these timeouts, plus a poll already under way (up to 5 s).
-- During a CLI hang (item 6) the album ends after three failed polls,
+- During a CLI hang (item 6) the album ends after 20 s of failed polls,
   while the receiver plays the current track to its end.
 
 ## Seen on real hardware
@@ -344,8 +348,8 @@ the code handles an item, the test in `heos/tests.rs` is named.
 6. **CLI hangs.** Twice the CLI stopped answering for about 2 minutes right
    after clients disconnected abruptly: ping worked, the TCP connect
    worked, no replies came. Then it reset the connections and recovered.
-   kids-deck times out after 5 s and reports `Stopped`; three failed polls
-   in a row end the album. The next command reconnects. A command that
+   kids-deck times out after 5 s and reports `Stopped`; polls failing for
+   20 s end the album. The next command reconnects. A command that
    finds its connection reset is sent again on a new one; a timed-out
    command is not. Tests: `a_silent_cli_fails_within_the_io_timeout`,
    `a_timed_out_command_is_not_sent_again`,

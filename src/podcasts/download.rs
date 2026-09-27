@@ -46,15 +46,23 @@ fn get(agent: &Agent, url: &str) -> Result<Response<Body>> {
 }
 
 fn read_limited(body: &mut Body, limit: u64, what: &str) -> Result<Vec<u8>> {
+    let too_big = || anyhow!("the {what} is larger than {} MB", limit / MB);
+    let mut bytes = Vec::new();
+    // ureq's limit counts the bytes on the wire, before gzip; `take` counts
+    // them after, so a small gzip body cannot fill the memory.
     body.with_config()
         .limit(limit)
-        .read_to_vec()
-        .map_err(|err| match err {
-            ureq::Error::BodyExceedsLimit(_) => {
-                anyhow!("the {what} is larger than {} MB", limit / MB)
-            }
+        .reader()
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| match ureq::Error::from(err) {
+            ureq::Error::BodyExceedsLimit(_) => too_big(),
             err => anyhow::Error::new(err).context(format!("cannot read the {what}")),
-        })
+        })?;
+    if bytes.len() as u64 > limit {
+        return Err(too_big());
+    }
+    Ok(bytes)
 }
 
 /// Why an episode download failed, which also says what happened to its
@@ -254,7 +262,10 @@ fn shrink(bytes: &[u8]) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::net;
-    use crate::podcasts::testserver::{FakeServer, closed_port, png, truncated};
+    use crate::podcasts::feed;
+    use crate::podcasts::testserver::{FakeServer, Item, closed_port, png, rss, truncated};
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
 
     const NAME: &str = "20250107-episode-1a2b3c4d.mp3";
 
@@ -321,6 +332,60 @@ mod tests {
         assert!(fetch_feed(&api(), &closed_port()).is_err());
         let err = fetch_feed(&api(), "file:///etc/passwd").unwrap_err();
         assert!(err.to_string().contains("http"), "{err:#}");
+    }
+
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn a_gzip_feed_is_decoded() {
+        let s = setup();
+        let item = Item {
+            guid: "ep-1",
+            title: "Episode 1",
+            date: "07 Jan 2025 10:00:00 +0000",
+            url: "https://example.org/e1.mp3",
+            picture: None,
+        };
+        let text = rss("Maus", None, &[item]);
+        fs::write(s.files.path().join("feed.gz"), gzip(text.as_bytes())).unwrap();
+
+        let body = fetch_feed(&api(), &s.server.url("/gzip/feed.gz")).unwrap();
+
+        assert_eq!(body, text.as_bytes());
+        assert_eq!(feed::parse(&body).unwrap().episodes.len(), 1);
+    }
+
+    #[test]
+    fn a_gzip_bomb_stops_at_the_size_limit() {
+        let s = setup();
+        // Gzip members in a row are one body: 100 MB of zeros in about 100 KB.
+        let bomb = gzip(&vec![0; MB as usize]).repeat(100);
+        assert!((bomb.len() as u64) < PICTURE_LIMIT);
+        fs::write(s.files.path().join("bomb.gz"), &bomb).unwrap();
+        let url = s.server.url("/gzip/bomb.gz");
+
+        let err = fetch_feed(&api(), &url).map(|body| body.len()).unwrap_err();
+        assert!(err.to_string().contains("larger than"), "{err:#}");
+
+        let name = cache::picture_name("bomb");
+        let err = picture(&api(), &url, s.cache.path(), &name).unwrap_err();
+        assert!(err.to_string().contains("larger than"), "{err:#}");
+    }
+
+    #[test]
+    fn a_plain_body_over_the_limit_is_refused() {
+        let s = setup();
+        fs::write(s.files.path().join("big.png"), vec![0; 11 * MB as usize]).unwrap();
+
+        let name = cache::picture_name("big");
+        let url = s.server.url("/plain/big.png");
+        let err = picture(&api(), &url, s.cache.path(), &name).unwrap_err();
+
+        assert!(err.to_string().contains("larger than"), "{err:#}");
     }
 
     #[test]

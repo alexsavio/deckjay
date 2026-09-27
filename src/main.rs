@@ -30,7 +30,7 @@ mod spotify;
 mod state;
 mod ui;
 
-use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -44,6 +44,7 @@ use tracing_subscriber::EnvFilter;
 use crate::config::{Config, SpeakerType};
 use crate::deck::Deck;
 use crate::library::Library;
+use crate::net::BaseUrl;
 use crate::simulator::Model;
 use crate::ui::Ui;
 
@@ -132,27 +133,22 @@ fn main() -> Result<()> {
         cfg.advertise_host = advertise_host;
     }
     let library = scan_sources(&cfg);
-
-    let base_url =
-        advertise_address(&cfg).map(|host| format!("http://{host}:{}/music", cfg.http_port));
+    let mut base_url = base_url(&cfg);
 
     if let Some(path) = preview {
-        return write_preview(&cfg, library, base_url?, &path);
+        return write_preview(&cfg, library, base_url, &path);
     }
     if check {
-        return run_check(
-            &cfg,
-            &library,
-            base_url.as_deref(),
-            simulator_url.as_deref(),
-        );
+        return run_check(&cfg, &library, &mut base_url, simulator_url.as_deref());
     }
-    let base_url = base_url?;
 
     let served = server::Served::new(library.served_files());
     if cfg.speaker_type != SpeakerType::Local {
         serve_music(&cfg, served.clone())?;
-        info!("serving music at {base_url}/");
+        match base_url.try_get() {
+            Ok(url) => info!("serving music at {url}/"),
+            Err(err) => warn!("{err:#}; the deck starts anyway and looks again at each album"),
+        }
     }
 
     let (event_tx, event_rx) = mpsc::channel();
@@ -167,10 +163,10 @@ fn main() -> Result<()> {
         Some(url) => DeckSource::Simulator(url),
         None => DeckSource::Usb(elgato_streamdeck::new_hidapi()?),
     };
-    drive_decks(&mut ui, source, cfg.brightness, &stop);
+    let outcome = drive_decks(&mut ui, source, cfg.brightness, &stop);
     info!("stopping");
     ui.save_state();
-    Ok(())
+    outcome
 }
 
 /// Ctrl-C, closing the terminal, `systemctl stop` and `docker stop` set the
@@ -189,16 +185,24 @@ fn stop_on_signals() -> Result<Arc<AtomicBool>> {
 }
 
 /// Keeps looking for a deck, and survives it being unplugged and plugged
-/// back in, until `stop` is set.
-fn drive_decks(ui: &mut Ui, mut source: DeckSource, brightness: u8, stop: &AtomicBool) {
+/// back in, until `stop` is set. Returns [`ui::PlayerGone`] when the player
+/// thread ended: the program exits with it, so the service restarts.
+fn drive_decks(
+    ui: &mut Ui,
+    mut source: DeckSource,
+    brightness: u8,
+    stop: &AtomicBool,
+) -> Result<()> {
     let mut waiting_logged = false;
     while !stop.load(Ordering::SeqCst) {
         match source.open() {
             Ok(Some(mut deck)) => {
                 info!("deck connected: {}", deck.name());
                 waiting_logged = false;
-                if let Err(err) = ui.run(&mut deck, brightness, stop) {
-                    warn!("deck disconnected: {err:#}");
+                match ui.run(&mut deck, brightness, stop) {
+                    Ok(()) => {}
+                    Err(err) if err.is::<ui::PlayerGone>() => return Err(err),
+                    Err(err) => warn!("deck disconnected: {err:#}"),
                 }
             }
             Ok(None) if !waiting_logged => {
@@ -210,6 +214,9 @@ fn drive_decks(ui: &mut Ui, mut source: DeckSource, brightness: u8, stop: &Atomi
         }
         ui.handle_events();
         ui.take_snapshots();
+        if ui.player_gone() {
+            return Err(ui::PlayerGone.into());
+        }
         for _ in 0..20 {
             if stop.load(Ordering::SeqCst) {
                 break;
@@ -217,6 +224,7 @@ fn drive_decks(ui: &mut Ui, mut source: DeckSource, brightness: u8, stop: &Atomi
             std::thread::sleep(Duration::from_millis(100));
         }
     }
+    Ok(())
 }
 
 /// For systemd's `ExecStopPost`, which runs however kids-deck ended, a crash
@@ -379,7 +387,7 @@ fn run_spotify_login(args: impl Iterator<Item = String>) -> Result<()> {
     )
 }
 
-fn write_preview(cfg: &Config, library: Library, base_url: String, path: &Path) -> Result<()> {
+fn write_preview(cfg: &Config, library: Library, base_url: BaseUrl, path: &Path) -> Result<()> {
     let (tx, _) = mpsc::channel();
     let (_, rx) = mpsc::channel();
     let mut ui = Ui::new(cfg, library, base_url, tx, rx, state::Store::in_memory());
@@ -432,35 +440,21 @@ fn spotify_output(cfg: &Config) -> Option<player::spotify::Connect> {
     })
 }
 
-fn advertise_address(cfg: &Config) -> Result<String> {
+fn base_url(cfg: &Config) -> BaseUrl {
     if cfg.speaker_type == SpeakerType::Local {
         // Nothing downloads from us: the music URLs are never used.
-        return Ok("127.0.0.1".into());
+        return BaseUrl::fixed(format!("http://127.0.0.1:{}/music", cfg.http_port));
     }
     match &cfg.advertise_host {
-        Some(host) => Ok(host.clone()),
-        None => local_ip_towards(&cfg.speaker_host, cfg.speaker_port()).with_context(|| {
-            format!(
-                "cannot find a route to speaker_host {} (port {}); check it, or set advertise_host",
-                cfg.speaker_host,
-                cfg.speaker_port()
-            )
-        }),
+        Some(host) => BaseUrl::fixed(format!("http://{host}:{}/music", cfg.http_port)),
+        None => BaseUrl::towards(&cfg.speaker_host, cfg.speaker_port(), cfg.http_port),
     }
-}
-
-/// The local address this machine uses to reach the speaker. No packets are
-/// sent: connecting a UDP socket only picks the route.
-fn local_ip_towards(host: &str, port: u16) -> Result<String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect((host, port))?;
-    Ok(socket.local_addr()?.ip().to_string())
 }
 
 fn run_check(
     cfg: &Config,
     library: &Library,
-    base_url: Result<&str, &anyhow::Error>,
+    base_url: &mut BaseUrl,
     simulator_url: Option<&str>,
 ) -> Result<()> {
     for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
@@ -499,12 +493,12 @@ fn run_check(
             }
         }
     }
-    match base_url {
+    match base_url.try_get() {
         Ok(base_url) => {
             if let Some(track) = library.items().next().and_then(|(_, a)| a.tracks().first()) {
                 println!(
                     "\nExample URL the speaker will fetch:\n  {}",
-                    library::url_for(base_url, &track.rel_path)
+                    library::url_for(&base_url, &track.rel_path)
                 );
             }
         }
@@ -666,13 +660,24 @@ mod tests {
     #[test]
     fn no_route_to_the_speaker_names_speaker_host() {
         // An IPv4 socket cannot connect to an IPv6 address: fails without DNS or network.
-        let err = advertise_address(&config("speaker_host = \"::1\"\n")).unwrap_err();
+        let err = base_url(&config("speaker_host = \"::1\"\n"))
+            .try_get()
+            .unwrap_err();
         assert!(err.to_string().contains("speaker_host ::1"), "{err:#}");
     }
 
     #[test]
     fn advertise_host_skips_detection() {
         let cfg = config("speaker_host = \"::1\"\nadvertise_host = \"10.0.0.2\"\n");
-        assert_eq!(advertise_address(&cfg).unwrap(), "10.0.0.2");
+        assert_eq!(
+            base_url(&cfg).try_get().unwrap(),
+            format!("http://10.0.0.2:{}/music", cfg.http_port)
+        );
+    }
+
+    #[test]
+    fn local_audio_needs_no_route_to_a_speaker() {
+        let cfg = config("speaker_type = \"local\"\n");
+        assert!(base_url(&cfg).try_get().is_ok());
     }
 }

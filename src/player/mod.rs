@@ -162,8 +162,10 @@ pub enum PlayerEvent {
     Finished(ItemId),
 }
 
-/// A speaker that fails this many status polls in a row is taken to be gone.
-const MAX_FAILED_POLLS: u32 = 3;
+/// A speaker whose status polls keep failing for this long is taken to be
+/// gone. A shorter network drop only pauses the reports; the poll interval
+/// differs per speaker (1 s on HEOS, 4 s on Cast), so a count would not.
+const POLL_FAILURE_GRACE: Duration = Duration::from_secs(20);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Where the album plays, and what the player needs to reach it.
@@ -234,6 +236,12 @@ trait Speaker {
     fn poll(&mut self, events: &mut Emitter) -> Result<()>;
     /// `None` while no album is active, so there is nothing to poll.
     fn poll_interval(&self) -> Option<Duration>;
+    /// How long polls may keep failing before the album is given up. A
+    /// speaker whose poll failures are final (a sound card that went away)
+    /// gives up sooner.
+    fn poll_failure_grace(&self) -> Duration {
+        POLL_FAILURE_GRACE
+    }
     /// Forgets the album after a failed command.
     fn reset(&mut self);
     /// Stops what plays and forgets it, before another speaker takes over.
@@ -253,7 +261,7 @@ trait Speaker {
 }
 
 fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
-    let mut failed_polls = 0;
+    let mut failing_since: Option<Instant> = None;
     loop {
         let next = match speaker.poll_interval() {
             Some(interval) => rx.recv_timeout(interval),
@@ -267,37 +275,54 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
                 events.last = None;
                 for cmd in coalesce(pending) {
                     debug!(?cmd, "speaker command");
+                    let guessed = guessed(&cmd);
                     let done = match cmd {
                         PlayerCmd::Off => power_off(speaker.as_mut(), &mut events),
                         cmd => speaker.handle(cmd, &mut events),
                     };
-                    if let Err(err) = done {
-                        warn!("speaker command failed: {err:#}");
-                        speaker.reset();
-                        events.emit(PlayerEvent::Stopped);
-                        // The rest were guesses from a state the UI no longer
-                        // shows, and each would wait out its own timeout.
-                        break;
+                    match done {
+                        Ok(()) => failing_since = None,
+                        Err(err) if guessed => {
+                            warn!("speaker command failed: {err:#}");
+                            speaker.reset();
+                            events.emit(PlayerEvent::Stopped);
+                            // The rest were guesses from a state the UI no
+                            // longer shows, and each would wait out its own
+                            // timeout.
+                            break;
+                        }
+                        // The UI shows nothing for it, and the album may well
+                        // play on; the polls find out if the speaker is gone.
+                        Err(err) => warn!("speaker command failed: {err:#}"),
                     }
-                    failed_polls = 0;
                 }
             }
             Err(RecvTimeoutError::Timeout) => match speaker.poll(&mut events) {
-                Ok(()) => failed_polls = 0,
+                Ok(()) => failing_since = None,
                 Err(err) => {
                     debug!("status poll failed: {err:#}");
-                    failed_polls += 1;
-                    if failed_polls >= MAX_FAILED_POLLS {
+                    let since = *failing_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= speaker.poll_failure_grace() {
                         warn!("the speaker stopped answering: {err:#}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
-                        failed_polls = 0;
+                        failing_since = None;
                     }
                 }
             },
             Err(RecvTimeoutError::Disconnected) => return,
         }
     }
+}
+
+/// Whether the UI shows the command's outcome before the speaker answers
+/// (`Ui::press` sets the current item and play state at once). When such a
+/// command fails, the guess must be undone; for the others the album goes on.
+fn guessed(cmd: &PlayerCmd) -> bool {
+    matches!(
+        cmd,
+        PlayerCmd::Play { .. } | PlayerCmd::TogglePause | PlayerCmd::Off
+    )
 }
 
 /// Standby is tried even when the stop failed: a receiver's control port

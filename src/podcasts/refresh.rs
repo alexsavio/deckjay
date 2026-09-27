@@ -43,6 +43,8 @@ struct Run {
     feed: FeedSettings,
     dir: PathBuf,
     old: Manifest,
+    /// `feed.json` could not be read, so `disk` may miss cached episodes.
+    manifest_broken: bool,
     disk: Vec<Stored>,
     /// `None` when the fetch failed.
     remote: Option<Feed>,
@@ -146,7 +148,7 @@ impl Worker {
             let Ok(dir) = cache::feed_dir(&self.settings.cache_dir, &feed.slug) else {
                 continue;
             };
-            let manifest = cache::load(&dir);
+            let manifest = cache::load(&dir).unwrap_or_default();
             let present = Manifest {
                 episodes: cache::present(&dir, &manifest),
                 ..manifest
@@ -194,13 +196,17 @@ impl Worker {
             dropped += plan.drop.len();
             let manifest = self.settle(run, plan.publish);
             wanted.extend(files_to_publish(&run.dir, &run.feed.slug, &manifest));
-            let keep = keep_names(run, &manifest);
-            let stale = cache::unwanted(&run.dir, &keep, run.remote.is_none());
-            unwanted.extend(
-                stale
-                    .iter()
-                    .map(|name| Path::new(&run.feed.slug).join(name)),
-            );
+            // Without the feed or the old manifest, `manifest` can miss cached
+            // files that are still good; they wait for a refresh that has both.
+            if run.remote.is_some() && !run.manifest_broken {
+                let keep = keep_names(run, &manifest);
+                let stale = cache::unwanted(&run.dir, &keep);
+                unwanted.extend(
+                    stale
+                        .iter()
+                        .map(|name| Path::new(&run.feed.slug).join(name)),
+                );
+            }
             snapshot.feeds.push(feed_state(
                 &run.dir,
                 &run.feed,
@@ -218,7 +224,9 @@ impl Worker {
 
     fn fetch(&mut self, feed: FeedSettings) -> Option<Run> {
         let dir = cache::feed_dir(&self.settings.cache_dir, &feed.slug).ok()?;
-        let old = cache::load(&dir);
+        let loaded = cache::load(&dir);
+        let manifest_broken = loaded.is_none();
+        let old = loaded.unwrap_or_default();
         let disk = cache::present(&dir, &old);
         let url = without_query(&feed.url);
         let remote = match download::fetch_feed(&self.api, &feed.url).and_then(|b| feed::parse(&b))
@@ -247,6 +255,7 @@ impl Worker {
             feed,
             dir,
             old,
+            manifest_broken,
             disk,
             remote,
             keep,

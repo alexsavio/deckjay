@@ -39,6 +39,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 signal-hook = { version = "0.4", default-features = false }
 
 [dev-dependencies]
+flate2 = "1"
 tempfile = "3"
 
 [lints.rust]
