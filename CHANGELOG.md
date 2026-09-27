@@ -176,6 +176,7 @@ matching the assertion already made for the command-failure branch.
 - Play on a Bluetooth speaker and Spotify on the Pi
 - Rename the repository to kids-deck and say it runs on Linux
 - List the supported decks and split the README into short parts
+- *(pi)* Add Raspberry Pi Zero 2 W notes
 
 ### ⚙️ Miscellaneous Tasks
 
