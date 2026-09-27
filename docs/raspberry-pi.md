@@ -13,7 +13,9 @@ card).
 ## 🧰 What you need
 
 - A **Raspberry Pi 3** or newer, with a power supply and a microSD card
-  (16 GB or more, plus the size of your music).
+  (16 GB or more, plus the size of your music). A Pi Zero 2 W works too,
+  with a few changes: see
+  [Run on a Raspberry Pi Zero 2 W](#-run-on-a-raspberry-pi-zero-2-w).
 - **64-bit Raspberry Pi OS Lite**, trixie (Debian 13) or bookworm
   (Debian 12). The release binaries do not run on the 32-bit OS.
 - The Stream Deck, plugged into the Pi.
@@ -455,6 +457,44 @@ the output when it pauses, but the pause reaches the Pi through Spotify's
 servers and can take a moment: the first press after a playlist may fail,
 and the next one play, because `bluez-alsa` may not let two programs use
 the speaker at once.
+
+## 🪶 Run on a Raspberry Pi Zero 2 W
+
+> **Not tested yet:** these notes follow the specifications of the board
+> and the reports of other users, not a Zero 2 W with kids-deck on it.
+
+The Zero 2 W has the CPU cores of a Pi 3 (at 1 GHz in place of 1.2 GHz)
+and runs the 64-bit OS, so the steps above apply as they are: the same
+arm64 binary, the same service. Half the memory and one USB port change a
+few things:
+
+- **Power.** The deck gets its 5 V straight from the Pi's micro-USB
+  input: the Zero 2 W has no fuse and no current limiter on its data
+  port. The budget is fine (the Pi
+  [draws](https://www.cnx-software.com/2021/12/09/raspberry-pi-zero-2-w-power-consumption/)
+  about 0.13 A idle with Wi-Fi and under 1.5 A even in a stress test, a
+  Stream Deck MK.2 about
+  [0.3 A](https://www.jamiebalfour.scot/reviews/posts/elgato-stream-deck-mk2),
+  and the official supply gives 2.5 A), but a thin cable or a cheap
+  adapter drops volts, and then the deck resets. Use the official
+  5.1 V 2.5 A supply and a short OTG adapter that grounds the ID pin: a
+  plain charging cable does not make the Pi a USB host. If the deck still
+  resets, or it is an XL (it draws more), put a powered USB hub between
+  the Pi and the deck.
+- **One USB port.** The deck takes it. A USB sound card or a Bluetooth
+  adapter needs a hub.
+- **No headphone jack.** Local audio needs HDMI or a USB sound card.
+  Chromecast and HEOS are not affected.
+- **Wi-Fi only, 2.4 GHz.** There is no network socket, so set the Wi-Fi in
+  Imager (step 1). Enough for music. The Bluetooth note above applies
+  here too (same radio chip), and without a network cable the way out of
+  a stutter is a USB Bluetooth adapter on a hub.
+- **512 MB of memory.** Install the release binary as in step 3, and skip
+  [Run it in Docker instead](#-run-it-in-docker-instead). Building on
+  the Pi is out too.
+- **The first draw is slower.** At each start kids-deck decodes the cover
+  of every item on the deck's shelves to make its tile; at 1 GHz with
+  big covers this takes some seconds. After that the tiles are kept.
 
 ## 🧱 Build the binary yourself
 

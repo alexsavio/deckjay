@@ -64,8 +64,8 @@ below](docs/images/simulator.webp)
   USB decks, `remote.rs` for the simulator), so a new deck is one new
   backend.
 - A computer for the Stream Deck, on the same network as the speaker:
-  **Linux** (a **Raspberry Pi 3** or newer with 64-bit Raspberry Pi OS, or
-  a PC) or a **Mac**. Windows is not supported.
+  **Linux** (a **Raspberry Pi 3** or newer or a Pi Zero 2 W, with 64-bit
+  Raspberry Pi OS, or a PC) or a **Mac**. Windows is not supported.
 - A speaker: a **Chromecast built-in** device (tested on a Lenovo smart
   display; built for a JBL Authentics 300), a **Denon or Marantz HEOS**
   receiver (tested on a Denon AVR-X1600H), or the computer's own sound
