@@ -32,6 +32,13 @@ fn every_failed_command_reports_stopped() {
                 Ok(PlayerEvent::Stopped),
                 "{output:?}"
             );
+            assert!(
+                matches!(
+                    events.recv_timeout(Duration::from_secs(5)),
+                    Ok(PlayerEvent::Trouble(_))
+                ),
+                "{output:?}"
+            );
         }
     }
 }
@@ -293,7 +300,8 @@ fn a_failed_command_reports_the_latest_place_before_stopped() {
             report(0, 0),
             PlayerEvent::Playing(BOOK),
             report(0, 7),
-            PlayerEvent::Stopped
+            PlayerEvent::Stopped,
+            PlayerEvent::Trouble("the speaker is off".into()),
         ]
     );
 }
@@ -330,6 +338,13 @@ fn unsupported_content_and_broken_stations_report_stopped() {
             assert_eq!(
                 events.recv_timeout(Duration::from_secs(5)),
                 Ok(PlayerEvent::Stopped),
+                "{output:?}"
+            );
+            assert!(
+                matches!(
+                    events.recv_timeout(Duration::from_secs(5)),
+                    Ok(PlayerEvent::Trouble(_))
+                ),
                 "{output:?}"
             );
         }
@@ -475,6 +490,12 @@ fn polls_failing_for_the_whole_grace_stop_the_album() {
         events.recv_timeout(Duration::from_secs(5)),
         Ok(PlayerEvent::Stopped)
     );
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(5)),
+        Ok(PlayerEvent::Trouble(
+            "the speaker stopped answering: no answer".into()
+        ))
+    );
     assert!(
         started.elapsed() >= GRACE,
         "gave up after {:?}",
@@ -561,6 +582,9 @@ fn a_failed_command_drops_the_rest_of_its_batch() {
     assert_eq!(handled.load(Ordering::SeqCst), 1);
     assert_eq!(
         events.try_iter().collect::<Vec<_>>(),
-        [PlayerEvent::Stopped]
+        [
+            PlayerEvent::Stopped,
+            PlayerEvent::Trouble("the speaker is off".into())
+        ]
     );
 }

@@ -22,6 +22,7 @@ const BG_POWER: Rgb<u8> = Rgb([175, 35, 45]);
 /// any cover.
 const DECOR_DARK: Rgb<u8> = Rgb([20, 20, 24]);
 const NEW_DOT: Rgb<u8> = Rgb([214, 40, 40]);
+const TROUBLE: Rgb<u8> = Rgb([214, 40, 40]);
 /// Fraction of a shelf key's height reserved for its bottom ledge and dots.
 const SHELF_LEDGE: f32 = 0.22;
 
@@ -257,13 +258,15 @@ pub fn glyph_placeholder(glyph: Glyph, color: Rgb<u8>, size: u32) -> RgbImage {
 // ------------------------------------------------------------- decorations
 
 /// What to draw on top of a tile (a cover or a placeholder). `progress` is
-/// steps out of 10; values above 10 clamp to 10.
+/// steps out of 10; values above 10 clamp to 10. `trouble` is the mark of
+/// an item whose press just failed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Decor {
     pub current: bool,
     pub badge: Option<Glyph>,
     pub progress: Option<u8>,
     pub new: bool,
+    pub trouble: bool,
 }
 
 /// Draws `decor` onto `tile`. Every decoration keeps `inset(size)` clear of
@@ -281,6 +284,9 @@ pub fn decorate(tile: &RgbImage, decor: Decor) -> RgbImage {
     }
     if decor.new {
         new_dot(&mut img, margin);
+    }
+    if decor.trouble {
+        trouble_mark(&mut img);
     }
     if decor.current {
         frame(&mut img, inset(size), HIGHLIGHT);
@@ -366,6 +372,19 @@ fn new_dot(img: &mut RgbImage, margin: f32) {
     blend(img, &ring_mask, WHITE, 1.0);
     let dot_mask = mask(size, |c| c.circle(cx, cy, r * 0.62, WHITE));
     blend(img, &dot_mask, NEW_DOT, 1.0);
+}
+
+/// Red disc with a white exclamation mark in the middle of the key: kids
+/// cannot read the failure, but they can see the key refused.
+fn trouble_mark(img: &mut RgbImage) {
+    let size = img.width();
+    let disc_mask = mask(size, |c| c.circle(0.5, 0.5, 0.24, WHITE));
+    blend(img, &disc_mask, TROUBLE, 0.92);
+    let bang_mask = mask(size, |c| {
+        c.rect(0.465, 0.31, 0.535, 0.56, WHITE);
+        c.circle(0.5, 0.645, 0.045, WHITE);
+    });
+    blend(img, &bang_mask, WHITE, 1.0);
 }
 
 // -------------------------------------------------------------------- shelf

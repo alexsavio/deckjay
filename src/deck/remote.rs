@@ -9,7 +9,7 @@ use image::{ImageFormat, RgbImage};
 use ureq::Agent;
 
 use super::Backend;
-use crate::simulator::{Brightness, Info};
+use crate::simulator::{Brightness, Info, Notice};
 
 /// Time allowed for one request, on top of a long-poll's own wait.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -114,6 +114,17 @@ impl Backend for RemoteDeck {
         Ok(())
     }
 
+    fn notice(&self, text: Option<&str>) -> Result<()> {
+        let body = serde_json::to_string(&Notice {
+            text: text.map(str::to_owned),
+        })?;
+        self.agent
+            .put(format!("{}/api/notice", self.base))
+            .header("content-type", "application/json")
+            .send(body)?;
+        Ok(())
+    }
+
     fn encode(&self, image: RgbImage) -> Result<Vec<u8>> {
         let mut png = Vec::new();
         image.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)?;
@@ -190,6 +201,27 @@ mod tests {
         let deck = Deck::open_simulator(&url).unwrap().unwrap();
         assert_eq!(deck.layout(), (4, 8));
         assert_eq!(deck.key_size(), 96);
+    }
+
+    #[test]
+    fn a_notice_reaches_the_simulator_page_and_blank_clears_it() {
+        let url = start_simulator(Model::Mk2.info());
+        let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
+        let notice = || {
+            let body = ureq::get(format!("{url}/api/state"))
+                .call()
+                .unwrap()
+                .body_mut()
+                .read_to_string()
+                .unwrap();
+            serde_json::from_str::<simulator::State>(&body)
+                .unwrap()
+                .notice
+        };
+        deck.notice(Some("no sound output found")).unwrap();
+        assert_eq!(notice().as_deref(), Some("no sound output found"));
+        deck.blank().unwrap();
+        assert_eq!(notice(), None);
     }
 
     #[test]

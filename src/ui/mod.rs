@@ -60,18 +60,22 @@ impl std::error::Error for PlayerGone {}
 
 /// Volume bar resolution; keeps the number of distinct cached key images small.
 const VOLUME_LEVELS: f32 = 20.0;
+/// How long an item wears the trouble mark after its press failed.
+const TROUBLE_MARK: Duration = Duration::from_secs(4);
 
 /// Everything a key can show. Used as the cache key for rendered images.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Face {
     Blank,
     /// `progress`: how much of an item that resumes is done, in tenths.
-    /// `new`: a podcast episode that never played.
+    /// `new`: a podcast episode that never played. `trouble`: its press
+    /// failed a moment ago.
     Item {
         id: ItemId,
         current: bool,
         progress: Option<u8>,
         new: bool,
+        trouble: bool,
     },
     More {
         page: usize,
@@ -132,6 +136,11 @@ pub struct Ui {
     /// Item currently loaded on the speaker (highlighted with a frame).
     current: Option<ItemId>,
     playing: bool,
+    /// The item whose key was pressed last: it wears the mark when a
+    /// command fails.
+    last_pressed: Option<ItemId>,
+    /// The last failure the player reported, until something plays again.
+    trouble: Option<Trouble>,
     /// Where the deck was and how far items got, across restarts.
     store: Store,
 
@@ -146,6 +155,16 @@ pub struct Ui {
 
     /// One per podcast source.
     podcasts: Vec<podcasts::PodcastThread>,
+}
+
+/// A failure the player reported. Its text goes where the deck can show
+/// one (the simulator page); the item pressed last wears a mark for
+/// [`TROUBLE_MARK`].
+struct Trouble {
+    text: String,
+    /// The item that wears the mark, until the mark is dropped.
+    item: Option<ItemId>,
+    at: Instant,
 }
 
 impl Ui {
@@ -198,6 +217,8 @@ impl Ui {
             volume: cfg.start_volume,
             current: None,
             playing: false,
+            last_pressed: None,
+            trouble: None,
             tiles: HashMap::new(),
             tile_size: 0,
             badges: false,
@@ -231,6 +252,7 @@ impl Ui {
                 deck.blank()?;
                 return Err(gone.into());
             }
+            changed |= self.drop_stale_mark();
             if self.take_snapshots() {
                 layout = self.layout(rows, cols);
                 self.fit(&layout);
@@ -253,6 +275,7 @@ impl Ui {
             if changed {
                 self.draw(deck, &layout)?;
             }
+            deck.notice(self.trouble.as_ref().map(|t| t.text.as_str()))?;
             if self.asleep != dimmed {
                 dimmed = self.asleep;
                 deck.set_brightness(if dimmed { 0 } else { brightness })?;
@@ -296,6 +319,15 @@ impl Ui {
                 PlayerEvent::Playing(item) => (Some(item), true),
                 PlayerEvent::Paused(item) => (Some(item), false),
                 PlayerEvent::Stopped => (None, false),
+                PlayerEvent::Trouble(text) => {
+                    self.trouble = Some(Trouble {
+                        text,
+                        item: self.last_pressed,
+                        at: Instant::now(),
+                    });
+                    changed = true;
+                    continue;
+                }
                 PlayerEvent::Progress {
                     item,
                     track,
@@ -316,12 +348,32 @@ impl Ui {
             if !playing {
                 self.store.save_now(Instant::now());
             }
+            // Something plays or pauses: the last failure is over.
+            if current.is_some() && self.trouble.take().is_some() {
+                changed = true;
+            }
             changed |= self.current != current || self.playing != playing;
             self.current = current;
             self.playing = playing;
         }
         self.store.save_if_due(Instant::now());
         changed
+    }
+
+    /// Takes the trouble mark off its item once it was shown for
+    /// [`TROUBLE_MARK`]; the text stays. Returns whether a key changes.
+    fn drop_stale_mark(&mut self) -> bool {
+        match &mut self.trouble {
+            Some(trouble) if trouble.item.is_some() && trouble.at.elapsed() >= TROUBLE_MARK => {
+                trouble.item = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn marked(&self, id: ItemId) -> bool {
+        self.trouble.as_ref().is_some_and(|t| t.item == Some(id))
     }
 
     fn press(&mut self, layout: &Layout, key: usize) {
@@ -344,10 +396,12 @@ impl Ui {
                 self.remember_place();
             }
             Action::Item(id) if self.current == Some(id) => {
+                self.last_pressed = Some(id);
                 self.send(PlayerCmd::TogglePause);
                 self.playing = !self.playing;
             }
             Action::Item(id) => {
+                self.last_pressed = Some(id);
                 let content = self.content(id);
                 self.send(PlayerCmd::Play {
                     item: id,
@@ -600,6 +654,7 @@ impl Ui {
                     current: self.current == Some(id),
                     progress: self.progress_steps(id),
                     new: self.is_new(id),
+                    trouble: self.marked(id),
                 },
                 Some(Action::More) => Face::More {
                     page: self.page(),
@@ -643,18 +698,21 @@ impl Ui {
                 current: false,
                 progress: None,
                 new: false,
+                trouble: false,
             } => self.tiles[id].clone(),
             Face::Item {
                 id,
                 current,
                 progress,
                 new,
+                trouble,
             } => icons::decorate(
                 &self.tiles[id],
                 Decor {
                     current: *current,
                     progress: *progress,
                     new: *new,
+                    trouble: *trouble,
                     badge: None,
                 },
             ),

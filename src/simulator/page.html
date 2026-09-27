@@ -204,6 +204,19 @@
   }
   .status[data-state="offline"]::before { background: var(--down); }
 
+  .notice {
+    margin: 0;
+    max-width: 40rem;
+    padding: 0.4rem 0.9rem;
+    border: 1px solid rgb(239 106 95 / 0.5);
+    border-radius: 0.6rem;
+    background: rgb(239 106 95 / 0.15);
+    color: var(--text);
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .notice[hidden] { display: none; }
+
   @media (prefers-reduced-motion: reduce) {
     .key { transition: none; }
     .key.pressed { transform: none; }
@@ -223,6 +236,7 @@
   <div class="floor-shadow" aria-hidden="true"></div>
 </div>
 <p id="status" class="status" role="status" data-state="waiting">Waiting for the player…</p>
+<p id="notice" class="notice" role="alert" hidden></p>
 <script>
 "use strict";
 
@@ -239,6 +253,7 @@ const STATUS_TEXT = {
 const grid = document.getElementById("grid");
 const summary = document.getElementById("summary");
 const statusLine = document.getElementById("status");
+const notice = document.getElementById("notice");
 let shape = "";
 let keys = [];
 
@@ -315,6 +330,8 @@ function render(state) {
   const brightness = Math.max(MIN_BRIGHTNESS, state.brightness / 100);
   grid.style.setProperty("--brightness", brightness);
   setStatus(state.connected ? "connected" : "waiting");
+  notice.hidden = !state.notice;
+  notice.textContent = state.notice ?? "";
 }
 
 async function poll() {

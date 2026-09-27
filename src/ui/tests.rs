@@ -424,7 +424,8 @@ fn an_audiobook_key_shows_how_much_is_done() {
             id: ItemId(0),
             current: false,
             progress: Some(5),
-            new: false
+            new: false,
+            trouble: false,
         }
     );
     assert_eq!(
@@ -433,9 +434,47 @@ fn an_audiobook_key_shows_how_much_is_done() {
             id: ItemId(1),
             current: false,
             progress: None,
-            new: false
+            new: false,
+            trouble: false,
         }
     );
+}
+
+#[test]
+fn a_failed_press_marks_the_item_and_keeps_the_notice_until_something_plays() {
+    let (mut ui, _cmds, events) = test_ui(3, "");
+    let layout = ui.layout(3, 5);
+    ui.update(&layout, &[1]);
+    events.send(PlayerEvent::Stopped).unwrap();
+    events
+        .send(PlayerEvent::Trouble("no sound output found".into()))
+        .unwrap();
+    assert!(ui.update(&layout, &[]));
+    assert!(matches!(
+        ui.faces(&layout)[1],
+        Face::Item { trouble: true, .. }
+    ));
+    assert!(matches!(
+        ui.faces(&layout)[0],
+        Face::Item { trouble: false, .. }
+    ));
+    assert_eq!(
+        ui.trouble.as_ref().map(|t| t.text.as_str()),
+        Some("no sound output found")
+    );
+
+    assert!(!ui.drop_stale_mark(), "the mark stays for a while");
+    ui.trouble.as_mut().unwrap().at = Instant::now().checked_sub(TROUBLE_MARK).unwrap();
+    assert!(ui.drop_stale_mark(), "the mark goes, the text stays");
+    assert!(matches!(
+        ui.faces(&layout)[1],
+        Face::Item { trouble: false, .. }
+    ));
+    assert!(ui.trouble.is_some());
+
+    events.send(PlayerEvent::Playing(ItemId(0))).unwrap();
+    assert!(ui.update(&layout, &[]));
+    assert!(ui.trouble.is_none(), "something plays: the failure is over");
 }
 
 #[test]
