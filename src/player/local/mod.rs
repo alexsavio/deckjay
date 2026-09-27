@@ -442,7 +442,6 @@ struct Tuned {
     content_type: Option<String>,
 }
 
-/// symphonia has no HE-AAC (SBR) and no HLS.
 /// Opens a source with the decoder and turns a panic in it into an error.
 /// symphonia parses untrusted files and streams on the player thread, and
 /// a panic there would end playback for every speaker until a restart.
@@ -451,6 +450,7 @@ fn guarded(open: impl FnOnce() -> Result<Source>) -> Result<Source> {
         .unwrap_or_else(|_| Err(anyhow!("the decoder panicked; the file is skipped")))
 }
 
+/// symphonia has no HE-AAC (SBR) and no HLS.
 fn decodable(stream: &radio::Stream) -> Result<()> {
     let kind = match stream.content_type.as_deref() {
         _ if stream.is_hls() => "HLS",
