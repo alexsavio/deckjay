@@ -49,6 +49,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Show stations and playlists in the check and logs
 - Let the power key stop what kids-deck did not start
 - Let the rewind and forward keys jump in stories too
+- *(release)* Let git-cliff print release notes and previews (#4)
 
 ### 💼 Other
 
