@@ -16,6 +16,10 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 pi := env("PI_HOST", "pi@raspberrypi.local")
 pi_dir := env("PI_DIR", "~/deckjay")
 
+# The test servers stay open until the tests end: a full run needs more open
+# files than the macOS default of 256. It must share a line with `cargo test`.
+open_files := "ulimit -n 4096 2>/dev/null || true"
+
 # List all recipes
 [default]
 help:
@@ -56,11 +60,11 @@ install:
 
 # Run every test
 test:
-    cargo test
+    {{ open_files }}; cargo test
 
 # Run the tests whose name contains FILTER, e.g. `just test-match config::`
 test-match FILTER:
-    cargo test {{ FILTER }}
+    {{ open_files }}; cargo test {{ FILTER }}
 
 # Format the code
 format:
@@ -84,7 +88,7 @@ doc *ARGS:
 
 # Every check to pass before a commit: format, lint, tests, docs
 ci: fmt-check lint
-    cargo test
+    {{ open_files }}; cargo test
     @just doc
 
 # Check the dependencies for security advisories (needs cargo-audit)
