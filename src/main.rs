@@ -1,9 +1,9 @@
 //! deckjay: a music player with no screen, driven by pictures on a Stream Deck.
 //!
 //! Album covers are shown on an Elgato Stream Deck. Pressing a cover plays
-//! the album on a network speaker (Chromecast or HEOS) or on this computer's
-//! sound output. The program serves the source folders over HTTP and tells
-//! the speaker to fetch the tracks from it.
+//! the album on a network speaker (Chromecast or HEOS), on a Spotify Connect
+//! device, or on this computer's sound output. The program serves the source
+//! folders over HTTP and tells the speaker to fetch the tracks from it.
 //!
 //! Three threads work together:
 //!

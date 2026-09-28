@@ -336,6 +336,43 @@ removes the change again.
   allow SSH (22/tcp) and, for a Chromecast or HEOS speaker, the music
   server (8765/tcp, `http_port`): the speaker downloads the music from it.
 
+## ⬆️ Upgrading from kids-deck
+
+The program was called kids-deck before. An old install keeps that name
+until you move it: the service, the binary, the config and state folders
+and the service user. The music can stay where it is, because
+`config.toml` names its folders.
+
+A service install (steps 3 to 7), on the Pi:
+
+```sh
+sudo systemctl disable --now kids-deck
+sudo rm /etc/systemd/system/kids-deck.service /usr/local/bin/kids-deck
+sudo usermod --login deckjay --home /var/lib/deckjay kidsdeck
+sudo groupmod --new-name deckjay kidsdeck
+sudo mv /etc/kids-deck /etc/deckjay
+sudo mv /var/lib/kids-deck /var/lib/deckjay
+```
+
+Then do step 3 (the new binary) and step 7 (the new unit) again. The old
+unit must be gone first: two services would fight over the deck. The
+hostname can stay; use your old one where this guide says
+`deckjay.local`.
+
+A Docker install, on the Pi, then from your computer:
+
+```sh
+cd ~/kids-deck && docker compose down && cd && mv kids-deck deckjay
+docker image rm kids-deck:latest
+```
+
+```sh
+just deploy
+```
+
+`just deploy` now uses `~/deckjay` (set `PI_DIR` in `.env` if you changed
+it), and the config, music and state move with the folder.
+
 ## 🔵 Play on a Bluetooth speaker
 
 > **Not tested yet:** a real Bluetooth speaker, and raspotify together with

@@ -7,7 +7,7 @@ description = "A music player with no screen: pictures on an Elgato Stream Deck,
 license = "MIT"
 repository = "https://github.com/alexsavio/deckjay"
 readme = "README.md"
-keywords = ["stream-deck", "music-player", "kids", "chromecast", "raspberry-pi"]
+keywords = ["stream-deck", "music-player", "chromecast", "spotify", "raspberry-pi"]
 categories = ["multimedia::audio"]
 
 [dependencies]
