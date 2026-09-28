@@ -7,6 +7,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+### 🚀 Features
+
+- *(cli)* Commands, check exit codes, --version and systemd notify ([#10](https://github.com/alexsavio/deckjay/issues/10))
+
 ### 📚 Documentation
 
 - *(pi)* Drop the upgrade section ([#9](https://github.com/alexsavio/deckjay/issues/9))
