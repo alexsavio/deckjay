@@ -37,7 +37,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Jump back and forward in audiobooks and podcasts
 - Turn the deck dark when kids-deck stops
 - Make the deck simulator look like a real Stream Deck
-- *(deck)* Log key presses, speaker events and deck errors with context (#3)
+- *(deck)* Log key presses, speaker events and deck errors with context ([#3](https://github.com/alexsavio/deckjay/issues/3))
 
 ### 🐛 Bug Fixes
 
@@ -49,12 +49,13 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Show stations and playlists in the check and logs
 - Let the power key stop what kids-deck did not start
 - Let the rewind and forward keys jump in stories too
-- *(release)* Let git-cliff print release notes and previews (#4)
+- *(release)* Let git-cliff print release notes and previews ([#4](https://github.com/alexsavio/deckjay/issues/4))
+- *(changelog)* Link the PR numbers in commit subjects ([#6](https://github.com/alexsavio/deckjay/issues/6))
 
 ### 💼 Other
 
 - Release CalVer versions to GitHub and crates.io
-- Harden the player against hangs, dead threads and podcast data loss (#1)
+- Harden the player against hangs, dead threads and podcast data loss ([#1](https://github.com/alexsavio/deckjay/issues/1))
 - fix(player): give failing polls 20 s and keep the album on a failed volume or skip
 
 The failure budget counted polls, so HEOS (1 s poll) gave a network blip
@@ -133,7 +134,7 @@ guarded was inserted below the /// symphonia has no HE-AAC (SBR) and
 no HLS. line, which documents decodable, not guarded. Move guarded
 above it so the doc sits on decodable again.
 
-- Show why a press failed on the simulator page and mark the key (#2)
+- Show why a press failed on the simulator page and mark the key ([#2](https://github.com/alexsavio/deckjay/issues/2))
 
 - feat(simulator): show why a press failed on the page and mark the key
 
@@ -162,7 +163,7 @@ matching the assertion already made for the command-failure branch.
 - Play an item's content instead of an album
 - Let the deck forget images of faces it no longer shows
 - Let a speaker stop before another one takes over
-- [**breaking**] Rename the project to deckjay (#5)
+- [**breaking**] Rename the project to deckjay ([#5](https://github.com/alexsavio/deckjay/issues/5))
 
 ### 📚 Documentation
 
