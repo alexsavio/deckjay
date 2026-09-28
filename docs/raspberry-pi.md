@@ -291,8 +291,9 @@ From your computer, in one command:
 ssh -t you@kidsdeck.local journalctl -u kids-deck -f
 ```
 
-For more detail, such as every file a speaker downloads, run
-`sudo systemctl edit kids-deck` and add:
+For more detail (each key press and speaker event, every file the speaker
+downloads, the Elgato devices found, and the time tiles and redraws take),
+run `sudo systemctl edit kids-deck` and add:
 
 ```ini
 [Service]

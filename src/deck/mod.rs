@@ -8,7 +8,7 @@ mod remote;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use hidapi::HidApi;
 use image::RgbImage;
 
@@ -95,26 +95,34 @@ impl Deck {
     }
 
     pub fn set_brightness(&self, percent: u8) -> Result<()> {
-        self.backend.set_brightness(percent)
+        self.backend
+            .set_brightness(percent)
+            .with_context(|| format!("cannot set the brightness to {percent}%"))
     }
 
-    /// Queues `face` for `key`; `render` is only called if the image isn't cached yet.
+    /// Queues `face` for `key`; `render` is only called if the image isn't
+    /// cached yet. Returns false when the key already showed `face`.
     pub fn show(
         &mut self,
         key: usize,
         face: &Face,
         render: impl FnOnce() -> RgbImage,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if self.shown[key].as_ref() == Some(face) {
-            return Ok(());
+            return Ok(false);
         }
         if !self.encoded.contains_key(face) {
-            let data = self.backend.encode(render())?;
+            let data = self
+                .backend
+                .encode(render())
+                .with_context(|| format!("cannot encode the image of key {key}"))?;
             self.encoded.insert(*face, data);
         }
-        self.backend.write_image(key, &self.encoded[face])?;
+        self.backend
+            .write_image(key, &self.encoded[face])
+            .with_context(|| format!("cannot send key {key}"))?;
         self.shown[key] = Some(*face);
-        Ok(())
+        Ok(true)
     }
 
     /// Forgets the cached images of every face that fails `keep`, e.g. of
@@ -131,21 +139,23 @@ impl Deck {
 
     /// Sends all queued images to the device.
     pub fn flush(&self) -> Result<()> {
-        self.backend.flush()
+        self.backend.flush().context("cannot flush the deck")
     }
 
     /// Turns the deck dark: no key images, no notice, brightness 0. The next
     /// [`Deck::show`] sends every key again.
     pub fn blank(&mut self) -> Result<()> {
-        self.backend.clear()?;
+        self.backend.clear().context("cannot clear the deck")?;
         self.shown.fill(None);
         self.noticed = None;
-        self.backend.set_brightness(0)
+        self.set_brightness(0)
     }
 
     pub fn notice(&mut self, text: Option<&str>) -> Result<()> {
         if self.noticed.as_deref() != text {
-            self.backend.notice(text)?;
+            self.backend
+                .notice(text)
+                .context("cannot show the notice")?;
             self.noticed = text.map(str::to_owned);
         }
         Ok(())
@@ -153,7 +163,9 @@ impl Deck {
 
     /// Waits up to `timeout` for input and returns the keys that were pressed down.
     pub fn pressed_keys(&self, timeout: Duration) -> Result<Vec<usize>> {
-        self.backend.pressed_keys(timeout)
+        self.backend
+            .pressed_keys(timeout)
+            .context("cannot read key presses")
     }
 }
 

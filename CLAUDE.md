@@ -39,7 +39,9 @@ installs a headless Pi as a systemd service (and the Docker deploy).
   the container address, which the speaker cannot reach. Without Docker:
   `cargo run -- simulator` plus `just run --simulator http://localhost:8090`.
 - `just debug`: runs with `RUST_LOG=debug,tower_http=debug` (shows each file
-  the speaker fetches). In Docker: `RUST_LOG=info,tower_http=debug just sim`.
+  the speaker fetches, each key press and speaker event, the Elgato devices
+  found, and how long tiles and redraws take). In Docker:
+  `RUST_LOG=info,tower_http=debug just sim`.
 - macOS: a native `kids-deck` gets "No route to host" to LAN speakers while
   `ping` and `nc` work: that is Local Network privacy blocking the binary
   (Apple binaries are exempt). Grant the terminal Local Network access, or
