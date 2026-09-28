@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.PATCH).
 
+## [Unreleased]
+
+### 📚 Documentation
+
+- *(pi)* Drop the upgrade section ([#9](https://github.com/alexsavio/deckjay/issues/9))
+
 ## [2026.9.0] - 2026-09-28
 
 ### 🚀 Features
