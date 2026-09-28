@@ -299,11 +299,11 @@ fn flip_lights_more_dots_for_a_later_step() {
     assert!(counts.windows(2).all(|w| w[0] < w[1]), "{counts:?}");
 }
 
-/// Not a check, a look: with `KIDS_DECK_CONTACT_SHEET=<path>` set, renders
+/// Not a check, a look: with `DECKJAY_CONTACT_SHEET=<path>` set, renders
 /// every glyph and decoration at 144 px so a human can eyeball them.
 #[test]
 fn contact_sheet() {
-    let Ok(path) = std::env::var("KIDS_DECK_CONTACT_SHEET") else {
+    let Ok(path) = std::env::var("DECKJAY_CONTACT_SHEET") else {
         return;
     };
     let size = 144;

@@ -1,13 +1,13 @@
 # HEOS CLI
 
-kids-deck drives Denon / Marantz HEOS devices through the HEOS CLI, set by
+deckjay drives Denon / Marantz HEOS devices through the HEOS CLI, set by
 `speaker_type = "heos"` in `config.toml`. The code:
 
 - [`src/player/heos.rs`](../src/player/heos.rs): the player choice, the
   album walk and radio stations.
 - [`src/player/heos/cli.rs`](../src/player/heos/cli.rs): the protocol.
 - [`src/player/heos/tests.rs`](../src/player/heos/tests.rs): a fake receiver
-  on 127.0.0.1 that records every command line kids-deck sends, and can
+  on 127.0.0.1 that records every command line deckjay sends, and can
   send progress events for
   [`tests/progress.rs`](../src/player/heos/tests/progress.rs);
   [`tests/radio.rs`](../src/player/heos/tests/radio.rs) plays stations on
@@ -24,7 +24,7 @@ Tested on a Denon AVR-X1600H.
 ## Protocol
 
 - **Transport:** plain TCP to port 1255 of any HEOS device ("a telnet
-  connection", spec §2). No TLS, no login for the commands kids-deck uses.
+  connection", spec §2). No TLS, no login for the commands deckjay uses.
   One device controls every player of the HEOS system.
 - **Commands:** one ASCII line, `heos://<group>/<command>?<key>=<value>&…`,
   ended by `\r\n` (spec §3.1).
@@ -34,7 +34,7 @@ Tested on a Denon AVR-X1600H.
   `%25`, in commands and in replies. One exception: the `url` pair of
   `browse/play_stream` "should be the last attribute value pair … to handle
   url_path with special characters and command delimiters" (spec §4.4.10).
-  kids-deck sends it last and unencoded, as pyheos does (`command_line`).
+  deckjay sends it last and unencoded, as pyheos does (`command_line`).
   Track URLs are already percent-encoded per path segment by
   `library::url_for`.
 
@@ -56,10 +56,10 @@ line):
   `command under process`, then the real reply (spec §3.2).
   `Reply::answers` skips the first one.
 - The spec's examples pad command names (`" player/ set_volume "`) and quote
-  values (`pid='1'`). The AVR-X1600H does neither. kids-deck accepts both
+  values (`pid='1'`). The AVR-X1600H does neither. deckjay accepts both
   (`unspaced`, `unquote`).
 - Change events (`event/…` lines) are off on a new connection (spec
-  §4.1.1). kids-deck still sends `enable=off`, as the start-up sequence in
+  §4.1.1). deckjay still sends `enable=off`, as the start-up sequence in
   spec §2.1.1 advises, and polls instead. The one exception is the place
   in a track: no command returns it, only the change event
   `event/player_now_playing_progress` (spec §5), with `pid`, `cur_pos` and
@@ -76,11 +76,11 @@ Error codes that matter here (spec §6.2):
 | 13 | Processing previous command | not seen on hardware |
 | 14 | cannot play | not seen on hardware; the fake receiver uses it |
 
-## Commands kids-deck sends
+## Commands deckjay sends
 
 `HeosPlayer::call` puts `pid=<pid>` first on every player command.
 
-| Command | Sent | kids-deck reads |
+| Command | Sent | deckjay reads |
 |---|---|---|
 | `system/register_for_change_events?enable=off` | new connection | result |
 | `system/register_for_change_events?enable=on` | progress item | result |
@@ -106,7 +106,7 @@ Error codes that matter here (spec §6.2):
   `set_play_state stop` at its end, or the next album. Albums that do not
   report progress never turn events on, so their command lines are the ones
   below.
-- kids-deck never sends `get_queue`, `get_now_playing_media`,
+- deckjay never sends `get_queue`, `get_now_playing_media`,
   `play_next`, `play_previous` or `heart_beat`.
 
 `Connection::open` picks the `get_players` entry whose `ip` is
@@ -141,7 +141,7 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    resolves to, 5 s read and write timeouts,
    `register_for_change_events?enable=off`, `get_players`, pick the pid.
    The connection stays open. When a command on that open connection
-   finds the socket closed or reset (not a timeout), kids-deck connects
+   finds the socket closed or reset (not a timeout), deckjay connects
    again and sends the command once more: the CLI resets idle connections
    when it recovers from a hang (item 6), and a restarted receiver has
    none. Every command it sends is safe to send twice.
@@ -151,7 +151,7 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    reports progress first gets `Progress` for the start of that track.
    `start.position` is not used: the CLI has no command that seeks in a
    stream, so the track (an audiobook chapter) starts from its beginning,
-   and kids-deck logs that at debug level.
+   and deckjay logs that at debug level.
 3. **Poll** every 1 s while an album is active: `get_play_state`.
    - For an item that reports progress, the latest
      `player_now_playing_progress` read since the last poll gives the place
@@ -268,7 +268,7 @@ printf 'PWSTANDBY\r' | nc -w 2 192.168.1.40 23
 
 Written down in the module doc of `heos.rs`:
 
-- `play_stream` plays one URL and there is no queue for URLs, so kids-deck
+- `play_stream` plays one URL and there is no queue for URLs, so deckjay
   walks the album itself. It polls `get_play_state` every second instead of
   listening to change events: one connection, and the only event it parses
   is the progress event.
@@ -281,7 +281,7 @@ Written down in the module doc of `heos.rs`:
   counts as the end (`Finished`).
 - The place in a track is as old as the latest progress event, which comes
   about every 5 s (item 5). Progress events were seen on the AVR-X1600H;
-  kids-deck's use of them is tested against the fake receiver only.
+  deckjay's use of them is tested against the fake receiver only.
 - No seek: an item that resumes starts its track from the beginning. A
   one-file book (`.m4b`) therefore starts over; a book split into chapter
   files goes back to the start of the chapter. For the same reason ⏮ and ⏭
@@ -320,13 +320,13 @@ the code handles an item, the test in `heos/tests.rs` is named.
    `an_empty_queue_does_not_stop_playback`,
    `events_and_under_process_notes_before_a_reply_are_skipped`.
 3. **`state=unknown`.** `get_play_state` can answer `unknown`, before a
-   stream starts and after it ends. kids-deck treats it as `stop`. Test:
+   stream starts and after it ends. deckjay treats it as `stop`. Test:
    `unknown_counts_as_not_playing`.
 4. **Retries after the last track.** Without a stop, the receiver retried
    the finished stream about every 3 s, with `event/player_playback_error`
    "Playback error. Could not decode the audio stream" and "Unsupported
    format", and the state flipping between `stop` and `unknown`. Once it
-   played the last track again. So kids-deck sends
+   played the last track again. So deckjay sends
    `player/set_play_state?state=stop` when an album ends. Test:
    `the_last_track_ending_stops_the_album`.
 5. **Track length and now playing.**
@@ -348,7 +348,7 @@ the code handles an item, the test in `heos/tests.rs` is named.
 6. **CLI hangs.** Twice the CLI stopped answering for about 2 minutes right
    after clients disconnected abruptly: ping worked, the TCP connect
    worked, no replies came. Then it reset the connections and recovered.
-   kids-deck times out after 5 s and reports `Stopped`; polls failing for
+   deckjay times out after 5 s and reports `Stopped`; polls failing for
    20 s end the album. The next command reconnects. A command that
    finds its connection reset is sent again on a new one; a timed-out
    command is not. Tests: `a_silent_cli_fails_within_the_io_timeout`,
@@ -360,7 +360,7 @@ the code handles an item, the test in `heos/tests.rs` is named.
    Test: `players_lists_names_pids_and_ips`.
 8. **macOS Local Network privacy.** A self-built binary gets "No route to
    host" to LAN devices while `ping` and `nc` work. Docker is not affected.
-   Reproduced on 2026-09-24: the `kids-deck --check` binary printed
+   Reproduced on 2026-09-24: the `deckjay --check` binary printed
    `NOT reachable: … No route to host (os error 65)` while
    `/usr/bin/python3` got the reply above. Grant the terminal app Local
    Network access, or use `just sim`.

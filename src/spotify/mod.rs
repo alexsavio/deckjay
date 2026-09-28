@@ -1,6 +1,6 @@
 //! Spotify Connect: sign-in, tokens and the Web API.
 //!
-//! kids-deck does not play Spotify audio itself: it remote-controls a Connect
+//! deckjay does not play Spotify audio itself: it remote-controls a Connect
 //! device (a speaker, receiver or Chromecast) through the Web API, which needs
 //! Premium. `login` signs in once and saves the refresh token (`token`);
 //! `api::Client` then keeps an access token fresh.

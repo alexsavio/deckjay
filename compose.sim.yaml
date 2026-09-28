@@ -6,14 +6,14 @@
 # `http_port` in config.toml.
 services:
   deck-sim:
-    image: kids-deck
+    image: deckjay
     pull_policy: never
     command: ["simulator", "--model", "${DECK_MODEL:-mk2}"]
     ports:
       - "8090:8090"
 
-  kids-deck:
-    image: kids-deck
+  deckjay:
+    image: deckjay
     build: .
     command:
       - /app/config.toml
@@ -31,7 +31,7 @@ services:
       # same path as on this computer. Put those in compose.sim.local.yaml
       # (git ignores it; `just sim` adds it), e.g.:
       #   services:
-      #     kids-deck:
+      #     deckjay:
       #       volumes:
       #         - /Volumes/Stick/audiobooks:/Volumes/Stick/audiobooks:ro
     environment:

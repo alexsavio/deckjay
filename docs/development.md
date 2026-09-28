@@ -1,6 +1,6 @@
 # 💻 Development
 
-How to build, run and test kids-deck on your computer. You need neither a
+How to build, run and test deckjay on your computer. You need neither a
 Stream Deck nor a speaker to start: the web simulator stands in for the
 deck, and `speaker_type = "local"` plays on the computer's own sound
 output.
@@ -30,7 +30,7 @@ output.
 
 ## 🧪 Test without a Stream Deck
 
-`kids-deck simulator` is a web page that acts as a Stream Deck: it shows
+`deckjay simulator` is a web page that acts as a Stream Deck: it shows
 the key images, and a click on a key is a key press. The player uses it in
 place of the USB deck when you start it with `--simulator URL`. When a
 press fails (no sound output in Docker, a speaker that does not answer),
@@ -70,7 +70,7 @@ program natively:
 
 macOS asks two things the first time; allow both:
 
-- **Incoming network connections** for `kids-deck`: the speaker downloads
+- **Incoming network connections** for `deckjay`: the speaker downloads
   the music from your Mac.
 - **Local Network access** for your terminal app (System Settings →
   Privacy & Security → Local Network): needed to talk to the speaker.
@@ -80,7 +80,7 @@ On Linux, install `99-streamdeck.rules` (its first lines say how), so the
 program can use the deck without root.
 
 Ctrl-C (or closing the terminal) stops the program and turns the deck
-dark; `kids-deck --blank` does the same for a deck left lit.
+dark; `deckjay --blank` does the same for a deck left lit.
 
 `just debug` logs more, including each file request the speaker makes.
 
@@ -97,7 +97,7 @@ Run `just` to list every recipe. The ones you need most:
 | `just ci` | Format check, clippy, tests and docs: run before a commit |
 | `just test-match NAME` | Run only the tests whose name contains `NAME` |
 | `just doc --open` | Build and open the API docs |
-| `just install` | Install `kids-deck` into `~/.cargo/bin` |
+| `just install` | Install `deckjay` into `~/.cargo/bin` |
 | `just spotify-login` | Sign in to Spotify once |
 | `just deploy` | Build the Pi image and start it on the Pi in Docker |
 
@@ -137,7 +137,7 @@ crates.io. `just publish-dry` checks the package first.
 | `icons/` | Draws control icons, kind glyphs and key decorations (no image files needed) |
 | `state.rs` | What the deck remembers in `state.json`: shelf, pages, audiobook progress |
 | `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
-| `simulator/` | The web Stream Deck simulator (`kids-deck simulator`) |
+| `simulator/` | The web Stream Deck simulator (`deckjay simulator`) |
 | `player/` | The player thread: shared command loop (`mod.rs`), when to report progress (`progress.rs`), speaker or Spotify (`router.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`, radio streams in `local/netread.rs`), Spotify Connect (`spotify.rs`) |
 | `server.rs` | HTTP server the speaker downloads the music from; its allowlist changes as podcasts refresh |
 | `podcasts/` | The podcasts thread: feeds, download plan, cache and refresh |

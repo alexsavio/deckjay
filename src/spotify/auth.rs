@@ -15,7 +15,7 @@ use super::api::{ApiError, Reply};
 use super::token::Secret;
 
 pub const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
-pub const LOGIN_EXPIRED: &str = "the Spotify login expired: run `kids-deck spotify-login`";
+pub const LOGIN_EXPIRED: &str = "the Spotify login expired: run `deckjay spotify-login`";
 pub const SCOPES: &str = "user-read-playback-state user-modify-playback-state \
                           playlist-read-private playlist-read-collaborative";
 
@@ -58,7 +58,7 @@ fn random_base64url<const N: usize>() -> Result<String> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-/// The page where the account owner allows kids-deck to control playback.
+/// The page where the account owner allows deckjay to control playback.
 pub fn authorize_url(client_id: &str, redirect_uri: &str, challenge: &str, state: &str) -> String {
     let query: Vec<String> = [
         ("client_id", client_id),
@@ -75,7 +75,7 @@ pub fn authorize_url(client_id: &str, redirect_uri: &str, challenge: &str, state
     format!("{AUTHORIZE_URL}?{}", query.join("&"))
 }
 
-/// The sign-in code from the query of the redirect back to kids-deck.
+/// The sign-in code from the query of the redirect back to deckjay.
 pub fn parse_callback(query: &str, expected_state: &str) -> Result<Secret> {
     let param = |name: &str| {
         query.split('&').find_map(|pair| {
@@ -86,12 +86,12 @@ pub fn parse_callback(query: &str, expected_state: &str) -> Result<Secret> {
     if param("state").as_deref() != Some(expected_state) {
         bail!(
             "this answer belongs to another sign-in (its state does not match): \
-             run `kids-deck spotify-login` again"
+             run `deckjay spotify-login` again"
         );
     }
     match param("error").as_deref() {
         Some("access_denied") => {
-            bail!("kids-deck was not allowed to use the Spotify account (access_denied)")
+            bail!("deckjay was not allowed to use the Spotify account (access_denied)")
         }
         Some(error) => bail!("the Spotify sign-in failed: {error}"),
         None => {}
@@ -140,7 +140,7 @@ pub fn exchange_code(
 }
 
 /// A revoked or expired refresh token gives an error that names
-/// `kids-deck spotify-login`, with the [`ApiError`] (`invalid_grant`) beneath it.
+/// `deckjay spotify-login`, with the [`ApiError`] (`invalid_grant`) beneath it.
 pub fn refresh(
     agent: &Agent,
     accounts: &str,

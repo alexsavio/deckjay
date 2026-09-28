@@ -33,7 +33,7 @@ fn tracks() -> Vec<TrackInfo> {
         .collect()
 }
 
-/// A media status entry with only the fields kids-deck reads set.
+/// A media status entry with only the fields deckjay reads set.
 fn entry(state: PlayerState, content_id: Option<&str>) -> StatusEntry {
     StatusEntry {
         media_session_id: 1,

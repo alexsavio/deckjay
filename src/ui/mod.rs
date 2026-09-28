@@ -52,7 +52,7 @@ pub struct PlayerGone;
 
 impl std::fmt::Display for PlayerGone {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the player thread ended; kids-deck exits so the service can restart it")
+        f.write_str("the player thread ended; deckjay exits so the service can restart it")
     }
 }
 

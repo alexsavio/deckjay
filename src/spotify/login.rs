@@ -1,4 +1,4 @@
-//! `kids-deck spotify-login`: signs in once in a browser and saves the refresh
+//! `deckjay spotify-login`: signs in once in a browser and saves the refresh
 //! token. Spotify sends the browser back to a listener on this machine; on a
 //! machine without a browser, the address the browser ends up at can be
 //! pasted instead.
@@ -26,11 +26,11 @@ const ACCEPT_POLL: Duration = Duration::from_millis(50);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_REQUEST_HEAD: u64 = 16 * 1024;
 
-const DONE_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>kids-deck</title>\
-    <p>Done: kids-deck may now control Spotify. You can close this tab.</p>";
-const FAILED_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>kids-deck</title>\
+const DONE_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>deckjay</title>\
+    <p>Done: deckjay may now control Spotify. You can close this tab.</p>";
+const FAILED_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>deckjay</title>\
     <p>The sign-in did not work; the terminal says why. You can close this tab.</p>";
-const NOT_FOUND_PAGE: &str = "<!doctype html><title>kids-deck</title><p>Not found.</p>";
+const NOT_FOUND_PAGE: &str = "<!doctype html><title>deckjay</title><p>Not found.</p>";
 
 /// Signs in and saves `<state_dir>/spotify-token.json`, then prints the account
 /// name and the Connect devices Spotify sees.
@@ -73,7 +73,7 @@ fn sign_in(
     let state = auth::new_state()?;
     writeln!(
         out,
-        "Open this address in a browser, sign in to Spotify and allow kids-deck:\n\n{}\n",
+        "Open this address in a browser, sign in to Spotify and allow deckjay:\n\n{}\n",
         auth::authorize_url(client_id, &redirect_uri, &pkce.challenge, &state)
     )?;
     writeln!(
@@ -140,7 +140,7 @@ fn describe(device: &Device) -> String {
         notes.push("active");
     }
     if device.is_restricted {
-        notes.push("restricted: kids-deck cannot control it");
+        notes.push("restricted: deckjay cannot control it");
     }
     format!("{} ({})", device.name, notes.join(", "))
 }
@@ -186,7 +186,7 @@ fn wait_for_code(
             }
             Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {
                 break Err(anyhow!(
-                    "no answer from Spotify after {}: run `kids-deck spotify-login` again",
+                    "no answer from Spotify after {}: run `deckjay spotify-login` again",
                     minutes_or_seconds(timeout)
                 ));
             }

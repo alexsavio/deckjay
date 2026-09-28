@@ -11,7 +11,7 @@ use ureq::Agent;
 use ureq::tls::{TlsConfig, TlsProvider};
 
 /// Sent with every request, so servers can tell who fetches their feeds.
-pub const USER_AGENT: &str = concat!("kids-deck/", env!("CARGO_PKG_VERSION"));
+pub const USER_AGENT: &str = concat!("deckjay/", env!("CARGO_PKG_VERSION"));
 
 /// `rust_cast` builds its TLS config from the process-wide default provider.
 /// Installing aws-lc-rs up front keeps that choice explicit.

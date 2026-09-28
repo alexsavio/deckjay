@@ -14,7 +14,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Override in `.env` or the environment.
 pi := env("PI_HOST", "pi@raspberrypi.local")
-pi_dir := env("PI_DIR", "~/kids-deck")
+pi_dir := env("PI_DIR", "~/deckjay")
 
 # List all recipes
 [default]
@@ -50,7 +50,7 @@ preview FILE="layout.png":
 build:
     cargo build
 
-# Install kids-deck into ~/.cargo/bin
+# Install deckjay into ~/.cargo/bin
 install:
     cargo install --path . --locked
 
@@ -112,11 +112,11 @@ sim-down:
 
 # Build the Raspberry Pi image (linux/arm64)
 image:
-    docker buildx build --platform linux/arm64 -t kids-deck --load .
+    docker buildx build --platform linux/arm64 -t deckjay --load .
 
 # Copy the image, compose file, config and music to the Pi, then start it
 deploy: image
-    docker save kids-deck | ssh {{ pi }} docker load
+    docker save deckjay | ssh {{ pi }} docker load
     ssh {{ pi }} "mkdir -p {{ pi_dir }}/music {{ pi_dir }}/state"
     scp docker-compose.yml config.toml {{ pi }}:{{ pi_dir }}/
     rsync -a music/ {{ pi }}:{{ pi_dir }}/music/
@@ -129,7 +129,7 @@ pi-music-prune:
 
 # Sign in to Spotify on the Pi: open the printed address here, paste back where the browser ends
 pi-spotify-login:
-    ssh -t {{ pi }} "cd {{ pi_dir }} && docker compose run --rm kids-deck spotify-login /app/config.toml"
+    ssh -t {{ pi }} "cd {{ pi_dir }} && docker compose run --rm deckjay spotify-login /app/config.toml"
 
 # Follow the logs on the Pi
 pi-logs:

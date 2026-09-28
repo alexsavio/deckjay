@@ -52,7 +52,7 @@ brightness = 60
 # absolute; it must be writable.
 # state_dir = "state"
 
-# Spotify (needs Premium): kids-deck remote-controls a Spotify Connect device,
+# Spotify (needs Premium): deckjay remote-controls a Spotify Connect device,
 # such as a speaker, a receiver or a Chromecast. Make an app at
 # https://developer.spotify.com/dashboard with the redirect URI
 # http://127.0.0.1:8898/callback and the Web API, put its Client ID here,

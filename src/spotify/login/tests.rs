@@ -166,7 +166,7 @@ fn the_browser_brings_the_code_back() {
         "Spotify account: Parent\n",
         "  Den (AVR)\n",
         "  Kitchen Speaker (Speaker, active)\n",
-        "  Old TV (TV, restricted: kids-deck cannot control it)\n",
+        "  Old TV (TV, restricted: deckjay cannot control it)\n",
     ] {
         assert!(text.contains(line), "{line:?} missing in:\n{text}");
     }
@@ -223,7 +223,7 @@ fn without_an_answer_it_gives_up_and_stops_listening() {
     let mut login = Login::start(io::empty(), Duration::from_millis(300));
     let err = login.result().unwrap_err().to_string();
     assert!(err.contains("no answer from Spotify"), "{err}");
-    assert!(err.contains("kids-deck spotify-login"), "{err}");
+    assert!(err.contains("deckjay spotify-login"), "{err}");
     let address = login.redirect_uri().strip_prefix("http://").unwrap();
     let address = address.strip_suffix("/callback").unwrap();
     assert!(TcpStream::connect(address).is_err());

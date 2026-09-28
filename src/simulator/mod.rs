@@ -1,5 +1,5 @@
 //! A Stream Deck simulator: a web page that shows the key images and turns
-//! clicks into key presses. Run it with `kids-deck simulator`; the player
+//! clicks into key presses. Run it with `deckjay simulator`; the player
 //! connects with `--simulator http://HOST:PORT` instead of using USB.
 //!
 //! HTTP API (the player uses `/api/*` except `/api/press`, which the page uses):

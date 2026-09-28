@@ -1,6 +1,6 @@
 # Local audio out
 
-With `speaker_type = "local"` in `config.toml`, kids-deck plays the album
+With `speaker_type = "local"` in `config.toml`, deckjay plays the album
 itself, on the sound output of the computer it runs on: the headphone jack or
 HDMI of a Raspberry Pi, or the speakers of a Mac. There is no network
 speaker, no `speaker_host` and no music web server. The code:
@@ -183,7 +183,7 @@ deck shows the album stopped). Then the stream stays open, playing silence
 between albums.
 
 The stream uses the output's default format (rate, channels, sample type);
-kids-deck never asks the output to change it. Decoded audio is fitted to
+deckjay never asks the output to change it. Decoded audio is fitted to
 it:
 
 - **Rate:** linear interpolation when the file's rate differs, for example
@@ -251,7 +251,7 @@ names.
 - **Pi:** `docker-compose.yml` runs the container privileged with the
   host's `/dev` mounted, so `/dev/snd` is there. The image has the ALSA
   library (`libasound2t64`); the build stage needs `libasound2-dev`.
-  kids-deck talks to ALSA directly, not through a sound server, so run it
+  deckjay talks to ALSA directly, not through a sound server, so run it
   on Raspberry Pi OS Lite, or stop the host's PipeWire or PulseAudio: a
   sound server holds the card, and the album press fails with the device
   busy.

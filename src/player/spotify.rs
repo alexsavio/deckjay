@@ -1,6 +1,6 @@
 //! Spotify playlists, played by remote-controlling a Spotify Connect device
 //! through the Web API ([`crate::spotify::api`]). The audio never passes
-//! through kids-deck: Spotify streams it to the device.
+//! through deckjay: Spotify streams it to the device.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -206,7 +206,7 @@ impl Speaker for SpotifyPlayer {
     }
 
     /// Pauses the configured device whatever it plays, e.g. a playlist that
-    /// an earlier run of kids-deck started.
+    /// an earlier run of deckjay started.
     fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
         self.stop(events)?;
         let wanted = self.connect.device.clone();

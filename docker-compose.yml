@@ -1,7 +1,7 @@
 # For the Raspberry Pi. Put this file next to config.toml and the music folder.
 services:
-  kids-deck:
-    image: kids-deck:latest
+  deckjay:
+    image: deckjay:latest
     restart: unless-stopped
     # Host networking: the speaker must reach the web server, and replies from
     # the speaker must reach us.

@@ -11,7 +11,7 @@
 //! stops it instead when the receiver refuses, and play/pause loads it
 //! again, so it always goes on live.
 //!
-//! kids-deck opens the socket itself and hands it to the `rust_cast` channels,
+//! deckjay opens the socket itself and hands it to the `rust_cast` channels,
 //! so every read and write has a timeout: a speaker that accepts the
 //! connection and then goes quiet fails the command instead of holding the
 //! player thread for good.
