@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/alexsavio/deckjay/actions/workflows/ci.yml/badge.svg)](https://github.com/alexsavio/deckjay/actions/workflows/ci.yml)
 [![zizmor](https://github.com/alexsavio/deckjay/actions/workflows/zizmor.yml/badge.svg)](https://github.com/alexsavio/deckjay/actions/workflows/zizmor.yml)
+[![crates.io](https://img.shields.io/crates/v/deckjay.svg)](https://crates.io/crates/deckjay)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A music player with no screen: press a picture on an Elgato Stream Deck,
