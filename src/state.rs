@@ -129,7 +129,7 @@ impl Store {
         match serde_json::from_str::<State>(&text) {
             Ok(state) if state.version > VERSION => {
                 warn!(
-                    "{} is from a newer kids-deck; it is left as it is and nothing will be remembered",
+                    "{} is from a newer deckjay; it is left as it is and nothing will be remembered",
                     path.display()
                 );
                 Store::memory(State::default())

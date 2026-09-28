@@ -5,7 +5,7 @@ code in this repository.
 
 ## What this is
 
-`kids-deck`, a Rust binary: album covers on an Elgato Stream Deck; pressing
+`deckjay`, a Rust binary: album covers on an Elgato Stream Deck; pressing
 one plays the album on a network speaker, Chromecast built-in (built for a JBL
 Authentics 300) or Denon / Marantz HEOS, or on the computer's own sound output
 (`speaker_type` = `cast`, `heos` or `local` in `config.toml`).
@@ -29,7 +29,7 @@ installs a headless Pi as a systemd service (and the Docker deploy).
   `speaker_host` (unless `advertise_host` is set).
 - `just doctor` (`--check`): sources and their items, connected decks, speaker
   reachability, and with `[spotify]` the account and its Connect devices.
-- `just spotify-login` (`kids-deck spotify-login`): the one-time Spotify
+- `just spotify-login` (`deckjay spotify-login`): the one-time Spotify
   sign-in (OAuth PKCE, `src/spotify/login.rs`); the token goes to
   `<state_dir>/spotify-token.json`, mode 0600. The default log filter keeps
   `ureq_proto` at info, because at trace it logs raw requests with tokens.
@@ -42,7 +42,7 @@ installs a headless Pi as a systemd service (and the Docker deploy).
   the speaker fetches, each key press and speaker event, the Elgato devices
   found, and how long tiles and redraws take). In Docker:
   `RUST_LOG=info,tower_http=debug just sim`.
-- macOS: a native `kids-deck` gets "No route to host" to LAN speakers while
+- macOS: a native `deckjay` gets "No route to host" to LAN speakers while
   `ping` and `nc` work: that is Local Network privacy blocking the binary
   (Apple binaries are exempt). Grant the terminal Local Network access, or
   test in Docker (`just sim`).
@@ -115,7 +115,7 @@ servers:
   saves them in `state.json`. The network backends share `connect` (every resolved
   address, 3 s timeout); all three share `clamp_volume`.
   - `cast.rs`: connectionless; every command opens a fresh connection and
-    drops it. kids-deck opens the socket itself (3 s connect, 15 s read and
+    drops it. deckjay opens the socket itself (3 s connect, 15 s read and
     write timeouts, TLS without a certificate check) and hands it to the
     `rust_cast` channels, because `rust_cast` sets no timeout. Tests drive
     it against `FakeCast` over plain TCP. Polls every 4 s while an album is
@@ -208,7 +208,7 @@ such as "connection refused" or "host not found". An HTTP error status or a
 URL ureq cannot use (no `http://`, `https://`) is a real error. A simulator
 grid is checked too: at least 2 rows, at most 64 keys, keys of 16 to 512 px.
 
-Simulator (`simulator/`): `kids-deck simulator` runs an axum server on its
+Simulator (`simulator/`): `deckjay simulator` runs an axum server on its
 own single-thread tokio runtime with the page (`page.html`) and the
 `/api/*` routes; the route table is the module doc of `simulator/mod.rs`, and
 `Info` / `Brightness` / `Notice` / `State` are shared with the client. The
@@ -237,7 +237,7 @@ Rendering:
   a free control key (XL), else the top-right item key when more than 6
   item keys remain (MK.2), else none; `Layout::slots` lists the item keys
   left for items and navigation. It sends `PlayerCmd::Off` (the player loop
-  calls `Speaker::stop_everything`, which also stops what kids-deck did not
+  calls `Speaker::stop_everything`, which also stops what deckjay did not
   start, e.g. after a restart: Cast quits every app but the idle screen,
   HEOS sends `set_play_state stop`, Spotify pauses its device; then
   `Speaker::standby`: HEOS sends `PWSTANDBY` to the receiver's control port

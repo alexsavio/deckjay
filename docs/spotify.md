@@ -1,6 +1,6 @@
 # Spotify
 
-kids-deck does not play Spotify audio itself. It remote-controls a Spotify
+deckjay does not play Spotify audio itself. It remote-controls a Spotify
 Connect device (a speaker, a receiver such as the Denon, or a Chromecast)
 through the official Spotify Web API. That needs a Spotify **Premium**
 account. The code:
@@ -15,12 +15,12 @@ account. The code:
 
 1. Open <https://developer.spotify.com/dashboard> and sign in with the
    Premium account.
-2. Create an app. Name and description: anything, e.g. "kids-deck".
+2. Create an app. Name and description: anything, e.g. "deckjay".
 3. Redirect URI: `http://127.0.0.1:8898/callback`, exactly. Spotify refuses
    `localhost`.
 4. APIs: tick **Web API**.
 5. Copy the app's **Client ID**. The app never needs its client secret:
-   kids-deck signs in with PKCE.
+   deckjay signs in with PKCE.
 
 Apps stay in development mode: only the owner and up to five users added in
 the dashboard can use them. That is enough for one family.
@@ -50,9 +50,9 @@ just pi-spotify-login     # on the Pi, over SSH
 ```
 
 The command prints an address. Open it in a browser, sign in and allow
-kids-deck. The browser then goes to `http://127.0.0.1:8898/callback`:
+deckjay. The browser then goes to `http://127.0.0.1:8898/callback`:
 
-- On the same computer, kids-deck answers there and the sign-in ends.
+- On the same computer, deckjay answers there and the sign-in ends.
 - On the Pi, that page does not load on the Mac's browser. Copy the
   address from the browser's address bar and paste it into the terminal.
   (Or forward the port: `ssh -L 8898:127.0.0.1:8898 pi@raspberrypi.local`.)
@@ -94,14 +94,14 @@ A playlist press:
    device is idle, the transfer and the play are sent once more.
 
 The deck's keys then work on Spotify too: play/pause, next, previous and
-the volume keys (`max_volume` holds as for the speaker). kids-deck asks
+the volume keys (`max_volume` holds as for the speaker). deckjay asks
 Spotify what plays every 5 s while playing and every 15 s while paused. If
 the device plays something else (someone took over in the Spotify app),
 the key shows the playlist stopped.
 
 ## Covers
 
-Each playlist key shows the playlist's cover once kids-deck has fetched
+Each playlist key shows the playlist's cover once deckjay has fetched
 it: at start, a background thread saves missing covers in
 `<state_dir>/spotify-covers/`. A new playlist's cover shows from the next
 start; until then its key shows the Spotify glyph. `picture` in the
@@ -111,7 +111,7 @@ start; until then its key shows the Spotify glyph. `picture` in the
 
 Spotify lists a Google Cast device (a Chromecast, a Lenovo smart display,
 a TV with Chromecast built-in) only while Spotify is the app that plays on
-it. When kids-deck plays an album, a book, a podcast or radio on the same
+it. When deckjay plays an album, a book, a podcast or radio on the same
 Cast device, Spotify loses it, and the next playlist press fails with "no
 Spotify Connect device matches" until someone casts Spotify to it again
 from the phone. So for Spotify pick a device with Spotify Connect built in

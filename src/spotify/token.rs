@@ -55,17 +55,13 @@ impl TokenFile {
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == ErrorKind::NotFound => bail!(
-                "not signed in to Spotify ({} is missing): run `kids-deck spotify-login`",
+                "not signed in to Spotify ({} is missing): run `deckjay spotify-login`",
                 path.display()
             ),
             Err(err) => return Err(err).with_context(|| format!("cannot read {}", path.display())),
         };
-        serde_json::from_str(&text).with_context(|| {
-            format!(
-                "{} is damaged: run `kids-deck spotify-login`",
-                path.display()
-            )
-        })
+        serde_json::from_str(&text)
+            .with_context(|| format!("{} is damaged: run `deckjay spotify-login`", path.display()))
     }
 
     /// Atomic: a crash leaves the old file or the new one, never half of one.
@@ -189,7 +185,7 @@ mod tests {
     fn a_missing_file_asks_for_spotify_login() {
         let dir = tempfile::tempdir().unwrap();
         let err = TokenFile::load(dir.path()).unwrap_err().to_string();
-        assert!(err.contains("run `kids-deck spotify-login`"), "{err}");
+        assert!(err.contains("run `deckjay spotify-login`"), "{err}");
     }
 
     #[test]
@@ -197,7 +193,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(TokenFile::path(dir.path()), "{\"client_id\": ").unwrap();
         let err = format!("{:#}", TokenFile::load(dir.path()).unwrap_err());
-        assert!(err.contains("run `kids-deck spotify-login`"), "{err}");
+        assert!(err.contains("run `deckjay spotify-login`"), "{err}");
     }
 
     #[test]

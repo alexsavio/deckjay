@@ -257,7 +257,7 @@ trait Speaker {
         Ok(())
     }
     /// The power key: stops whatever the device plays, also what another app
-    /// or an earlier run of kids-deck started.
+    /// or an earlier run of deckjay started.
     fn stop_everything(&mut self, events: &mut Emitter) -> Result<()> {
         self.stop(events)
     }

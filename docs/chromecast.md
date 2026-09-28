@@ -4,7 +4,7 @@
 Chromecast built-in), see [Seen on real hardware](#seen-on-real-hardware).
 The target speaker, a JBL Authentics 300, is not tested yet. The other facts
 below come from the code, the rust_cast 0.21.0 source, a dump of the bytes
-rust_cast writes for kids-deck's calls, and Google's docs.
+rust_cast writes for deckjay's calls, and Google's docs.
 
 Cast is the default `speaker_type`. The code:
 
@@ -27,7 +27,7 @@ closed port. No test talks Cast V2.
 ## Protocol (Cast V2)
 
 - **Transport:** TCP port 8009 with TLS. Google lists TCP 8008–8009 for
-  casting. kids-deck calls `CastDevice::connect_without_host_verification`:
+  casting. deckjay calls `CastDevice::connect_without_host_verification`:
   rustls with a verifier that accepts any server certificate but still
   checks the handshake signatures. (`CastDevice::connect` would check the
   certificate against the platform roots and the host name.) The device
@@ -50,7 +50,7 @@ closed port. No test talks Cast V2.
 
 Namespaces, all `urn:x-cast:com.google.cast.` plus:
 
-| Namespace | kids-deck sends | Replies it waits for |
+| Namespace | deckjay sends | Replies it waits for |
 |---|---|---|
 | `tp.connection` | `CONNECT` | none |
 | `tp.heartbeat` | nothing | none (the receiver's `PING`s are buffered) |
@@ -61,16 +61,16 @@ rust_cast turns `LAUNCH_ERROR` and the media errors `LOAD_FAILED`,
 `LOAD_CANCELLED`, `INVALID_PLAYER_STATE` and `INVALID_REQUEST` into a
 failed call.
 
-## Messages kids-deck sends
+## Messages deckjay sends
 
 The payloads below are the exact JSON rust_cast 0.21.0 writes, captured by
 running its channels against a stream that records the bytes, all on one
-connection. Ids 1 to 4 match a kids-deck album start with the Default Media
+connection. Ids 1 to 4 match a deckjay album start with the Default Media
 Receiver not running yet. Ids 5 to 7 and `mediaSessionId: 1` come from the
-dump: kids-deck opens a new connection per command, so ids restart at 1,
+dump: deckjay opens a new connection per command, so ids restart at 1,
 and it takes `mediaSessionId` from `MEDIA_STATUS`.
 
-| rust_cast call | To | kids-deck reads from the reply |
+| rust_cast call | To | deckjay reads from the reply |
 |---|---|---|
 | `connection.connect("receiver-0")` | `receiver-0` | no reply |
 | `receiver.get_status()` | `receiver-0` | `applications[]` |
@@ -91,7 +91,7 @@ and it takes `mediaSessionId` from `MEDIA_STATUS`.
 {"requestId":3,"type":"LAUNCH","appId":"CC1AD845"}
 ```
 
-From an app entry kids-deck uses `appId`, `sessionId` and `transportId`.
+From an app entry deckjay uses `appId`, `sessionId` and `transportId`.
 `CC1AD845` is the Default Media Receiver, Google's hosted receiver app
 (`DEFAULT_MEDIA_RECEIVER_APPLICATION_ID`); it needs no registration and has
 no custom UI. The `LOAD` (wrapped, one queue item shown; `sessionId` and
@@ -130,7 +130,7 @@ the destination come from the app entry of `RECEIVER_STATUS`):
 - `currentTime` is `start.position` in seconds (`LoadOptions.current_time`),
   0.0 unless an item resumes inside a track (see
   [Resume inside a track](#resume-inside-a-track)).
-- kids-deck never sends `QUEUE_*`, `CLOSE`, `PING` or `PONG`, `SEEK` only
+- deckjay never sends `QUEUE_*`, `CLOSE`, `PING` or `PONG`, `SEEK` only
   right after a `LOAD` that resumes inside a track and for ⏪ / ⏩, and
   `STOP` only for a station the receiver will not pause (see
   [Radio](#radio)) and before another speaker takes over (item 9 of
@@ -142,7 +142,7 @@ the destination come from the app entry of `RECEIVER_STATUS`):
   receiver goes on with the next queue item by itself. Tested on the pure
   `seek_target` only, not on a receiver.
 
-`MEDIA_STATUS` fields kids-deck reads (first entry only): `playerState`
+`MEDIA_STATUS` fields deckjay reads (first entry only): `playerState`
 (`IDLE`, `PLAYING`, `BUFFERING`, `PAUSED`), `idleReason`, `mediaSessionId`,
 `media.contentId`, `media.duration` and `currentTime` (seconds).
 
@@ -195,7 +195,7 @@ Every command opens its own connection and drops it at the end, without a
    and nothing to pause: nothing is sent, emits `Stopped`.
 6. **Volume key:** `SET_VOLUME` to `receiver-0`, level clamped to 0.0–1.0.
    This is the device volume, not the stream volume.
-7. **End of album:** kids-deck sends nothing. Google documents that a queue
+7. **End of album:** deckjay sends nothing. Google documents that a queue
    item with `autoplay` starts "when the item becomes the currentItem", and
    that with `REPEAT_OFF` "When the queue is completed the media session is
    terminated." The next poll should then see `IDLE` (idle reason
@@ -277,7 +277,7 @@ An item that resumes (an audiobook) sends `PlayerCmd::Play` with
 
 Whether a receiver applies the `LOAD`'s `currentTime` to the first queue
 item when that item says `startTime` 0 is not documented clearly enough to
-rely on. So kids-deck sends both: `currentTime` in the `LOAD`, then a `SEEK`
+rely on. So deckjay sends both: `currentTime` in the `LOAD`, then a `SEEK`
 (`seek_after_load`) to the `mediaSessionId` of the first entry in the
 `LOAD`'s reply, with `resumeState` `PLAYBACK_START`. The payload, from the
 field order of rust_cast's `PlaybackSeekRequest` (not a byte capture):
@@ -301,7 +301,7 @@ field order of rust_cast's `PlaybackSeekRequest` (not a byte capture):
 ## Seen on real hardware
 
 Lenovo smart display CD-4N341Y, 2026-09-24, through
-`just sim` (kids-deck in Docker, the web deck simulator for the keys), with
+`just sim` (deckjay in Docker, the web deck simulator for the keys), with
 the two-track test album (a 15 s MP3, then a 15 s m4a with its index at the
 start):
 
@@ -309,7 +309,7 @@ start):
    queue: the device launched the Default Media Receiver (`CC1AD845`).
    With the app already running, a load took about 1 s.
 2. **Queue.** The device fetched each file when its track started: the MP3,
-   then the m4a 15 s later. kids-deck sent nothing in between; the Cast
+   then the m4a 15 s later. deckjay sent nothing in between; the Cast
    queue moves on by itself.
 3. **Keys.** Play/pause paused and resumed. Next went to track 2. Previous,
    pressed 4 s into track 2 (under the 5 s rule), went back to track 1.
@@ -323,7 +323,7 @@ start):
 
 ## Quirks and limits
 
-- **Timeouts.** rust_cast sets no timeout anywhere, so kids-deck opens
+- **Timeouts.** rust_cast sets no timeout anywhere, so deckjay opens
   the socket itself (3 s to connect, `IO_TIMEOUT` of 15 s on each read and
   write), wraps it in TLS without a certificate check, as
   `connect_without_host_verification` does, and hands it to rust_cast's
@@ -338,7 +338,7 @@ start):
   rust_cast's field docs and Google's `MediaStatus`; not seen on a device.
   There is no time limit on it (HEOS has `LOAD_TIMEOUT`): a receiver that
   stays in that state keeps the deck on "playing".
-- **No heartbeat.** kids-deck never sends or answers `PING`. Each
+- **No heartbeat.** deckjay never sends or answers `PING`. Each
   connection lives for one command, so it relies on the command finishing
   before the receiver gives up on it.
 - **The "ours" check is a string compare.** `contentId` must come back
@@ -352,7 +352,7 @@ start):
 - **Strict parsing.** rust_cast knows four player states and needs
   `mediaSessionId`, `playbackRate`, `playerState` and
   `supportedMediaCommands` in every status entry. Another state or a
-  missing field fails the call, and kids-deck reports `Stopped`.
+  missing field fails the call, and deckjay reports `Stopped`.
 - **Message size.** One `LOAD` carries every track. Measured with
   rust_cast 0.21.0 and 46-character URLs: 100 tracks make a 33 605-byte
   frame, 200 tracks 66 905 bytes, over the 64 KiB limit in openscreen's
@@ -374,7 +374,7 @@ start):
 
 ## Test by hand
 
-`just doctor` (`kids-deck --check`) runs step 1 of the sequence and prints
+`just doctor` (`deckjay --check`) runs step 1 of the sequence and prints
 the receiver status (format from `print_cast_speaker`):
 
 ```text
@@ -458,7 +458,7 @@ Protocol sources:
 ## Power key
 
 The deck's power key stops whatever the speaker plays, not only what
-kids-deck started (after a restart kids-deck does not know what plays, and
+deckjay started (after a restart deckjay does not know what plays, and
 a phone may have cast something). It asks the receiver for its running
 apps and quits each one (`receiver.stop_app`), except the Backdrop idle
 screen (`E8C28D3C`) of a Chromecast. A Nest or Lenovo display then goes

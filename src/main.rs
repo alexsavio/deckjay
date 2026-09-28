@@ -1,4 +1,4 @@
-//! kids-deck: a music player for kids.
+//! deckjay: a music player with no screen, driven by pictures on a Stream Deck.
 //!
 //! Album covers are shown on an Elgato Stream Deck. Pressing a cover plays
 //! the album on a network speaker (Chromecast or HEOS) or on this computer's
@@ -13,7 +13,7 @@
 //!   ([`player::spawn_with`]).
 //! - `http`: serves the music files to the speaker ([`server::spawn`]).
 //!
-//! `kids-deck simulator` runs something else: [`simulator`], a web page that
+//! `deckjay simulator` runs something else: [`simulator`], a web page that
 //! stands in for the Stream Deck, so the player can run without the hardware.
 
 mod config;
@@ -49,11 +49,11 @@ use crate::simulator::Model;
 use crate::ui::Ui;
 
 const USAGE: &str = "\
-usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
+usage: deckjay [CONFIG] [--simulator URL] [--advertise-host HOST]
                  [--check | --preview FILE.png]
-       kids-deck --blank
-       kids-deck simulator [--model NAME] [--port PORT]
-       kids-deck spotify-login [CONFIG] [--listen ADDR]
+       deckjay --blank
+       deckjay simulator [--model NAME] [--port PORT]
+       deckjay spotify-login [CONFIG] [--listen ADDR]
 
   CONFIG              path to config.toml (default: ./config.toml)
   --simulator URL     use the deck simulator at URL, e.g. http://localhost:8090,
@@ -63,7 +63,7 @@ usage: kids-deck [CONFIG] [--simulator URL] [--advertise-host HOST]
                       overrides advertise_host in the config
   --check             list sources, Stream Decks and speaker status, then exit
   --preview FILE.png  draw the 15-key layout into a picture, then exit
-  --blank             turn the USB Stream Deck dark, then exit; kids-deck
+  --blank             turn the USB Stream Deck dark, then exit; deckjay
                       does this itself when it is stopped (Ctrl-C, SIGTERM)
 
   simulator           run the web Stream Deck simulator
@@ -227,7 +227,7 @@ fn drive_decks(
     Ok(())
 }
 
-/// For systemd's `ExecStopPost`, which runs however kids-deck ended, a crash
+/// For systemd's `ExecStopPost`, which runs however deckjay ended, a crash
 /// included.
 fn blank_usb_deck() -> Result<()> {
     let mut hid = elgato_streamdeck::new_hidapi()?;
@@ -512,7 +512,7 @@ fn run_check(
                 "  reachable ✓  {}x{} keys of {} px",
                 info.rows, info.cols, info.key_size
             ),
-            Ok(None) => println!("  NOT reachable (start it with `kids-deck simulator`)"),
+            Ok(None) => println!("  NOT reachable (start it with `deckjay simulator`)"),
             Err(err) => println!("  NOT usable: {err:#}"),
         }
     } else {

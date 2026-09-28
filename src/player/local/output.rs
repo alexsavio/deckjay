@@ -46,7 +46,7 @@ impl OpenOutput {
             SampleFormat::U24 => build::<cpal::U24>(&device, config, sink, failures),
             SampleFormat::U32 => build::<u32>(&device, config, sink, failures),
             SampleFormat::U64 => build::<u64>(&device, config, sink, failures),
-            other => bail!("{name} wants {other} samples, which kids-deck cannot make"),
+            other => bail!("{name} wants {other} samples, which deckjay cannot make"),
         }
         .with_context(|| format!("cannot open {name}"))?;
         stream

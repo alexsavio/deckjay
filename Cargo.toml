@@ -1,11 +1,11 @@
 [package]
-name = "kids-deck"
+name = "deckjay"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "A music player for small children: pictures on an Elgato Stream Deck, music on a Chromecast, a HEOS receiver or the computer's own sound output"
+description = "A music player with no screen: pictures on an Elgato Stream Deck, one press plays on a Chromecast, a HEOS receiver, Spotify Connect or the computer's own sound output"
 license = "MIT"
-repository = "https://github.com/alexsavio/kids-deck"
+repository = "https://github.com/alexsavio/deckjay"
 readme = "README.md"
 keywords = ["stream-deck", "music-player", "kids", "chromecast", "raspberry-pi"]
 categories = ["multimedia::audio"]

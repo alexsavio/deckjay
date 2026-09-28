@@ -1,9 +1,9 @@
 # Podcasts
 
 A `[[source]]` with `type = "podcast"` is one shelf of podcast episodes.
-kids-deck reads the feeds, downloads the newest episodes into a cache
+deckjay reads the feeds, downloads the newest episodes into a cache
 folder, and plays them like any other file: the speaker fetches them from
-the kids-deck web server, or local audio plays them from the disk. The
+the deckjay web server, or local audio plays them from the disk. The
 code:
 
 - [`src/config/podcast.rs`](../src/config/podcast.rs): the source table and

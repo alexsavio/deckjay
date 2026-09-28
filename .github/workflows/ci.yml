@@ -117,4 +117,4 @@ jobs:
       # The image the Pi runs is arm64; this builds the same Dockerfile for
       # the runner, to catch a broken build before a deploy.
       - name: Build the image
-        run: docker build --tag kids-deck:ci .
+        run: docker build --tag deckjay:ci .

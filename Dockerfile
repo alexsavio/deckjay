@@ -1,6 +1,6 @@
 # Builds the Raspberry Pi image (needs 64-bit Raspberry Pi OS on the Pi).
 #
-#   docker buildx build --platform linux/arm64 -t kids-deck --load .
+#   docker buildx build --platform linux/arm64 -t deckjay --load .
 #
 # On an Apple Silicon Mac this builds natively and quickly. On an Intel Mac it
 # runs under emulation and takes a while.
@@ -25,7 +25,7 @@ FROM debian:trixie-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libudev1 libasound2t64 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-COPY --from=build /src/target/release/kids-deck /usr/local/bin/kids-deck
+COPY --from=build /src/target/release/deckjay /usr/local/bin/deckjay
 WORKDIR /app
-ENTRYPOINT ["kids-deck"]
+ENTRYPOINT ["deckjay"]
 CMD ["/app/config.toml"]

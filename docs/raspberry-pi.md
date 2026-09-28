@@ -1,7 +1,7 @@
 # 🍓 Run on a Raspberry Pi
 
-This guide installs kids-deck on a Raspberry Pi with no screen and no
-keyboard ("headless"), on Raspberry Pi OS (Raspbian). kids-deck runs as a
+This guide installs deckjay on a Raspberry Pi with no screen and no
+keyboard ("headless"), on Raspberry Pi OS (Raspbian). deckjay runs as a
 systemd service: it starts at boot, starts again when it fails, and writes
 its logs to the system journal. You do every step over SSH from your
 computer.
@@ -28,7 +28,7 @@ Write the card with
 **Raspberry Pi OS Lite (64-bit)** ("Raspberry Pi OS (other)"), then open
 the settings (OS customisation) before you write:
 
-- Hostname: `kidsdeck`.
+- Hostname: `deckjay`.
 - A user name and a password of your choice. This guide calls the user
   `you`.
 - Wi-Fi name and password, if the Pi has no network cable.
@@ -39,7 +39,7 @@ Put the card in the Pi and power it on. The first boot takes a few
 minutes. Then, from your computer:
 
 ```sh
-ssh you@kidsdeck.local
+ssh you@deckjay.local
 ```
 
 Check that the Pi runs the 64-bit OS; the first command must print
@@ -62,20 +62,20 @@ sudo apt install -y libudev1 libasound2t64 ca-certificates rsync
 On bookworm, the sound library is `libasound2` in place of
 `libasound2t64`.
 
-## 📦 3. Install kids-deck
+## 📦 3. Install deckjay
 
 Download the arm64 archive of the newest release, check it, and install the
 program:
 
 ```sh
-base=https://github.com/alexsavio/kids-deck/releases/latest/download
-curl -fsSLO "$base/kids-deck-aarch64-unknown-linux-gnu.tar.gz"
+base=https://github.com/alexsavio/deckjay/releases/latest/download
+curl -fsSLO "$base/deckjay-aarch64-unknown-linux-gnu.tar.gz"
 curl -fsSLO "$base/SHA256SUMS.txt"
 sha256sum --check --ignore-missing SHA256SUMS.txt
-tar -xzf kids-deck-aarch64-unknown-linux-gnu.tar.gz
-cd kids-deck-aarch64-unknown-linux-gnu
-sudo install -m 0755 kids-deck /usr/local/bin/kids-deck
-kids-deck --help
+tar -xzf deckjay-aarch64-unknown-linux-gnu.tar.gz
+cd deckjay-aarch64-unknown-linux-gnu
+sudo install -m 0755 deckjay /usr/local/bin/deckjay
+deckjay --help
 ```
 
 The archive also holds `config.example.toml` and `99-streamdeck.rules`;
@@ -85,14 +85,14 @@ release yet, or to build the program yourself, see
 
 ## 👤 4. Make a user for the service
 
-The service runs as its own system user, `kidsdeck`, not as root. The
+The service runs as its own system user, `deckjay`, not as root. The
 `plugdev` group lets it use the Stream Deck (with the udev rule below), and
 the `audio` group lets it play on the Pi's sound output.
 
 ```sh
 sudo useradd --system --user-group --no-create-home \
-  --home-dir /var/lib/kids-deck --shell /usr/sbin/nologin \
-  --groups plugdev,audio kidsdeck
+  --home-dir /var/lib/deckjay --shell /usr/sbin/nologin \
+  --groups plugdev,audio deckjay
 ```
 
 Install the udev rule, which gives the `plugdev` group access to Elgato
@@ -106,25 +106,25 @@ sudo udevadm trigger --subsystem-match=usb --subsystem-match=hidraw
 
 ## 🎵 5. Copy the music
 
-The music goes to `/srv/kids-deck`, one folder per source. Make the folder
+The music goes to `/srv/deckjay`, one folder per source. Make the folder
 yours, so you can copy to it without `sudo`. On the Pi:
 
 ```sh
-sudo install -d -o "$USER" -g "$USER" -m 0755 /srv/kids-deck
+sudo install -d -o "$USER" -g "$USER" -m 0755 /srv/deckjay
 ```
 
 Then, on your computer, copy each music folder:
 
 ```sh
-rsync -rtLP --chmod=D755,F644 "$HOME/Music/Kids Music/" you@kidsdeck.local:/srv/kids-deck/music/
-rsync -rtLP --chmod=D755,F644 "$HOME/Music/Kids Stories/" you@kidsdeck.local:/srv/kids-deck/stories/
+rsync -rtLP --chmod=D755,F644 "$HOME/Music/Kids Music/" you@deckjay.local:/srv/deckjay/music/
+rsync -rtLP --chmod=D755,F644 "$HOME/Music/Kids Stories/" you@deckjay.local:/srv/deckjay/stories/
 ```
 
 - The `/` at the end of the source copies what is in the folder, not the
   folder itself.
 - `-L` copies the files that symlinks point to. A music folder that is a
   folder of symlinks to albums works too.
-- `--chmod` makes every file readable by the `kidsdeck` user.
+- `--chmod` makes every file readable by the `deckjay` user.
 - rsync only adds and updates files; it never deletes on the Pi. Add
   `--delete` to also remove what is no longer on your computer.
 
@@ -132,33 +132,33 @@ Run the same commands again when the music changes.
 
 ## 📝 6. Write the configuration
 
-The configuration goes to `/etc/kids-deck/config.toml`. Only root can
-change it, and only the `kidsdeck` user can read it (it can hold a
+The configuration goes to `/etc/deckjay/config.toml`. Only root can
+change it, and only the `deckjay` user can read it (it can hold a
 Spotify client id):
 
 ```sh
-sudo install -d -o root -g kidsdeck -m 0750 /etc/kids-deck
-sudo install -o root -g kidsdeck -m 0640 config.example.toml /etc/kids-deck/config.toml
-sudo nano /etc/kids-deck/config.toml
+sudo install -d -o root -g deckjay -m 0750 /etc/deckjay
+sudo install -o root -g deckjay -m 0640 config.example.toml /etc/deckjay/config.toml
+sudo nano /etc/deckjay/config.toml
 ```
 
 `config.example.toml` explains every key. On the Pi, use absolute paths:
-relative ones start from `/etc/kids-deck`, where the service cannot
+relative ones start from `/etc/deckjay`, where the service cannot
 write. An example that plays on the headphone jack:
 
 ```toml
 speaker_type = "local"
 audio_device = "Headphones"
 max_volume = 0.4
-state_dir = "/var/lib/kids-deck"
+state_dir = "/var/lib/deckjay"
 
 [[source]]
 type = "music"
-path = "/srv/kids-deck/music"
+path = "/srv/deckjay/music"
 
 [[source]]
 type = "story"
-path = "/srv/kids-deck/stories"
+path = "/srv/deckjay/stories"
 ```
 
 - For a Chromecast or a HEOS receiver, set `speaker_type` to `"cast"` or
@@ -178,7 +178,7 @@ sources and their items, the Stream Decks, and the sound outputs (local
 audio) or whether the speaker answers:
 
 ```sh
-sudo -u kidsdeck kids-deck --check /etc/kids-deck/config.toml
+sudo -u deckjay deckjay --check /etc/deckjay/config.toml
 ```
 
 ## 🚀 7. Start it at boot
@@ -186,10 +186,10 @@ sudo -u kidsdeck kids-deck --check /etc/kids-deck/config.toml
 Write the service file:
 
 ```sh
-sudo tee /etc/systemd/system/kids-deck.service >/dev/null <<'EOF'
+sudo tee /etc/systemd/system/deckjay.service >/dev/null <<'EOF'
 [Unit]
-Description=kids-deck Stream Deck music player
-Documentation=https://github.com/alexsavio/kids-deck
+Description=deckjay Stream Deck music player
+Documentation=https://github.com/alexsavio/deckjay
 # The speaker needs our LAN address, found from the route to it.
 Wants=network-online.target
 After=network-online.target sound.target
@@ -198,15 +198,15 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=kidsdeck
-Group=kidsdeck
+User=deckjay
+Group=deckjay
 SupplementaryGroups=plugdev audio
-# Creates /var/lib/kids-deck, owned by kidsdeck.
-StateDirectory=kids-deck
-WorkingDirectory=/var/lib/kids-deck
-ExecStart=/usr/local/bin/kids-deck /etc/kids-deck/config.toml
-# Turns the deck dark however kids-deck ended, a crash included.
-ExecStopPost=/usr/local/bin/kids-deck --blank
+# Creates /var/lib/deckjay, owned by deckjay.
+StateDirectory=deckjay
+WorkingDirectory=/var/lib/deckjay
+ExecStart=/usr/local/bin/deckjay /etc/deckjay/config.toml
+# Turns the deck dark however deckjay ended, a crash included.
+ExecStopPost=/usr/local/bin/deckjay --blank
 Restart=always
 RestartSec=5
 # Wait up to a minute between starts when it keeps failing (systemd 254 or
@@ -236,16 +236,16 @@ Then start it, now and at every boot:
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now kids-deck
-systemctl status kids-deck
+sudo systemctl enable --now deckjay
+systemctl status deckjay
 ```
 
 The deck lights up with the covers. Unplug and plug the deck, or turn the
 speaker off and on: the program waits for them and goes on.
 
-When kids-deck stops (`systemctl stop`, a shutdown), it turns the deck
+When deckjay stops (`systemctl stop`, a shutdown), it turns the deck
 dark itself. When it crashes or is killed (`kill -9`, out of memory), it
-cannot, so the `ExecStopPost` line runs `kids-deck --blank` after it; 5 s
+cannot, so the `ExecStopPost` line runs `deckjay --blank` after it; 5 s
 later systemd starts it again and the deck lights up. Unplugging the deck
 or turning the Pi off also leaves it dark.
 
@@ -256,7 +256,7 @@ across reboots, but cap its size, so it rotates and never fills the card:
 
 ```sh
 sudo install -d /etc/systemd/journald.conf.d
-sudo tee /etc/systemd/journald.conf.d/50-kids-deck.conf >/dev/null <<'EOF'
+sudo tee /etc/systemd/journald.conf.d/50-deckjay.conf >/dev/null <<'EOF'
 [Journal]
 Storage=persistent
 Compress=yes
@@ -272,86 +272,86 @@ sudo systemd-tmpfiles --create --prefix /var/log/journal
 sudo systemctl restart systemd-journald
 ```
 
-This setting is for the whole Pi, not only for kids-deck.
+This setting is for the whole Pi, not only for deckjay.
 
 ## 🔍 Read the logs
 
 On the Pi:
 
 ```sh
-journalctl -u kids-deck -f                    # follow
-journalctl -u kids-deck -b -1                 # the boot before this one
-journalctl -u kids-deck --since "1 hour ago"
+journalctl -u deckjay -f                    # follow
+journalctl -u deckjay -b -1                 # the boot before this one
+journalctl -u deckjay --since "1 hour ago"
 journalctl --disk-usage
 ```
 
 From your computer, in one command:
 
 ```sh
-ssh -t you@kidsdeck.local journalctl -u kids-deck -f
+ssh -t you@deckjay.local journalctl -u deckjay -f
 ```
 
 For more detail (each key press and speaker event, every file the speaker
 downloads, the Elgato devices found, and the time tiles and redraws take),
-run `sudo systemctl edit kids-deck` and add:
+run `sudo systemctl edit deckjay` and add:
 
 ```ini
 [Service]
 Environment=RUST_LOG=debug,tower_http=debug
 ```
 
-Then `sudo systemctl restart kids-deck`. `sudo systemctl revert kids-deck`
+Then `sudo systemctl restart deckjay`. `sudo systemctl revert deckjay`
 removes the change again.
 
 ## 🔁 Day to day
 
 - **New music:** copy it with the `rsync` commands of step 5, then
-  `sudo systemctl restart kids-deck`. The program reads the music folders
+  `sudo systemctl restart deckjay`. The program reads the music folders
   when it starts.
 - **A new version:** download and install it as in step 3, then
-  `sudo systemctl restart kids-deck`.
+  `sudo systemctl restart deckjay`.
 - **Check after a change:** stop the service first, because it holds the
   deck:
 
   ```sh
-  sudo systemctl stop kids-deck
-  sudo -u kidsdeck kids-deck --check /etc/kids-deck/config.toml
-  sudo systemctl start kids-deck
+  sudo systemctl stop deckjay
+  sudo -u deckjay deckjay --check /etc/deckjay/config.toml
+  sudo systemctl start deckjay
   ```
 
 - **Spotify:** set up the Spotify app and `[spotify]` as in
   [spotify.md](spotify.md), start the service once (it makes
-  `/var/lib/kids-deck`), then sign in and restart:
+  `/var/lib/deckjay`), then sign in and restart:
 
   ```sh
-  sudo -u kidsdeck kids-deck spotify-login /etc/kids-deck/config.toml
-  sudo systemctl restart kids-deck
+  sudo -u deckjay deckjay spotify-login /etc/deckjay/config.toml
+  sudo systemctl restart deckjay
   ```
 
   The Pi has no browser: open the address it prints on your computer, and
   paste the address the browser ends up at back into the terminal. Or
-  connect with `ssh -L 8898:127.0.0.1:8898 you@kidsdeck.local` first, and
+  connect with `ssh -L 8898:127.0.0.1:8898 you@deckjay.local` first, and
   the sign-in finishes by itself.
-- **Firewall:** kids-deck needs no firewall change. If you turn on `ufw`,
+- **Firewall:** deckjay needs no firewall change. If you turn on `ufw`,
   allow SSH (22/tcp) and, for a Chromecast or HEOS speaker, the music
   server (8765/tcp, `http_port`): the speaker downloads the music from it.
 
 ## 🔵 Play on a Bluetooth speaker
 
 > **Not tested yet:** a real Bluetooth speaker, and raspotify together with
-> kids-deck. These steps follow the Debian packages, their manuals and a
+> deckjay. These steps follow the Debian packages, their manuals and a
 > test in a Debian container. One risk is known: after a playlist, the
 > first press on a book may fail because Spotify still holds the speaker.
 > The next press should play (see the end of
 > [Spotify on the Pi itself](#-spotify-on-the-pi-itself)).
 
-To kids-deck a paired Bluetooth speaker is one more sound output, so it
+To deckjay a paired Bluetooth speaker is one more sound output, so it
 plays with `speaker_type = "local"`. (On a Mac: pair the speaker in System
 Settings, then set `audio_device` to part of its name; `--check` lists the
 names.)
 
 Raspberry Pi OS Lite has no sound server, and PipeWire runs only in a
-user's login session, which the `kidsdeck` service user never has.
+user's login session, which the `deckjay` service user never has.
 `bluez-alsa` works without one: a system service that gives every member
 of the `audio` group an ALSA device named `bluealsa`.
 
@@ -374,7 +374,7 @@ of the `audio` group an ALSA device named `bluealsa`.
    exit
    ```
 
-3. Make the speaker the Pi's default sound output, for kids-deck and every
+3. Make the speaker the Pi's default sound output, for deckjay and every
    other program:
 
    ```sh
@@ -387,14 +387,14 @@ of the `audio` group an ALSA device named `bluealsa`.
    EOF
    ```
 
-4. Leave `audio_device` out of `/etc/kids-deck/config.toml` (it plays on
+4. Leave `audio_device` out of `/etc/deckjay/config.toml` (it plays on
    the default output), check, and restart:
 
    ```sh
-   sudo systemctl stop kids-deck
-   sudo -u kidsdeck kids-deck --check /etc/kids-deck/config.toml
+   sudo systemctl stop deckjay
+   sudo -u deckjay deckjay --check /etc/deckjay/config.toml
    speaker-test -D default -c 2 -t sine -l 1   # a short tone on the speaker
-   sudo systemctl start kids-deck
+   sudo systemctl start deckjay
    ```
 
 Things to know:
@@ -415,7 +415,7 @@ A Bluetooth speaker has no Spotify Connect, so the Pi becomes the Spotify
 Connect device: [raspotify](https://github.com/dtcooper/raspotify) runs
 librespot as a service and plays on the Pi's default output, the
 Bluetooth speaker above. Unlike a Chromecast, it stays in Spotify's device
-list. Not tested with kids-deck yet (see the note at the top of
+list. Not tested with deckjay yet (see the note at the top of
 [Play on a Bluetooth speaker](#-play-on-a-bluetooth-speaker)).
 
 1. Install raspotify (it has arm64 packages):
@@ -429,7 +429,7 @@ list. Not tested with kids-deck yet (see the note at the top of
    sign-in, so the Pi stays in your account's device list after a reboot:
 
    ```sh
-   LIBRESPOT_NAME="kidsdeck"
+   LIBRESPOT_NAME="deckjay"
    #LIBRESPOT_DISABLE_CREDENTIAL_CACHE=
    ```
 
@@ -437,22 +437,22 @@ list. Not tested with kids-deck yet (see the note at the top of
    Then `sudo systemctl restart raspotify`.
 
 3. Sign it in once: on a phone on the same network, open Spotify, tap the
-   devices icon and pick **kidsdeck**. It keeps the sign-in in
+   devices icon and pick **deckjay**. It keeps the sign-in in
    `/var/lib/raspotify`.
 
-4. In `/etc/kids-deck/config.toml`, set the device, and sign kids-deck in
+4. In `/etc/deckjay/config.toml`, set the device, and sign deckjay in
    to Spotify as in [Day to day](#-day-to-day):
 
    ```toml
    [spotify]
    client_id = "..."
-   device = "kidsdeck"
+   device = "deckjay"
    ```
 
-   `--check` lists the Spotify devices your account sees; `kidsdeck` must
+   `--check` lists the Spotify devices your account sees; `deckjay` must
    be one of them.
 
-kids-deck closes its sound output when a playlist starts, and pauses
+deckjay closes its sound output when a playlist starts, and pauses
 Spotify when an album, a book or a station starts. librespot should free
 the output when it pauses, but the pause reaches the Pi through Spotify's
 servers and can take a moment: the first press after a playlist may fail,
@@ -462,7 +462,7 @@ the speaker at once.
 ## 🪶 Run on a Raspberry Pi Zero 2 W
 
 > **Not tested yet:** these notes follow the specifications of the board
-> and the reports of other users, not a Zero 2 W with kids-deck on it.
+> and the reports of other users, not a Zero 2 W with deckjay on it.
 
 The Zero 2 W has the CPU cores of a Pi 3 (at 1 GHz in place of 1.2 GHz)
 and runs the 64-bit OS, so the steps above apply as they are: the same
@@ -493,7 +493,7 @@ few things:
 - **512 MB of memory.** Install the release binary as in step 3, and skip
   [Run it in Docker instead](#-run-it-in-docker-instead). Building on
   the Pi is out too.
-- **The first draw is slower.** At each start kids-deck decodes the cover
+- **The first draw is slower.** At each start deckjay decodes the cover
   of every item on the deck's shelves to make its tile; at 1 GHz with
   big covers this takes some seconds. After that the tiles are kept.
 
@@ -505,17 +505,17 @@ Pi OS trixie. In a checkout of this repository:
 
 ```sh
 just image
-id=$(docker create --platform linux/arm64 kids-deck)
-docker cp "$id":/usr/local/bin/kids-deck ./kids-deck
+id=$(docker create --platform linux/arm64 deckjay)
+docker cp "$id":/usr/local/bin/deckjay ./deckjay
 docker rm "$id"
-scp kids-deck config.example.toml 99-streamdeck.rules you@kidsdeck.local:
+scp deckjay config.example.toml 99-streamdeck.rules you@deckjay.local:
 ```
 
 Then go on with step 3 from `sudo install`, in your home folder on the Pi.
 
 ## 🐳 Run it in Docker instead
 
-The repository can also run kids-deck on the Pi in a Docker container. Put
+The repository can also run deckjay on the Pi in a Docker container. Put
 Docker on the Pi; then on your computer, in a checkout of this
 repository:
 
@@ -526,7 +526,7 @@ just pi-logs
 
 `just deploy` builds the arm64 image, copies it to the Pi with
 `docker save | ssh docker load`, copies `docker-compose.yml`, `config.toml`
-and `music/` to `~/kids-deck`, and runs `docker compose up -d` there. It
+and `music/` to `~/deckjay`, and runs `docker compose up -d` there. It
 uses `pi@raspberrypi.local`; set `PI_HOST` (and `PI_DIR`) in `.env` to
 change it.
 

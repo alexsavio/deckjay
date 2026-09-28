@@ -21,7 +21,7 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: kids-deck
+  BINARY_NAME: deckjay
   TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:

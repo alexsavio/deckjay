@@ -1,12 +1,13 @@
-# 🎶 kids-deck
+# 🎶 deckjay
 
-[![CI](https://github.com/alexsavio/kids-deck/actions/workflows/ci.yml/badge.svg)](https://github.com/alexsavio/kids-deck/actions/workflows/ci.yml)
-[![zizmor](https://github.com/alexsavio/kids-deck/actions/workflows/zizmor.yml/badge.svg)](https://github.com/alexsavio/kids-deck/actions/workflows/zizmor.yml)
+[![CI](https://github.com/alexsavio/deckjay/actions/workflows/ci.yml/badge.svg)](https://github.com/alexsavio/deckjay/actions/workflows/ci.yml)
+[![zizmor](https://github.com/alexsavio/deckjay/actions/workflows/zizmor.yml/badge.svg)](https://github.com/alexsavio/deckjay/actions/workflows/zizmor.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A player for small children who cannot read yet: they press a picture on
-an Elgato Stream Deck, and their music, audiobook, story, podcast or radio
-station plays.
+A music player with no screen: press a picture on an Elgato Stream Deck,
+and that album, audiobook, story, podcast, radio station or Spotify
+playlist plays. Made for small children who cannot read yet, and just as
+good for anyone who wants their music one press away.
 
 It plays on a Chromecast built-in speaker, a Denon or Marantz HEOS
 receiver, a Spotify Connect device, or the computer's own sound output.
@@ -42,10 +43,11 @@ below](docs/images/simulator.webp)
 - 🔖 **Books resume:** audiobooks and podcast episodes play on from where they
   stopped, also after a restart. In books, podcasts and stories ⏪ and ⏩
   jump 10 s back or on (`seek_seconds`).
-- 🧒 **Made for children:** a volume cap, a power key that stops everything
+- 🧒 **Simple on purpose:** a volume cap, a power key that stops everything
   and dims the deck (the next press only lights it again), a deck that
   keeps working when it is unplugged and plugged back in, and goes dark
-  when the program stops.
+  when the program stops. No menus: small children and grandparents can
+  use it.
 - 🧪 **Test without hardware:** a web page that acts as a Stream Deck, and a
   preview picture of the layout.
 - 🍓 **Runs on a headless Raspberry Pi** as a service that starts at boot, or
@@ -79,7 +81,7 @@ below](docs/images/simulator.webp)
 Get the program one of two ways:
 
 - **Download** the archive for your computer from the
-  [releases page](https://github.com/alexsavio/kids-deck/releases): Linux
+  [releases page](https://github.com/alexsavio/deckjay/releases): Linux
   x86_64, Linux arm64 (a Raspberry Pi with a 64-bit OS) or macOS on Apple
   silicon. The Linux ones need glibc 2.35 or newer (Debian 12, Ubuntu
   22.04, Raspberry Pi OS 12 or later), `libasound2` and `libudev1`.
@@ -87,7 +89,7 @@ Get the program one of two ways:
   `libasound2-dev`, `libudev-dev` and `pkg-config` first.
 
   ```sh
-  cargo install kids-deck --locked
+  cargo install deckjay --locked
   ```
 
 Then:
@@ -96,14 +98,14 @@ Then:
    `config.toml`, and set the speaker and your music folders.
 2. On Linux, install `99-streamdeck.rules` (its first lines say how), so
    the program can use the deck without root.
-3. Run `kids-deck` in that folder (`kids-deck path/to/config.toml` also
+3. Run `deckjay` in that folder (`deckjay path/to/config.toml` also
    works). On a Mac, quit the Elgato Stream Deck app first, and allow
    Local Network access as
    [the development guide](docs/development.md#-run-with-a-stream-deck)
    explains.
 
 For a Raspberry Pi without a screen, follow
-[`docs/raspberry-pi.md`](docs/raspberry-pi.md): it installs kids-deck as a
+[`docs/raspberry-pi.md`](docs/raspberry-pi.md): it installs deckjay as a
 service that starts at boot.
 
 ## 🔧 How it works
@@ -127,7 +129,7 @@ even if the computer is busy.
 
 ## 🍓 Run on a Raspberry Pi
 
-[`docs/raspberry-pi.md`](docs/raspberry-pi.md) installs kids-deck on a
+[`docs/raspberry-pi.md`](docs/raspberry-pi.md) installs deckjay on a
 headless Raspberry Pi with Raspberry Pi OS: a service that starts at boot
 and starts again when it fails, the music on the SD card, and logs in the
 system journal with a size cap.
@@ -172,7 +174,7 @@ steps and a map of the code.
 
 - [`docs/heos.md`](docs/heos.md) and
   [`docs/chromecast.md`](docs/chromecast.md): the HEOS CLI and the Google
-  Cast protocol as kids-deck uses them: the commands it sends, the order,
+  Cast protocol as deckjay uses them: the commands it sends, the order,
   the quirks of real devices, and how to test by hand.
 - [`docs/local-audio.md`](docs/local-audio.md): local playback: decoding,
   sound outputs and the Raspberry Pi's audio devices.
@@ -202,6 +204,6 @@ map, and `CLAUDE.md` describes the architecture in more depth.
 
 ## 📄 License
 
-[MIT](LICENSE). The crates kids-deck builds on keep their own licenses;
+[MIT](LICENSE). The crates deckjay builds on keep their own licenses;
 most are MIT or Apache-2.0, and a few, such as symphonia and
 elgato-streamdeck, are MPL-2.0.

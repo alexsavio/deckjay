@@ -1,4 +1,4 @@
-//! A blocking client for the parts of the Spotify Web API that kids-deck
+//! A blocking client for the parts of the Spotify Web API that deckjay
 //! uses: Connect devices, playback control, the account name and playlist
 //! pictures. It keeps the access token fresh and saves a rotated refresh token.
 
@@ -105,7 +105,7 @@ impl ApiError {
         ApiError {
             status: 429,
             reason: None,
-            message: "kids-deck is waiting for Spotify's rate limit".into(),
+            message: "deckjay is waiting for Spotify's rate limit".into(),
             retry_after: Some(wait),
         }
     }
@@ -163,7 +163,7 @@ impl Reply {
     }
 
     pub fn json<T: DeserializeOwned>(&self) -> Result<T> {
-        serde_json::from_str(&self.body).context("Spotify sent an answer kids-deck cannot read")
+        serde_json::from_str(&self.body).context("Spotify sent an answer deckjay cannot read")
     }
 }
 
