@@ -10,6 +10,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### 📚 Documentation
 
 - *(pi)* Drop the upgrade section ([#9](https://github.com/alexsavio/deckjay/issues/9))
+- *(readme)* Add the crates.io badge ([#11](https://github.com/alexsavio/deckjay/issues/11))
 
 ## [2026.9.0] - 2026-09-28
 
