@@ -9,8 +9,8 @@ repository = "https://github.com/alexsavio/deckjay"
 readme = "README.md"
 keywords = ["stream-deck", "music-player", "chromecast", "spotify", "raspberry-pi"]
 categories = ["multimedia::audio"]
-# Dev tooling stays out of the crate; config.example.toml, the udev rule and
-# the docs go in, because the README tells cargo-install users to use them.
+# config.example.toml, the udev rule and the docs stay in: the README tells
+# cargo-install users to copy them.
 exclude = [
     ".github/",
     ".dockerignore",
