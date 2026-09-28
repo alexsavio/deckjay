@@ -15,7 +15,7 @@ speaker, no `speaker_host` and no music web server. The code:
 - [`src/player/local/netread.rs`](../src/player/local/netread.rs): a radio
   station's stream as a `Read` for symphonia.
 - [`src/player/local/output.rs`](../src/player/local/output.rs): the sound
-  card (cpal): picking the output, opening the stream, `--check`'s list.
+  card (cpal): picking the output, opening the stream, `check`'s list.
 - [`src/player/local/tests.rs`](../src/player/local/tests.rs): decoding of
   WAV, MP3 and AAC files, the converter, and the player with a fake sound
   card; [`tests/resume.rs`](../src/player/local/tests/resume.rs): the start
@@ -43,7 +43,7 @@ audio_device = "Headphones"
 ```
 
 `audio_device` picks the first output whose name contains it, ignoring
-case, in the order `just doctor` (`--check`) prints them: the default output
+case, in the order `just doctor` (`deckjay check`) prints them: the default output
 first. A value that matches nothing fails the album press, and the log
 lists every output name. The volume keys scale the samples: 1.0 plays the
 file as it is, 0.5 halves the amplitude.
@@ -230,7 +230,7 @@ The Pi 3 has two outputs:
   default), `bcm2835 HDMI 1` with the older firmware driver.
 
 On Linux one card appears as several ALSA devices with the same name
-(`hw:`, `plughw:`, `sysdefault:`, `dmix:`, `hdmi:` ...), so `--check` shows
+(`hw:`, `plughw:`, `sysdefault:`, `dmix:`, `hdmi:` ...), so `deckjay check` shows
 the ALSA device in brackets, for example
 `bcm2835 Headphones, bcm2835 Headphones (plughw:CARD=Headphones,DEV=0)`.
 `audio_device` matches the whole line, so it can name one ALSA device:

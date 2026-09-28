@@ -75,7 +75,7 @@ sha256sum --check --ignore-missing SHA256SUMS.txt
 tar -xzf deckjay-aarch64-unknown-linux-gnu.tar.gz
 cd deckjay-aarch64-unknown-linux-gnu
 sudo install -m 0755 deckjay /usr/local/bin/deckjay
-deckjay --help
+deckjay --version
 ```
 
 The archive also holds `config.example.toml` and `99-streamdeck.rules`;
@@ -173,12 +173,15 @@ path = "/srv/deckjay/stories"
 - Keep the top-level keys above the first `[[source]]`: TOML reads every
   key after a table header as part of that table.
 
-Check the configuration before you start the service. `--check` lists the
-sources and their items, the Stream Decks, and the sound outputs (local
-audio) or whether the speaker answers:
+Check the configuration before you start the service. `check-config`
+reads the file and nothing else. `check` also lists the sources and their
+items, the Stream Decks, and the sound outputs (local audio) or whether the
+speaker answers; it exits with 1 when it found a problem and with 2 when it
+found warnings only, so a script can read the result:
 
 ```sh
-sudo -u deckjay deckjay --check /etc/deckjay/config.toml
+sudo -u deckjay deckjay check-config /etc/deckjay/config.toml
+sudo -u deckjay deckjay check /etc/deckjay/config.toml
 ```
 
 ## 🚀 7. Start it at boot
@@ -197,7 +200,10 @@ After=network-online.target sound.target
 StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+# deckjay tells systemd when it runs and sends a heartbeat; without one
+# for a minute (a hung program) systemd restarts it.
+Type=notify
+WatchdogSec=60
 User=deckjay
 Group=deckjay
 SupplementaryGroups=plugdev audio
@@ -206,15 +212,13 @@ StateDirectory=deckjay
 WorkingDirectory=/var/lib/deckjay
 ExecStart=/usr/local/bin/deckjay /etc/deckjay/config.toml
 # Turns the deck dark however deckjay ended, a crash included.
-ExecStopPost=/usr/local/bin/deckjay --blank
+ExecStopPost=/usr/local/bin/deckjay blank
 Restart=always
 RestartSec=5
 # Wait up to a minute between starts when it keeps failing (systemd 254 or
 # newer; bookworm's systemd ignores these two lines).
 RestartSteps=5
 RestartMaxDelaySec=60
-# No colour codes in the journal.
-Environment=NO_COLOR=1
 Environment=RUST_BACKTRACE=1
 
 # Light hardening. The deck (hidraw, usb) and the sound card (/dev/snd)
@@ -245,9 +249,11 @@ speaker off and on: the program waits for them and goes on.
 
 When deckjay stops (`systemctl stop`, a shutdown), it turns the deck
 dark itself. When it crashes or is killed (`kill -9`, out of memory), it
-cannot, so the `ExecStopPost` line runs `deckjay --blank` after it; 5 s
+cannot, so the `ExecStopPost` line runs `deckjay blank` after it; 5 s
 later systemd starts it again and the deck lights up. Unplugging the deck
-or turning the Pi off also leaves it dark.
+or turning the Pi off also leaves it dark. When the program hangs (it stays
+alive, but the deck stops reacting), its heartbeat stops, and systemd kills
+and restarts it after the minute of `WatchdogSec=`.
 
 ## 📜 8. Keep the logs
 
@@ -310,12 +316,13 @@ removes the change again.
   when it starts.
 - **A new version:** download and install it as in step 3, then
   `sudo systemctl restart deckjay`.
-- **Check after a change:** stop the service first, because it holds the
-  deck:
+- **Check after a change:** `deckjay check-config /etc/deckjay/config.toml`
+  reads the file and can run any time. For the full check, stop the
+  service first, because it holds the deck:
 
   ```sh
   sudo systemctl stop deckjay
-  sudo -u deckjay deckjay --check /etc/deckjay/config.toml
+  sudo -u deckjay deckjay check /etc/deckjay/config.toml
   sudo systemctl start deckjay
   ```
 
@@ -384,7 +391,7 @@ it), and the config, music and state move with the folder.
 
 To deckjay a paired Bluetooth speaker is one more sound output, so it
 plays with `speaker_type = "local"`. (On a Mac: pair the speaker in System
-Settings, then set `audio_device` to part of its name; `--check` lists the
+Settings, then set `audio_device` to part of its name; `deckjay check` lists the
 names.)
 
 Raspberry Pi OS Lite has no sound server, and PipeWire runs only in a
@@ -429,7 +436,7 @@ of the `audio` group an ALSA device named `bluealsa`.
 
    ```sh
    sudo systemctl stop deckjay
-   sudo -u deckjay deckjay --check /etc/deckjay/config.toml
+   sudo -u deckjay deckjay check /etc/deckjay/config.toml
    speaker-test -D default -c 2 -t sine -l 1   # a short tone on the speaker
    sudo systemctl start deckjay
    ```
@@ -486,8 +493,8 @@ list. Not tested with deckjay yet (see the note at the top of
    device = "deckjay"
    ```
 
-   `--check` lists the Spotify devices your account sees; `deckjay` must
-   be one of them.
+   `deckjay check` lists the Spotify devices your account sees; `deckjay`
+   must be one of them.
 
 deckjay closes its sound output when a playlist starts, and pauses
 Spotify when an album, a book or a station starts. librespot should free

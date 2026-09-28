@@ -80,7 +80,7 @@ On Linux, install `99-streamdeck.rules` (its first lines say how), so the
 program can use the deck without root.
 
 Ctrl-C (or closing the terminal) stops the program and turns the deck
-dark; `deckjay --blank` does the same for a deck left lit.
+dark; `deckjay blank` does the same for a deck left lit.
 
 `just debug` logs more, including each file request the speaker makes.
 
@@ -130,7 +130,9 @@ crates.io. `just publish-dry` checks the package first.
 
 | File | What it does |
 |---|---|
-| `main.rs` | Startup, command-line options, reconnecting to the deck |
+| `main.rs` | Startup, the commands (`check`, `check-config`, `preview`, `blank`), reconnecting to the deck |
+| `cli.rs` | The command line (clap): commands, options, exit codes |
+| `systemd.rs` | Tells systemd the service is ready and alive (`sd_notify`) |
 | `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`) |
 | `library/` | Items and shelves, one shelf per source (`mod.rs`); scans source folders and finds covers (`scan.rs`); builds URLs |
 | `ui/` | What each key shows and does (`mod.rs`), key layout with shelves (`layout.rs`) |

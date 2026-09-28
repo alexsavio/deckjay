@@ -360,7 +360,7 @@ the code handles an item, the test in `heos/tests.rs` is named.
    Test: `players_lists_names_pids_and_ips`.
 8. **macOS Local Network privacy.** A self-built binary gets "No route to
    host" to LAN devices while `ping` and `nc` work. Docker is not affected.
-   Reproduced on 2026-09-24: the `deckjay --check` binary printed
+   Reproduced on 2026-09-24: the `deckjay check` binary printed
    `NOT reachable: … No route to host (os error 65)` while
    `/usr/bin/python3` got the reply above. Grant the terminal app Local
    Network access, or use `just sim`.

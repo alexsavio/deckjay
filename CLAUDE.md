@@ -27,8 +27,18 @@ installs a headless Pi as a systemd service (and the Docker deploy).
   click through the UI without hardware, use `just sim`.
   Still needs a valid `config.toml` with a `[[source]]`, and a route to
   `speaker_host` (unless `advertise_host` is set).
-- `just doctor` (`--check`): sources and their items, connected decks, speaker
-  reachability, and with `[spotify]` the account and its Connect devices.
+- `just doctor` (`deckjay check`): sources and their items, connected decks,
+  speaker reachability, and with `[spotify]` the account and its Connect
+  devices. Exits 1 on a problem (a feed not readable, nothing to play, the
+  speaker does not answer), 2 on warnings only (no cover, no deck).
+  `deckjay check-config FILE` reads the config and nothing else, for scripts
+  that write it (Ansible `validate:`).
+- The command line is `src/cli.rs` (clap derive): `deckjay [CONFIG]` runs the
+  player; `check`, `check-config`, `preview FILE`, `blank`, `simulator` and
+  `spotify-login` are commands. `--check`, `--preview FILE` and `--blank` stay
+  as hidden aliases (systemd's `ExecStopPost` uses `--blank`). A command line
+  clap cannot read exits 64, so a typo never looks like a `check` result.
+  `deckjay --version` prints `deckjay <Cargo version>`.
 - `just spotify-login` (`deckjay spotify-login`): the one-time Spotify
   sign-in (OAuth PKCE, `src/spotify/login.rs`); the token goes to
   `<state_dir>/spotify-token.json`, mode 0600. The default log filter keeps
@@ -82,9 +92,16 @@ servers:
   that draws but plays nothing.
   SIGINT, SIGTERM and SIGHUP set a stop flag (`signal-hook`; a second one
   ends the program at once): `Ui::run` turns the deck dark (`Deck::blank`)
-  and returns `Ok`, and `main` saves the state and exits. `--blank` does the
-  same for a deck left lit (systemd's `ExecStopPost`), opening it without
-  the reset that shows the Elgato logo.
+  and returns `Ok`, and `main` saves the state and exits. `deckjay blank`
+  does the same for a deck left lit (systemd's `ExecStopPost`), opening it
+  without the reset that shows the Elgato logo.
+  Under systemd (`Type=notify`, `WatchdogSec=`), `systemd.rs` sends
+  `READY=1` just before the deck loop (a deck need not be plugged in),
+  `WATCHDOG=1` twice per period from the `Ui::run` loop and from the waiting
+  loop in `drive_decks` (`Ui::heartbeat`), and `STOPPING=1` after the state
+  is saved; a hung main thread is killed and restarted. Outside systemd
+  these do nothing. Log colours are off when `JOURNAL_STREAM` (set by the
+  journal) or `NO_COLOR` is set.
 - **player** (`player/`, thread `cast`, `heos` or `local`): `main::output` turns
   the config into a `player::Output` (`Cast`/`Heos` carry host and port, `Local`
   only the device name), and `spawn_with` builds the speaker on the player
