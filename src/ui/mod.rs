@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use image::{Rgb, RgbImage};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use self::layout::{Action, Control, Layout};
 use crate::config::{Config, SpeakerType};
@@ -315,6 +315,7 @@ impl Ui {
             }
         }
         for event in events {
+            debug!(?event, "speaker event");
             let (current, playing) = match event {
                 PlayerEvent::Playing(item) => (Some(item), true),
                 PlayerEvent::Paused(item) => (Some(item), false),
@@ -378,8 +379,10 @@ impl Ui {
 
     fn press(&mut self, layout: &Layout, key: usize) {
         let Some(action) = layout.action(key, self.shelf, self.page()) else {
+            debug!(key, "key pressed: nothing there");
             return;
         };
+        debug!(key, ?action, "key pressed");
         match action {
             Action::More => {
                 self.pages[self.shelf] = (self.page() + 1) % layout.pages(self.shelf);
@@ -513,6 +516,7 @@ impl Ui {
     /// the keys before they choose.
     fn wake(&mut self, keys: &mut Vec<usize>) {
         if self.asleep && !keys.is_empty() {
+            debug!(?keys, "key pressed while asleep: waking up");
             self.asleep = false;
             keys.clear();
         }
@@ -737,11 +741,19 @@ impl Ui {
     }
 
     fn draw(&self, deck: &mut Deck, layout: &Layout) -> Result<()> {
+        let started = Instant::now();
         let size = deck.key_size();
+        let mut sent = 0;
         for (key, face) in self.faces(layout).iter().enumerate() {
-            deck.show(key, face, || self.render(face, size))?;
+            if deck.show(key, face, || self.render(face, size))? {
+                sent += 1;
+            }
         }
-        deck.flush()
+        deck.flush()?;
+        if sent > 0 {
+            debug!(sent, elapsed = ?started.elapsed(), "deck drawn");
+        }
+        Ok(())
     }
 
     fn layout(&self, rows: usize, cols: usize) -> Layout {

@@ -11,6 +11,7 @@ use elgato_streamdeck::{
 };
 use hidapi::HidApi;
 use image::{DynamicImage, RgbImage};
+use tracing::debug;
 
 use super::Backend;
 
@@ -24,7 +25,11 @@ impl HidDeck {
     /// `reset` clears the deck to the Elgato logo first.
     pub(super) fn open(hid: &mut HidApi, reset: bool) -> Result<Option<HidDeck>> {
         refresh_device_list(hid)?;
-        let Some((kind, serial)) = list_devices(hid)
+        let devices = list_devices(hid);
+        for (kind, serial) in &devices {
+            debug!(?kind, %serial, rows = kind.row_count(), "found an Elgato device");
+        }
+        let Some((kind, serial)) = devices
             .into_iter()
             .find(|(kind, _)| kind.is_visual() && kind.row_count() >= 2)
         else {

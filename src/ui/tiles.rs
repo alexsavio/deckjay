@@ -2,9 +2,10 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::Instant;
 
 use image::{Rgb, RgbImage};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::Ui;
 use crate::config::Color;
@@ -50,11 +51,17 @@ impl Ui {
             .chain(self.current)
             .collect();
         self.tiles.retain(|id, _| on_deck.contains(id));
+        let started = Instant::now();
+        let mut made = 0;
         for id in on_deck {
             let item = self.library.item(id);
-            self.tiles
-                .entry(id)
-                .or_insert_with(|| item_tile(item, size, badges));
+            self.tiles.entry(id).or_insert_with(|| {
+                made += 1;
+                item_tile(item, size, badges)
+            });
+        }
+        if made > 0 {
+            debug!(made, elapsed = ?started.elapsed(), "tiles prepared");
         }
         remade
     }
