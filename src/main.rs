@@ -384,8 +384,9 @@ fn base_url(cfg: &Config) -> BaseUrl {
 }
 
 /// What `check` found, for the exit code: 0 all good, 1 problems, 2 warnings
-/// only. A problem means the deck cannot play something; a warning means it
-/// plays, but something is missing.
+/// only. A problem means the deck cannot play something. A warning means it
+/// plays, or will once something the player waits for arrives (a deck, a
+/// simulator, the first podcast refresh), but something is missing.
 #[derive(Default)]
 struct Report {
     problems: usize,
@@ -459,7 +460,12 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
             }
         }
         if shelf.items.is_empty() {
-            report.problem("  nothing to play");
+            if source.podcast.is_some() {
+                // The episodes come with the first refresh, after the start.
+                report.warning("  nothing to play yet: the episodes come with the first refresh");
+            } else {
+                report.problem("  nothing to play");
+            }
         }
         for &id in &shelf.items {
             let item = library.item(id);
@@ -506,7 +512,8 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
                 "  reachable ✓  {}x{} keys of {} px",
                 info.rows, info.cols, info.key_size
             ),
-            Ok(None) => report.problem("  NOT reachable (start it with `deckjay simulator`)"),
+            // The player waits for the simulator, as it waits for a USB deck.
+            Ok(None) => report.warning("  NOT reachable (start it with `deckjay simulator`)"),
             Err(err) => report.problem(format!("  NOT usable: {err:#}")),
         }
     } else {

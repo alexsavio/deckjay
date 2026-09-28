@@ -23,7 +23,9 @@ const EXIT_USAGE: i32 = 64;
 const AFTER_HELP: &str = "\
 Exit codes of `check`: 0 all good, 1 a problem (a feed that cannot be read,
 a source with nothing to play, a speaker that does not answer), 2 warnings
-only (an item with no cover). A wrong command line exits with 64.";
+only (an item with no cover, no Stream Deck plugged in, no spotify.device,
+a podcast source before its first refresh). A wrong command line exits
+with 64.";
 
 /// Reads the command line, or prints help, the version or the error and
 /// exits.
@@ -64,12 +66,22 @@ struct Cli {
     #[arg(long, hide = true)]
     check: bool,
 
-    /// Same as `deckjay preview FILE`
-    #[arg(long, hide = true, value_name = "FILE.png")]
+    /// Same as `deckjay preview FILE`; like the command, it takes no
+    /// simulator and no advertise host.
+    #[arg(
+        long,
+        hide = true,
+        value_name = "FILE.png",
+        conflicts_with_all = ["simulator", "advertise_host"]
+    )]
     preview: Option<PathBuf>,
 
-    /// Same as `deckjay blank`
-    #[arg(long, hide = true)]
+    /// Same as `deckjay blank`, which takes nothing else.
+    #[arg(
+        long,
+        hide = true,
+        conflicts_with_all = ["config", "simulator", "advertise_host", "check", "preview"]
+    )]
     blank: bool,
 }
 
@@ -314,6 +326,21 @@ mod tests {
                 listen: "0.0.0.0:9".parse().unwrap()
             }
         );
+    }
+
+    #[test]
+    fn old_options_take_no_more_than_the_commands_do() {
+        for args in [
+            &["--preview", "out.png", "--advertise-host", "1.2.3.4"][..],
+            &["--preview", "out.png", "--simulator", "http://s:1"],
+            &["--blank", "c.toml"],
+            &["--blank", "--check"],
+            &["--blank", "--simulator", "http://s:1"],
+        ] {
+            assert_eq!(error(args).kind(), ErrorKind::ArgumentConflict, "{args:?}");
+        }
+        // The default config path is not a conflict.
+        assert_eq!(parse(&["--blank"]), Command::Blank);
     }
 
     #[test]

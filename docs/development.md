@@ -91,7 +91,7 @@ Run `just` to list every recipe. The ones you need most:
 | Command | What it does |
 |---|---|
 | `just run` | Start the player |
-| `just doctor` | List sources and their items, Stream Decks and speaker status |
+| `just doctor` | List sources and their items, Stream Decks and speaker status; exits 1 on a problem, 2 on warnings only (for example no deck) |
 | `just sim [MODEL]` | Run the player with the web Stream Deck simulator |
 | `just preview [FILE]` | Draw the key layout into a PNG, no hardware needed |
 | `just ci` | Format check, clippy, tests and docs: run before a commit |

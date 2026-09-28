@@ -204,6 +204,9 @@ StartLimitIntervalSec=0
 # for a minute (a hung program) systemd restarts it.
 Type=notify
 WatchdogSec=60
+# How long systemd waits for "running" (default 90 s): the library scan and
+# the speaker's name lookup must fit, also on a slow card.
+TimeoutStartSec=5min
 User=deckjay
 Group=deckjay
 SupplementaryGroups=plugdev audio
@@ -251,9 +254,11 @@ When deckjay stops (`systemctl stop`, a shutdown), it turns the deck
 dark itself. When it crashes or is killed (`kill -9`, out of memory), it
 cannot, so the `ExecStopPost` line runs `deckjay blank` after it; 5 s
 later systemd starts it again and the deck lights up. Unplugging the deck
-or turning the Pi off also leaves it dark. When the program hangs (it stays
-alive, but the deck stops reacting), its heartbeat stops, and systemd kills
-and restarts it after the minute of `WatchdogSec=`.
+or turning the Pi off also leaves it dark. When the main thread hangs (the
+deck stops reacting to presses), its heartbeat stops, and systemd kills and
+restarts the program after the minute of `WatchdogSec=`. A stuck player
+thread is not caught this way: the deck reacts, but nothing plays. Then
+`sudo systemctl restart deckjay`.
 
 ## 📜 8. Keep the logs
 

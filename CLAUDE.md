@@ -30,7 +30,9 @@ installs a headless Pi as a systemd service (and the Docker deploy).
 - `just doctor` (`deckjay check`): sources and their items, connected decks,
   speaker reachability, and with `[spotify]` the account and its Connect
   devices. Exits 1 on a problem (a feed not readable, nothing to play, the
-  speaker does not answer), 2 on warnings only (no cover, no deck).
+  speaker does not answer), 2 on warnings only (no cover, no deck or
+  simulator yet, no `spotify.device`, a podcast source before its first
+  refresh). So `just doctor` exits 2 on a machine without a deck.
   `deckjay check-config FILE` reads the config and nothing else, for scripts
   that write it (Ansible `validate:`).
 - The command line is `src/cli.rs` (clap derive): `deckjay [CONFIG]` runs the
@@ -98,10 +100,12 @@ servers:
   Under systemd (`Type=notify`, `WatchdogSec=`), `systemd.rs` sends
   `READY=1` just before the deck loop (a deck need not be plugged in),
   `WATCHDOG=1` twice per period from the `Ui::run` loop and from the waiting
-  loop in `drive_decks` (`Ui::heartbeat`), and `STOPPING=1` after the state
-  is saved; a hung main thread is killed and restarted. Outside systemd
-  these do nothing. Log colours are off when `JOURNAL_STREAM` (set by the
-  journal) or `NO_COLOR` is set.
+  loop in `drive_decks` (`Ui::heartbeat`), at once before a full redraw
+  (`Watchdog::beat_now`), and `STOPPING=1` after the state is saved; a hung
+  main thread is killed and restarted, a hung player thread is not seen.
+  `TimeoutStartSec=` in the unit bounds the start before `READY=1` (library
+  scan, speaker name lookup). Outside systemd these do nothing. Log colours
+  are off when `JOURNAL_STREAM` (set by the journal) or `NO_COLOR` is set.
 - **player** (`player/`, thread `cast`, `heos` or `local`): `main::output` turns
   the config into a `player::Output` (`Cast`/`Heos` carry host and port, `Local`
   only the device name), and `spawn_with` builds the speaker on the player

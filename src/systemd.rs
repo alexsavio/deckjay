@@ -57,6 +57,15 @@ impl Watchdog {
         }
     }
 
+    /// A heartbeat at once, before work that can take a while (a full
+    /// redraw), so that work has the whole period.
+    pub fn beat_now(&mut self) {
+        if self.every.is_some() {
+            self.last = Instant::now();
+            send(NotifyState::Watchdog);
+        }
+    }
+
     fn due(&self, now: Instant) -> bool {
         self.every
             .is_some_and(|every| now.duration_since(self.last) >= every)
@@ -71,6 +80,16 @@ mod tests {
     fn off_is_never_due() {
         let watchdog = Watchdog::off();
         assert!(!watchdog.due(Instant::now() + Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn beat_now_starts_the_wait_again() {
+        let mut watchdog = Watchdog::new(Some(Duration::from_secs(30)));
+        let start = watchdog.last;
+        watchdog.beat_now();
+        assert!(watchdog.last >= start);
+        assert!(!watchdog.due(watchdog.last + Duration::from_secs(29)));
+        assert!(watchdog.due(watchdog.last + Duration::from_secs(30)));
     }
 
     #[test]
