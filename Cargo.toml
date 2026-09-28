@@ -9,6 +9,22 @@ repository = "https://github.com/alexsavio/deckjay"
 readme = "README.md"
 keywords = ["stream-deck", "music-player", "chromecast", "spotify", "raspberry-pi"]
 categories = ["multimedia::audio"]
+# config.example.toml, the udev rule and the docs stay in: the README tells
+# cargo-install users to copy them.
+exclude = [
+    ".github/",
+    ".dockerignore",
+    ".editorconfig",
+    ".gitignore",
+    "CLAUDE.md",
+    "Dockerfile",
+    "cliff.toml",
+    "compose.sim.yaml",
+    "docker-compose.yml",
+    "docs/images/",
+    "justfile",
+    "rust-toolchain.toml",
+]
 
 [dependencies]
 anyhow = "1"
