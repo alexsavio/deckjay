@@ -53,10 +53,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          # Build on the newest main, not on the commit that started this run:
-          # a queued run's commit is older than the changelog commit the run
-          # before it pushed. A push that lands in between fails ours; then
-          # start over from the new main and generate again, never rebase.
+          # Every attempt starts from the newest main and generates again: a
+          # queued run's own commit is older than the changelog commit the run
+          # before it pushed, and a push that lands in between fails ours.
           for attempt in 1 2 3; do
             git fetch origin main
             git reset --hard origin/main
