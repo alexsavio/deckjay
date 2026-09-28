@@ -162,6 +162,7 @@ matching the assertion already made for the command-failure branch.
 - Play an item's content instead of an album
 - Let the deck forget images of faces it no longer shows
 - Let a speaker stop before another one takes over
+- [**breaking**] Rename the project to deckjay (#5)
 
 ### 📚 Documentation
 
