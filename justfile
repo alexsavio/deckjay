@@ -34,9 +34,9 @@ run *ARGS:
 debug *ARGS:
     RUST_LOG=debug,tower_http=debug cargo run -- {{ ARGS }}
 
-# List sources and their items, Stream Decks and speaker status, then exit
+# List sources and their items, Stream Decks and speaker status, then exit (2 = warnings only, e.g. no deck)
 doctor:
-    cargo run --release -- --check
+    cargo run --release -- check
 
 # Sign in to Spotify once (needs [spotify] in config.toml)
 spotify-login:
@@ -44,7 +44,7 @@ spotify-login:
 
 # Draw the 15-key layout into a picture, no hardware needed
 preview FILE="layout.png":
-    cargo run --release -- --preview {{ FILE }}
+    cargo run --release -- preview {{ FILE }}
 
 # Build the debug binary
 build:

@@ -374,7 +374,7 @@ start):
 
 ## Test by hand
 
-`just doctor` (`deckjay --check`) runs step 1 of the sequence and prints
+`just doctor` (`deckjay check`) runs step 1 of the sequence and prints
 the receiver status (format from `print_cast_speaker`):
 
 ```text

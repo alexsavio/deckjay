@@ -44,6 +44,7 @@ use crate::library::{self, ItemId, Kind, Library, Media};
 use crate::net::BaseUrl;
 use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
 use crate::state::Store;
+use crate::systemd;
 
 /// The player thread ended, which only a panic does: nothing can play until
 /// the program restarts, so [`Ui::run`] returns this and `main` exits with it.
@@ -155,6 +156,8 @@ pub struct Ui {
 
     /// One per podcast source.
     podcasts: Vec<podcasts::PodcastThread>,
+    /// systemd's heartbeat; off outside systemd.
+    watchdog: systemd::Watchdog,
 }
 
 /// A failure the player reported. Its text goes where the deck can show
@@ -225,6 +228,7 @@ impl Ui {
             restyled: HashSet::new(),
             asleep: false,
             podcasts: Vec::new(),
+            watchdog: systemd::Watchdog::off(),
         }
     }
 
@@ -233,6 +237,9 @@ impl Ui {
     /// returns [`PlayerGone`]), or until `stop` is set: the deck goes dark
     /// and it returns `Ok`.
     pub fn run(&mut self, deck: &mut Deck, brightness: u8, stop: &AtomicBool) -> Result<()> {
+        // The first draw sends every key; on the simulator each is an HTTP
+        // request with its own timeout.
+        self.watchdog.beat_now();
         let mut dimmed = self.asleep;
         deck.set_brightness(if dimmed { 0 } else { brightness })?;
         let (rows, cols) = deck.layout();
@@ -242,6 +249,7 @@ impl Ui {
         self.draw(deck, &layout)?;
 
         loop {
+            self.watchdog.beat();
             if stop.load(Ordering::SeqCst) {
                 return deck.blank();
             }
@@ -254,6 +262,7 @@ impl Ui {
             }
             changed |= self.drop_stale_mark();
             if self.take_snapshots() {
+                self.watchdog.beat_now();
                 layout = self.layout(rows, cols);
                 self.fit(&layout);
                 let remade = self.prepare_tiles(deck.key_size());
@@ -298,6 +307,15 @@ impl Ui {
 
     pub fn player_gone(&self) -> bool {
         self.gone.is_some()
+    }
+
+    pub fn set_watchdog(&mut self, watchdog: systemd::Watchdog) {
+        self.watchdog = watchdog;
+    }
+
+    /// Tells systemd the main thread is alive; `run` does it by itself.
+    pub fn heartbeat(&mut self) {
+        self.watchdog.beat();
     }
 
     /// Applies status updates from the speaker. Returns true if anything changed.

@@ -80,7 +80,7 @@ On Linux, install `99-streamdeck.rules` (its first lines say how), so the
 program can use the deck without root.
 
 Ctrl-C (or closing the terminal) stops the program and turns the deck
-dark; `deckjay --blank` does the same for a deck left lit.
+dark; `deckjay blank` does the same for a deck left lit.
 
 `just debug` logs more, including each file request the speaker makes.
 
@@ -91,7 +91,7 @@ Run `just` to list every recipe. The ones you need most:
 | Command | What it does |
 |---|---|
 | `just run` | Start the player |
-| `just doctor` | List sources and their items, Stream Decks and speaker status |
+| `just doctor` | List sources and their items, Stream Decks and speaker status; exits 1 on a problem, 2 on warnings only (for example no deck) |
 | `just sim [MODEL]` | Run the player with the web Stream Deck simulator |
 | `just preview [FILE]` | Draw the key layout into a PNG, no hardware needed |
 | `just ci` | Format check, clippy, tests and docs: run before a commit |
@@ -130,7 +130,9 @@ crates.io. `just publish-dry` checks the package first.
 
 | File | What it does |
 |---|---|
-| `main.rs` | Startup, command-line options, reconnecting to the deck |
+| `main.rs` | Startup, the commands (`check`, `check-config`, `preview`, `blank`), reconnecting to the deck |
+| `cli.rs` | The command line (clap): commands, options, exit codes |
+| `systemd.rs` | Tells systemd the service is ready and alive (`sd_notify`) |
 | `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`) |
 | `library/` | Items and shelves, one shelf per source (`mod.rs`); scans source folders and finds covers (`scan.rs`); builds URLs |
 | `ui/` | What each key shows and does (`mod.rs`), key layout with shelves (`layout.rs`) |
