@@ -37,6 +37,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Jump back and forward in audiobooks and podcasts
 - Turn the deck dark when kids-deck stops
 - Make the deck simulator look like a real Stream Deck
+- *(deck)* Log key presses, speaker events and deck errors with context (#3)
 
 ### 🐛 Bug Fixes
 
