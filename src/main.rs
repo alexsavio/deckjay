@@ -15,7 +15,9 @@
 //!
 //! `deckjay simulator` runs something else: [`simulator`], a web page that
 //! stands in for the Stream Deck, so the player can run without the hardware.
+//! The other commands ([`cli`]) check the setup or the deck and exit.
 
+mod cli;
 mod config;
 mod deck;
 mod icons;
@@ -28,59 +30,33 @@ mod server;
 mod simulator;
 mod spotify;
 mod state;
+mod systemd;
 mod ui;
 
-use std::net::{TcpStream, ToSocketAddrs};
-use std::path::{Path, PathBuf};
+use std::fmt::Display;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::Path;
+use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use hidapi::HidApi;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use crate::cli::{Command, RunArgs};
 use crate::config::{Config, SpeakerType};
 use crate::deck::Deck;
 use crate::library::Library;
 use crate::net::BaseUrl;
-use crate::simulator::Model;
 use crate::ui::Ui;
 
-const USAGE: &str = "\
-usage: deckjay [CONFIG] [--simulator URL] [--advertise-host HOST]
-                 [--check | --preview FILE.png]
-       deckjay --blank
-       deckjay simulator [--model NAME] [--port PORT]
-       deckjay spotify-login [CONFIG] [--listen ADDR]
-
-  CONFIG              path to config.toml (default: ./config.toml)
-  --simulator URL     use the deck simulator at URL, e.g. http://localhost:8090,
-                      instead of a USB Stream Deck
-  --advertise-host HOST
-                      the address the speaker uses to reach this program;
-                      overrides advertise_host in the config
-  --check             list sources, Stream Decks and speaker status, then exit
-  --preview FILE.png  draw the 15-key layout into a picture, then exit
-  --blank             turn the USB Stream Deck dark, then exit; deckjay
-                      does this itself when it is stopped (Ctrl-C, SIGTERM)
-
-  simulator           run the web Stream Deck simulator
-  --model NAME        mk2 (default), mini, neo, xl or plus
-  --port PORT         port of the simulator page and API (default: 8090)
-
-  spotify-login       sign in to Spotify once; saves the login in state_dir
-  --listen ADDR       where the browser comes back to (default: 127.0.0.1:8898)
-";
-
-const DEFAULT_SPOTIFY_LISTEN: &str = "127.0.0.1:8898";
-
-const DEFAULT_SIMULATOR_PORT: u16 = 8090;
-
-fn main() -> Result<()> {
+fn main() -> Result<ExitCode> {
     net::install_crypto();
     tracing_subscriber::fmt()
+        .with_ansi(colour())
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 // ureq_proto logs raw requests, tokens included, at trace level.
@@ -88,59 +64,42 @@ fn main() -> Result<()> {
         )
         .init();
 
-    let mut args = std::env::args().skip(1).peekable();
-    if args.next_if(|arg| arg == "simulator").is_some() {
-        return run_simulator(args);
-    }
-    if args.next_if(|arg| arg == "spotify-login").is_some() {
-        return run_spotify_login(args);
-    }
-
-    let mut config_path = PathBuf::from("config.toml");
-    let mut check = false;
-    let mut preview: Option<PathBuf> = None;
-    let mut simulator_url: Option<String> = None;
-    let mut advertise_host: Option<String> = None;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--check" => check = true,
-            "--blank" => return blank_usb_deck(),
-            "--simulator" => {
-                simulator_url = Some(args.next().context("--simulator needs a URL")?);
-            }
-            "--advertise-host" => {
-                let host = args.next().context("--advertise-host needs a host")?;
-                if host.is_empty() {
-                    bail!("--advertise-host is empty; in Docker, start with `just sim`");
-                }
-                config::check_advertise_host(&host).context("invalid --advertise-host")?;
-                advertise_host = Some(host);
-            }
-            "--preview" => {
-                preview = Some(args.next().context("--preview needs a file name")?.into());
-            }
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return Ok(());
-            }
-            s if s.starts_with('-') => bail!("unknown option {s}\n\n{USAGE}"),
-            s => config_path = s.into(),
+    match cli::parse() {
+        Command::Run(args) => run_player(&args)?,
+        Command::Check(args) => return run_check(&args),
+        Command::CheckConfig { config } => check_config(&config)?,
+        Command::Preview { file, config } => {
+            let cfg = Config::load(&config)?;
+            let library = scan_sources(&cfg);
+            write_preview(&cfg, library, base_url(&cfg), &file)?;
         }
+        Command::Blank => blank_usb_deck()?,
+        Command::Simulator { model, port } => simulator::run(port, model)?,
+        Command::SpotifyLogin { config, listen } => run_spotify_login(&config, listen)?,
     }
+    Ok(ExitCode::SUCCESS)
+}
 
-    let mut cfg = Config::load(&config_path)?;
-    if advertise_host.is_some() {
-        cfg.advertise_host = advertise_host;
+/// No colour codes when `NO_COLOR` is set (no-color.org) or when the output
+/// goes to systemd's journal, which sets `JOURNAL_STREAM`. `with_ansi`
+/// replaces tracing's own `NO_COLOR` default, so both are read here.
+fn colour() -> bool {
+    std::env::var_os("JOURNAL_STREAM").is_none()
+        && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty())
+}
+
+fn load_config(args: &RunArgs) -> Result<Config> {
+    let mut cfg = Config::load(&args.config)?;
+    if args.advertise_host.is_some() {
+        cfg.advertise_host.clone_from(&args.advertise_host);
     }
+    Ok(cfg)
+}
+
+fn run_player(args: &RunArgs) -> Result<()> {
+    let cfg = load_config(args)?;
     let library = scan_sources(&cfg);
     let mut base_url = base_url(&cfg);
-
-    if let Some(path) = preview {
-        return write_preview(&cfg, library, base_url, &path);
-    }
-    if check {
-        return run_check(&cfg, &library, &mut base_url, simulator_url.as_deref());
-    }
 
     let served = server::Served::new(library.served_files());
     if cfg.speaker_type != SpeakerType::Local {
@@ -156,17 +115,36 @@ fn main() -> Result<()> {
     let store = state::Store::open(&cfg.state_dir);
     let mut ui = Ui::new(&cfg, library, base_url, player, event_rx, store);
     ui.set_podcasts(start_podcasts(&cfg, &served));
+    ui.set_watchdog(systemd::Watchdog::from_env());
     fetch_playlist_covers(&cfg);
 
     let stop = stop_on_signals()?;
-    let source = match simulator_url {
-        Some(url) => DeckSource::Simulator(url),
+    let source = match &args.simulator {
+        Some(url) => DeckSource::Simulator(url.clone()),
         None => DeckSource::Usb(elgato_streamdeck::new_hidapi()?),
     };
+    // Ready without a deck: the program waits for one.
+    systemd::ready();
     let outcome = drive_decks(&mut ui, source, cfg.brightness, &stop);
     info!("stopping");
     ui.save_state();
+    systemd::stopping();
     outcome
+}
+
+/// For the scripts that write the config (Ansible's `validate:`): reads the
+/// file and nothing else.
+fn check_config(path: &Path) -> Result<()> {
+    let cfg = Config::load(path)?;
+    let names: Vec<&str> = cfg.sources.iter().map(|s| s.name.as_str()).collect();
+    println!(
+        "{} is valid: {:?} speaker, {} ({})",
+        path.display(),
+        cfg.speaker_type,
+        count(names.len(), "source"),
+        names.join(", ")
+    );
+    Ok(())
 }
 
 /// Ctrl-C, closing the terminal, `systemctl stop` and `docker stop` set the
@@ -221,6 +199,7 @@ fn drive_decks(
             if stop.load(Ordering::SeqCst) {
                 break;
             }
+            ui.heartbeat();
             std::thread::sleep(Duration::from_millis(100));
         }
     }
@@ -322,55 +301,8 @@ impl DeckSource {
     }
 }
 
-fn run_simulator(mut args: impl Iterator<Item = String>) -> Result<()> {
-    let mut model = Model::Mk2;
-    let mut port = DEFAULT_SIMULATOR_PORT;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--model" => {
-                let name = args.next().context("--model needs a name")?;
-                model = Model::parse(&name).with_context(|| {
-                    format!(
-                        "unknown model {name}; use one of: {}",
-                        Model::NAMES.join(", ")
-                    )
-                })?;
-            }
-            "--port" => {
-                let value = args.next().context("--port needs a number")?;
-                port = value
-                    .parse()
-                    .with_context(|| format!("--port needs a number, not {value}"))?;
-            }
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return Ok(());
-            }
-            s => bail!("unknown simulator option {s}\n\n{USAGE}"),
-        }
-    }
-    simulator::run(port, model)
-}
-
-fn run_spotify_login(args: impl Iterator<Item = String>) -> Result<()> {
-    let mut config_path = PathBuf::from("config.toml");
-    let mut listen = DEFAULT_SPOTIFY_LISTEN.to_string();
-    let mut args = args;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--listen" => listen = args.next().context("--listen needs an address")?,
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return Ok(());
-            }
-            s if s.starts_with('-') => bail!("unknown spotify-login option {s}\n\n{USAGE}"),
-            s => config_path = s.into(),
-        }
-    }
-    let listen = listen
-        .parse()
-        .with_context(|| format!("--listen needs an address like 127.0.0.1:8898, not {listen}"))?;
-    let cfg = Config::load(&config_path)?;
+fn run_spotify_login(config_path: &Path, listen: SocketAddr) -> Result<()> {
+    let cfg = Config::load(config_path)?;
     let spotify = cfg.spotify.as_ref().with_context(|| {
         format!(
             "{} has no [spotify] table with the client_id of your Spotify app",
@@ -451,12 +383,62 @@ fn base_url(cfg: &Config) -> BaseUrl {
     }
 }
 
-fn run_check(
-    cfg: &Config,
-    library: &Library,
-    base_url: &mut BaseUrl,
-    simulator_url: Option<&str>,
-) -> Result<()> {
+/// What `check` found, for the exit code: 0 all good, 1 problems, 2 warnings
+/// only. A problem means the deck cannot play something; a warning means it
+/// plays, but something is missing.
+#[derive(Default)]
+struct Report {
+    problems: usize,
+    warnings: usize,
+}
+
+impl Report {
+    fn problem(&mut self, line: impl Display) {
+        self.problems += 1;
+        println!("{line}");
+    }
+
+    fn warning(&mut self, line: impl Display) {
+        self.warnings += 1;
+        println!("{line}");
+    }
+
+    fn code(&self) -> u8 {
+        match (self.problems, self.warnings) {
+            (0, 0) => 0,
+            (0, _) => 2,
+            _ => 1,
+        }
+    }
+
+    /// Prints the totals and gives the exit code.
+    fn finish(self) -> ExitCode {
+        if self.code() == 0 {
+            println!("\nAll good ✓");
+        } else {
+            println!(
+                "\n{}, {}",
+                count(self.problems, "problem"),
+                count(self.warnings, "warning")
+            );
+        }
+        ExitCode::from(self.code())
+    }
+}
+
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
+fn run_check(args: &RunArgs) -> Result<ExitCode> {
+    let cfg = load_config(args)?;
+    let library = scan_sources(&cfg);
+    let mut base_url = base_url(&cfg);
+    let mut report = Report::default();
     for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
         if source.serves_files() {
             let (name, kind, path) = (&source.name, source.kind, source.path.display());
@@ -470,12 +452,14 @@ fn run_check(
                     Ok((title, episodes)) => {
                         println!("  feed {}: {title:?}, {episodes} episodes ✓", feed.name);
                     }
-                    Err(err) => println!("  feed {}: NOT readable: {err:#}", feed.name),
+                    Err(err) => {
+                        report.problem(format!("  feed {}: NOT readable: {err:#}", feed.name));
+                    }
                 }
             }
         }
         if shelf.items.is_empty() {
-            println!("  nothing to play");
+            report.problem("  nothing to play");
         }
         for &id in &shelf.items {
             let item = library.item(id);
@@ -484,12 +468,22 @@ fn run_check(
             } else {
                 "no cover"
             };
-            match &item.media {
-                library::Media::Tracks(tracks) => {
-                    println!("  {:<40} {:>3} tracks, {cover}", item.name, tracks.len());
-                }
-                library::Media::Stream { url } => println!("  {:<40} {url}", item.name),
-                library::Media::Spotify { uri } => println!("  {:<40} {uri}, {cover}", item.name),
+            let (line, fine) = match &item.media {
+                library::Media::Tracks(tracks) => (
+                    format!("  {:<40} {:>3} tracks, {cover}", item.name, tracks.len()),
+                    item.cover.is_some(),
+                ),
+                // Stations show a glyph, never a cover.
+                library::Media::Stream { url } => (format!("  {:<40} {url}", item.name), true),
+                library::Media::Spotify { uri } => (
+                    format!("  {:<40} {uri}, {cover}", item.name),
+                    item.cover.is_some(),
+                ),
+            };
+            if fine {
+                println!("{line}");
+            } else {
+                report.warning(line);
             }
         }
     }
@@ -502,29 +496,29 @@ fn run_check(
                 );
             }
         }
-        Err(err) => println!("\nThe speaker cannot fetch music:\n  {err:#}"),
+        Err(err) => report.problem(format!("\nThe speaker cannot fetch music:\n  {err:#}")),
     }
 
-    if let Some(url) = simulator_url {
+    if let Some(url) = &args.simulator {
         println!("\nDeck simulator {url}:");
         match Deck::simulator_info(url) {
             Ok(Some(info)) => println!(
                 "  reachable ✓  {}x{} keys of {} px",
                 info.rows, info.cols, info.key_size
             ),
-            Ok(None) => println!("  NOT reachable (start it with `deckjay simulator`)"),
-            Err(err) => println!("  NOT usable: {err:#}"),
+            Ok(None) => report.problem("  NOT reachable (start it with `deckjay simulator`)"),
+            Err(err) => report.problem(format!("  NOT usable: {err:#}")),
         }
     } else {
-        print_usb_decks()?;
+        print_usb_decks(&mut report);
     }
 
     if let Some(spotify) = &cfg.spotify {
-        print_spotify(cfg, spotify);
+        print_spotify(&cfg, spotify, &mut report);
     }
     if cfg.speaker_type == SpeakerType::Local {
-        print_audio_outputs(cfg);
-        return Ok(());
+        print_audio_outputs(&cfg, &mut report);
+        return Ok(report.finish());
     }
     println!(
         "\nSpeaker {}:{} ({:?}):",
@@ -533,61 +527,61 @@ fn run_check(
         cfg.speaker_type
     );
     match cfg.speaker_type {
-        SpeakerType::Cast => print_cast_speaker(cfg),
-        SpeakerType::Heos => print_heos_players(cfg),
+        SpeakerType::Cast => print_cast_speaker(&cfg, &mut report),
+        SpeakerType::Heos => print_heos_players(&cfg, &mut report),
         SpeakerType::Local => unreachable!("handled above"),
     }
-    Ok(())
+    Ok(report.finish())
 }
 
-fn print_spotify(cfg: &Config, spotify: &config::Spotify) {
+fn print_spotify(cfg: &Config, spotify: &config::Spotify, report: &mut Report) {
     println!("\nSpotify:");
     let mut client =
         match spotify::api::Client::load(&cfg.state_dir, spotify::api::Endpoints::default()) {
             Ok(client) => client,
             Err(err) => {
-                println!("  {err:#}");
+                report.problem(format!("  {err:#}"));
                 return;
             }
         };
     let mut out = Vec::new();
     if let Err(err) = spotify::login::print_account(&mut client, &mut out) {
-        println!("  {err:#}");
+        report.problem(format!("  {err:#}"));
     }
     for line in String::from_utf8_lossy(&out).lines() {
         println!("  {line}");
     }
     let Some(device) = &spotify.device else {
-        println!("  no spotify.device set: Spotify cannot play yet");
+        report.warning("  no spotify.device set: Spotify cannot play yet");
         return;
     };
     match client.devices() {
         Ok(devices) => match spotify::pick_device(&devices, device) {
             Ok(found) => println!("  spotify.device {device:?} is {:?} ✓", found.name),
-            Err(err) => println!("  spotify.device {device:?}: {err:#}"),
+            Err(err) => report.problem(format!("  spotify.device {device:?}: {err:#}")),
         },
-        Err(err) => println!("  cannot check spotify.device: {err:#}"),
+        Err(err) => report.problem(format!("  cannot check spotify.device: {err:#}")),
     }
 }
 
-fn print_audio_outputs(cfg: &Config) {
+fn print_audio_outputs(cfg: &Config, report: &mut Report) {
     let wanted = cfg.audio_device.as_deref().unwrap_or("the default");
     println!("\nAudio out (local), using {wanted}:");
     match player::local::output_devices() {
-        Ok(names) if names.is_empty() => println!("  no sound output found"),
+        Ok(names) if names.is_empty() => report.problem("  no sound output found"),
         Ok(names) => names.iter().for_each(|name| println!("  {name}")),
-        Err(err) => println!("  cannot list sound outputs: {err:#}"),
+        Err(err) => report.problem(format!("  cannot list sound outputs: {err:#}")),
     }
 }
 
-fn print_cast_speaker(cfg: &Config) {
+fn print_cast_speaker(cfg: &Config, report: &mut Report) {
     let reachable = (cfg.speaker_host.as_str(), cfg.speaker_port())
         .to_socket_addrs()
         .map_err(anyhow::Error::from)
         .and_then(|mut addrs| addrs.next().context("cannot resolve speaker address"))
         .and_then(|addr| Ok(TcpStream::connect_timeout(&addr, Duration::from_secs(3))?));
     if let Err(err) = reachable {
-        println!("  NOT reachable: {err:#}");
+        report.problem(format!("  NOT reachable: {err:#}"));
         return;
     }
     match rust_cast::CastDevice::connect_without_host_verification(
@@ -609,13 +603,15 @@ fn print_cast_speaker(cfg: &Config) {
                 println!("  running app: {} ({})", app.display_name, app.app_id);
             }
         }
-        Err(err) => println!("  NOT reachable: {err:#}"),
+        Err(err) => report.problem(format!("  NOT reachable: {err:#}")),
     }
 }
 
-fn print_heos_players(cfg: &Config) {
+fn print_heos_players(cfg: &Config, report: &mut Report) {
     match player::heos::players(&cfg.speaker_host, cfg.speaker_port()) {
-        Ok(players) if players.is_empty() => println!("  reachable ✓  but it knows no players"),
+        Ok(players) if players.is_empty() => {
+            report.problem("  reachable ✓  but it knows no players");
+        }
         Ok(players) => {
             println!("  reachable ✓");
             for p in players {
@@ -623,16 +619,24 @@ fn print_heos_players(cfg: &Config) {
                 println!("  player {} ({}), ip {ip}, pid {}", p.name, p.model, p.pid);
             }
         }
-        Err(err) => println!("  NOT reachable: {err:#}"),
+        Err(err) => report.problem(format!("  NOT reachable: {err:#}")),
     }
 }
 
-fn print_usb_decks() -> Result<()> {
+/// A failure to list USB devices is one line of the report, not its end.
+fn print_usb_decks(report: &mut Report) {
     println!("\nStream Decks:");
-    let hid = elgato_streamdeck::new_hidapi()?;
+    let hid = match elgato_streamdeck::new_hidapi() {
+        Ok(hid) => hid,
+        Err(err) => {
+            report.problem(format!("  cannot list USB devices: {err}"));
+            return;
+        }
+    };
     let decks = elgato_streamdeck::list_devices(&hid);
     if decks.is_empty() {
-        println!("  none found (on macOS, quit the Elgato Stream Deck app first)");
+        // The player waits for a deck, so a missing one is not a problem.
+        report.warning("  none found (on macOS, quit the Elgato Stream Deck app first)");
     }
     for (kind, serial) in decks {
         println!(
@@ -642,7 +646,6 @@ fn print_usb_decks() -> Result<()> {
             kind.column_count()
         );
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -679,5 +682,22 @@ mod tests {
     fn local_audio_needs_no_route_to_a_speaker() {
         let cfg = config("speaker_type = \"local\"\n");
         assert!(base_url(&cfg).try_get().is_ok());
+    }
+
+    #[test]
+    fn check_exit_code_is_1_for_problems_2_for_warnings_only() {
+        let mut report = Report::default();
+        assert_eq!(report.code(), 0);
+        report.warning("an item with no cover");
+        assert_eq!(report.code(), 2);
+        report.problem("a speaker that does not answer");
+        assert_eq!(report.code(), 1);
+    }
+
+    #[test]
+    fn counts_read_well() {
+        assert_eq!(count(1, "problem"), "1 problem");
+        assert_eq!(count(0, "warning"), "0 warnings");
+        assert_eq!(count(3, "warning"), "3 warnings");
     }
 }
