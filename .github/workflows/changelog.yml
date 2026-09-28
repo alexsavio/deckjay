@@ -46,25 +46,26 @@ jobs:
       - name: Install rumdl
         run: command -v rumdl || cargo install rumdl@${{ env.RUMDL_VERSION }}
 
-      - name: Generate changelog
-        run: git cliff -o CHANGELOG.md
-
-      - name: Format changelog
-        run: rumdl fmt CHANGELOG.md
-
-      - name: Commit updated changelog
+      - name: Update changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git diff --quiet CHANGELOG.md && exit 0
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git add CHANGELOG.md
-          git commit -m "chore: update changelog [skip ci]"
-          # A push can land between the pull and ours; pull again and retry.
+          # Build on the newest main, not on the commit that started this run:
+          # a queued run's commit is older than the changelog commit the run
+          # before it pushed. A push that lands in between fails ours; then
+          # start over from the new main and generate again, never rebase.
           for attempt in 1 2 3; do
-            git pull --rebase && git push && exit 0
+            git fetch origin main
+            git reset --hard origin/main
+            git cliff -o CHANGELOG.md
+            rumdl fmt CHANGELOG.md
+            git diff --quiet CHANGELOG.md && exit 0
+            git add CHANGELOG.md
+            git commit -m "chore: update changelog [skip ci]"
+            git push && exit 0
             sleep $((attempt * 5))
           done
           exit 1
