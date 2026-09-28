@@ -192,6 +192,8 @@ release VERSION:
         echo "main is not the same as origin/main: pull or push first" >&2
         exit 1
     fi
+    # A failed step before the commit puts the files back, so a rerun gets the same version.
+    trap 'git checkout -q -- Cargo.toml Cargo.lock CHANGELOG.md; rm -f Cargo.toml.bak' ERR
     sed -i.bak '/^\[package\]/,/^\[/{s/^version = ".*"/version = "{{ VERSION }}"/;}' Cargo.toml
     rm Cargo.toml.bak
     cargo check --quiet
