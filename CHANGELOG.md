@@ -51,6 +51,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Let the rewind and forward keys jump in stories too
 - *(release)* Let git-cliff print release notes and previews ([#4](https://github.com/alexsavio/deckjay/issues/4))
 - *(changelog)* Link the PR numbers in commit subjects ([#6](https://github.com/alexsavio/deckjay/issues/6))
+- *(ci)* Regenerate the changelog on the newest main instead of rebasing ([#7](https://github.com/alexsavio/deckjay/issues/7))
 
 ### 💼 Other
 
