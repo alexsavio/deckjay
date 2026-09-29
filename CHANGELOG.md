@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.PATCH).
 
-## [2026.9.1] - 2026-09-29
+## [Unreleased]
 
 ### 🚀 Features
 
@@ -14,6 +14,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### 🐛 Bug Fixes
 
 - *(test)* Raise the open-file limit for the test runs ([#12](https://github.com/alexsavio/deckjay/issues/12))
+
+### 💼 Other
+
+- Merge branch 'main' of github.com:alexsavio/deckjay
 
 ### 📚 Documentation
 
