@@ -196,14 +196,20 @@ release VERSION:
         echo "main is not the same as origin/main: pull or push first" >&2
         exit 1
     fi
-    # A failed step before the commit puts the files back, so a rerun gets the same version.
-    trap 'git checkout -q -- Cargo.toml Cargo.lock CHANGELOG.md; rm -f Cargo.toml.bak' ERR
+    # A stop before the commit puts the files back, so a rerun gets the same version.
+    trap 'git checkout -q -- Cargo.toml Cargo.lock CHANGELOG.md; rm -f Cargo.toml.bak' EXIT
     sed -i.bak '/^\[package\]/,/^\[/{s/^version = ".*"/version = "{{ VERSION }}"/;}' Cargo.toml
     rm Cargo.toml.bak
     cargo check --quiet
     just ci
     git-cliff --tag "v{{ VERSION }}" -o CHANGELOG.md
     rumdl fmt CHANGELOG.md
+    # A merge or the Changelog workflow can push to main while the checks run.
+    git fetch -q origin main
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+        echo "origin/main moved while the checks ran: pull, then release again" >&2
+        exit 1
+    fi
     git add Cargo.toml Cargo.lock CHANGELOG.md
     # cliff.toml leaves this subject out of the changelog.
     git commit -m "chore(release): prepare for v{{ VERSION }}"
