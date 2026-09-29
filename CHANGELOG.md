@@ -11,6 +11,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 - *(cli)* Commands, check exit codes, --version and systemd notify ([#10](https://github.com/alexsavio/deckjay/issues/10))
 
+### 🐛 Bug Fixes
+
+- *(test)* Raise the open-file limit for the test runs ([#12](https://github.com/alexsavio/deckjay/issues/12))
+
 ### 📚 Documentation
 
 - *(pi)* Drop the upgrade section ([#9](https://github.com/alexsavio/deckjay/issues/9))
