@@ -107,6 +107,9 @@ pedantic lint group; the lint settings are in `Cargo.toml`.
 ## ✅ Before a commit
 
 - `just ci`: format check, clippy, the tests and the API docs.
+  On macOS, run `ulimit -n 4096` before a plain `cargo test`: the
+  default of 256 open files is too few for the whole suite. The `just`
+  recipes do this for you.
 - `rumdl check README.md CLAUDE.md docs/*.md`: Markdown lines stay within
   80 columns.
 - Commit messages follow
