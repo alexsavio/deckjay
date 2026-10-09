@@ -256,7 +256,7 @@ mod tests {
         // Episode 3 did not arrive: 2 and 1 stay, nothing is dropped.
         let after = plan(Some(&feed), &disk(&[2, 1]), 2, None);
         assert_eq!(summary(&after).1, names(&[2, 1]));
-        assert!(after.drop.is_empty());
+        assert_eq!(after.drop, []);
     }
 
     #[test]

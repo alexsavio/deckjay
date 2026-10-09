@@ -6,7 +6,7 @@
 # runs under emulation and takes a while.
 
 # Keep the Rust version in step with rust-toolchain.toml.
-FROM rust:1.98-trixie AS build
+FROM rust:1.99-trixie AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libudev-dev libasound2-dev pkg-config \
  && rm -rf /var/lib/apt/lists/*

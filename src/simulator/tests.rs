@@ -152,7 +152,7 @@ fn presses_are_returned_once_oldest_first() {
     press(&url, 7);
     press(&url, 2);
     assert_eq!(presses(&url, 0), [7, 2]);
-    assert!(presses(&url, 0).is_empty());
+    assert_eq!(presses(&url, 0), [] as [usize; 0]);
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn a_long_poll_ends_soon_after_a_press() {
 fn a_long_poll_without_presses_waits_then_returns_nothing() {
     let url = start(Model::Mk2.info());
     let started = Instant::now();
-    assert!(presses(&url, 300).is_empty());
+    assert_eq!(presses(&url, 300), [] as [usize; 0]);
     assert!(started.elapsed() >= Duration::from_millis(300));
 }
 
@@ -219,7 +219,7 @@ fn reset_clears_the_deck_and_versions_keep_growing() {
     assert_eq!(after.versions, vec![0; 15]);
     assert_eq!(after.brightness, 100);
     assert_eq!(status(ureq::get(format!("{url}/api/keys/0")).call()), 404);
-    assert!(presses(&url, 0).is_empty());
+    assert_eq!(presses(&url, 0), [] as [usize; 0]);
 
     put_key(&url, 0, &png(3));
     assert!(state(&url).versions[0] > before);

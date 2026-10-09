@@ -556,10 +556,9 @@ mod tests {
         doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace);
 
         assert_eq!(doomed.next(None), Some(t0 + grace));
-        assert!(
-            doomed
-                .take_due(t0 + grace.saturating_sub(Duration::from_millis(1)), None)
-                .is_empty()
+        assert_eq!(
+            doomed.take_due(t0 + grace.saturating_sub(Duration::from_millis(1)), None),
+            [] as [PathBuf; 0]
         );
         assert_eq!(doomed.take_due(t0 + grace, None), [rel("p-00000000.jpg")]);
         assert_eq!(doomed.next(None), None);
@@ -587,7 +586,10 @@ mod tests {
         doomed.schedule(vec![episode.clone()], t0, grace);
 
         assert_eq!(doomed.next(Some(ID)), None);
-        assert!(doomed.take_due(t0 + grace * 10, Some(ID)).is_empty());
+        assert_eq!(
+            doomed.take_due(t0 + grace * 10, Some(ID)),
+            [] as [PathBuf; 0]
+        );
         assert_eq!(doomed.next(Some("ffffffff00000000")), Some(t0 + grace));
         assert_eq!(doomed.take_due(t0 + grace * 10, None), [episode]);
     }

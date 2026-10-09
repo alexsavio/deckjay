@@ -138,7 +138,7 @@ fn an_unknown_device_names_the_ones_spotify_sees() {
     let mut rig = Rig::new("bathroom");
     let err = rig.play().unwrap_err();
     assert!(format!("{err:#}").contains("Den"), "{err:#}");
-    assert!(rig.events().is_empty());
+    assert_eq!(rig.events(), []);
 }
 
 #[test]

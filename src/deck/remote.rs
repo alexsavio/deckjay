@@ -294,10 +294,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(deck.pressed_keys(Duration::from_secs(2)).unwrap(), [7]);
-        assert!(
-            deck.pressed_keys(Duration::from_millis(10))
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            deck.pressed_keys(Duration::from_millis(10)).unwrap(),
+            [] as [usize; 0]
         );
     }
 

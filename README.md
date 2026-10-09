@@ -86,7 +86,7 @@ Get the program one of two ways:
   x86_64, Linux arm64 (a Raspberry Pi with a 64-bit OS) or macOS on Apple
   silicon. The Linux ones need glibc 2.35 or newer (Debian 12, Ubuntu
   22.04, Raspberry Pi OS 12 or later), `libasound2` and `libudev1`.
-- **Build** it with Rust 1.98 or newer. On Linux, install
+- **Build** it with Rust 1.99 or newer. On Linux, install
   `libasound2-dev`, `libudev-dev` and `pkg-config` first.
 
   ```sh

@@ -264,7 +264,7 @@ fn pause_silences_the_station_and_play_fetches_it_again() {
     rig.send(PlayerCmd::TogglePause).unwrap();
     assert_eq!(rig.events(), [PlayerEvent::Paused(ITEM)]);
     for _ in 0..5 {
-        assert!(levels(&rig.fill(), 1.0).is_empty());
+        assert_eq!(levels(&rig.fill(), 1.0), [] as [i16; 0]);
     }
     rig.poll().unwrap();
     assert_eq!(rig.events(), [], "a paused station has not ended");
