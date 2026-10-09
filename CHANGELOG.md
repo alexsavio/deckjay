@@ -12,6 +12,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(test)* Raise the open-file limit for the test runs ([#12](https://github.com/alexsavio/deckjay/issues/12))
 - *(release)* Stop when main moves during a release ([#13](https://github.com/alexsavio/deckjay/issues/13))
 
+### ⚙️ Miscellaneous Tasks
+
+- Bump Rust to 1.99 ([#14](https://github.com/alexsavio/deckjay/issues/14))
+
 ## [2026.9.1] - 2026-09-29
 
 ### 🚀 Features
