@@ -503,7 +503,7 @@ fn spawn_refuses_unsafe_settings() {
         let publisher = Box::new(Recorder(events));
         assert!(spawn(settings, timing(), publisher, snapshots).is_err());
     }
-    assert!(load_cached(&bad_slug).feeds.is_empty());
+    assert_eq!(load_cached(&bad_slug).feeds, []);
 }
 
 #[test]

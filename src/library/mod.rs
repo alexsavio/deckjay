@@ -425,7 +425,7 @@ mod tests {
         ]);
 
         assert_eq!(library.items().len(), 1);
-        assert!(library.shelves()[0].items.is_empty());
+        assert_eq!(library.shelves()[0].items, []);
         assert_eq!(library.shelves()[1].items, [ItemId(0)]);
     }
 

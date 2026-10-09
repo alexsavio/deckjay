@@ -2,7 +2,7 @@
 name = "deckjay"
 version = "2026.9.1"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.99"
 description = "A music player with no screen: pictures on an Elgato Stream Deck, one press plays on a Chromecast, a HEOS receiver, Spotify Connect or the computer's own sound output"
 license = "MIT"
 repository = "https://github.com/alexsavio/deckjay"

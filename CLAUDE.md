@@ -76,8 +76,8 @@ installs a headless Pi as a systemd service (and the Docker deploy).
   GitHub release, then `cargo publish` with the `CARGO_REGISTRY_TOKEN`
   secret. `just publish-dry` checks the package first.
 
-Toolchain: `rust-toolchain.toml` pins 1.98, `Cargo.toml` has
-`rust-version = "1.98"`, the Dockerfile builds on `rust:1.98-trixie`. Bump
+Toolchain: `rust-toolchain.toml` pins 1.99, `Cargo.toml` has
+`rust-version = "1.99"`, the Dockerfile builds on `rust:1.99-trixie`. Bump
 all three together.
 
 ## Architecture

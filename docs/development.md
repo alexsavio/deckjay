@@ -101,7 +101,7 @@ Run `just` to list every recipe. The ones you need most:
 | `just spotify-login` | Sign in to Spotify once |
 | `just deploy` | Build the Pi image and start it on the Pi in Docker |
 
-The code targets Rust 1.98 (edition 2024). `cargo clippy` uses the
+The code targets Rust 1.99 (edition 2024). `cargo clippy` uses the
 pedantic lint group; the lint settings are in `Cargo.toml`.
 
 ## ✅ Before a commit

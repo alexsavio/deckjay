@@ -345,7 +345,7 @@ fn plays_the_album_track_by_track_then_stops() {
     assert_eq!(rig.events(), [PlayerEvent::Stopped]);
     assert_eq!(rig.player.current, None);
     assert_eq!(rig.player.poll_interval(), None);
-    assert!(levels(&rig.fill(), 1.0).is_empty());
+    assert_eq!(levels(&rig.fill(), 1.0), [] as [i16; 0]);
     assert_eq!(rig.opened.get(), 1);
 }
 
@@ -456,7 +456,7 @@ fn seek_keeps_a_paused_track_paused() {
     let at = rig.engine().position();
     assert!(at.as_secs_f64() >= 3.3, "3 s on from about 0.5 s: {at:?}");
     for _ in 0..5 {
-        assert!(levels(&rig.fill(), 1.0).is_empty());
+        assert_eq!(levels(&rig.fill(), 1.0), [] as [i16; 0]);
     }
     assert_eq!(rig.engine().position(), at, "a pause keeps the place");
 }
@@ -493,7 +493,7 @@ fn toggle_pause_pauses_resumes_and_restarts_a_finished_album() {
     assert_eq!(rig.events(), [PlayerEvent::Paused(ITEM)]);
     let at = rig.engine().position();
     for _ in 0..5 {
-        assert!(levels(&rig.fill(), 1.0).is_empty());
+        assert_eq!(levels(&rig.fill(), 1.0), [] as [i16; 0]);
     }
     rig.poll().unwrap();
     assert_eq!(rig.engine().position(), at, "a pause keeps the place");

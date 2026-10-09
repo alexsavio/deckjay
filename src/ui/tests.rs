@@ -157,7 +157,7 @@ fn a_zero_max_volume_sends_nothing() {
     let layout = ui.layout(3, 5);
     ui.press(&layout, VOLUME_UP);
     ui.press(&layout, VOLUME_DOWN);
-    assert!(volumes_sent(&cmds).is_empty());
+    assert_eq!(volumes_sent(&cmds), [] as [f32; 0]);
     assert_eq!(volume_level(&ui, &layout), 0);
 }
 
