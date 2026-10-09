@@ -268,7 +268,6 @@ impl Library {
     }
 }
 
-/// One item per station of a radio source.
 fn stations(source: &Source) -> Vec<Item> {
     source
         .stations
@@ -317,7 +316,6 @@ const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'.')
     .remove(b'~');
 
-/// Builds `base/<segment>/<segment>` with every path segment URL-encoded.
 pub fn url_for(base: &str, rel_path: &Path) -> String {
     let mut url = base.trim_end_matches('/').to_string();
     for part in rel_path.components() {
