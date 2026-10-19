@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.PATCH).
 
+## [Unreleased]
+
+### ⚙️ Miscellaneous Tasks
+
+- Run cargo audit every week ([#16](https://github.com/alexsavio/deckjay/issues/16))
+
 ## [2026.10.0] - 2026-10-19
 
 ### 🐛 Bug Fixes
