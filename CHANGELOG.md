@@ -11,6 +11,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 - *(test)* Raise the open-file limit for the test runs ([#12](https://github.com/alexsavio/deckjay/issues/12))
 - *(release)* Stop when main moves during a release ([#13](https://github.com/alexsavio/deckjay/issues/13))
+- *(deps)* Bump rustls to 0.23.46 for RUSTSEC-2026-0346..0349 ([#15](https://github.com/alexsavio/deckjay/issues/15))
 
 ### 📚 Documentation
 
