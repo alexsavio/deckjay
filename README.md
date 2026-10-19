@@ -16,9 +16,9 @@ receiver, a Spotify Connect device, or the computer's own sound output.
 It runs on Linux (a Raspberry Pi next to the speaker, or any PC) and on
 macOS. Written in Rust.
 
-![The web Stream Deck simulator: eight album keys, the first one playing, a
-power key, the next-shelf key, and the playback and volume keys
-below](docs/images/simulator.webp)
+![The web Stream Deck simulator: eight albums shown by their covers, the
+first one playing, a power key, the next-shelf key, and the playback and
+volume keys below](docs/images/simulator.webp)
 
 ```text
  [A][A][A][A][⏻]     A = an album, book or story: press to play, again to pause
@@ -37,8 +37,9 @@ below](docs/images/simulator.webp)
 - 📚 **Shelves:** each source is a shelf; one key moves to the next shelf, and
   a shelf with more items than keys pages. Decks from the 6-key Mini to the
   36-key Plus XL work; the layout adapts.
-- 🎨 **Pictures, no text:** album covers, a `key.png` of your own, or a big
-  glyph of the kind (note, book, star, radio waves, microphone) on a colour.
+- 🎨 **Pictures, no text:** album covers (`cover.jpg`, `folder.jpg` or any
+  jpg or png in the album folder), a `key.png` of your own, or a big glyph
+  of the kind (note, book, star, radio waves, microphone) on a colour.
   Small badges tell the kinds apart, a bar shows how far a book got, and a
   dot marks podcast episodes not heard yet.
 - 🔖 **Books resume:** audiobooks and podcast episodes play on from where they
