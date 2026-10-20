@@ -489,7 +489,10 @@ few things:
   Stream Deck MK.2 about
   [0.3 A](https://www.jamiebalfour.scot/reviews/posts/elgato-stream-deck-mk2),
   and the official supply gives 2.5 A), but a thin cable or a cheap
-  adapter drops volts, and then the deck resets. Use the official
+  adapter drops volts, and then the deck resets. The Scissor Keys deck is
+  an MK.2 with other keys and the same screens, so it should draw the
+  same; nobody has measured it yet (a USB power meter between the Pi and
+  the deck, at full brightness, tells). Use the official
   5.1 V 2.5 A supply and a short OTG adapter that grounds the ID pin: a
   plain charging cable does not make the Pi a USB host. If the deck still
   resets, or it is an XL (it draws more), put a powered USB hub between
