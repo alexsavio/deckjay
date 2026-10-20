@@ -7,6 +7,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+### 📚 Documentation
+
+- *(pi)* Note Scissor Keys power on the Zero 2 W
+
 ### ⚙️ Miscellaneous Tasks
 
 - Run cargo audit every week ([#16](https://github.com/alexsavio/deckjay/issues/16))
