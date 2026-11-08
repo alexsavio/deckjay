@@ -1,0 +1,54 @@
+# Version updates (the repository setting handles security updates).
+# Every ecosystem waits 7 days after a release before it opens a PR.
+# The Rust toolchain is not listed on purpose: rust-toolchain.toml, Cargo.toml
+# `rust-version` and the Dockerfile `rust:` image are bumped together by hand.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: rust
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
