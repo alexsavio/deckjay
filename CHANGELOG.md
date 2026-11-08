@@ -10,6 +10,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### ⚙️ Miscellaneous Tasks
 
 - Refine Dependabot updates and log security bumps ([#24](https://github.com/alexsavio/deckjay/issues/24))
+- Bump taiki-e/install-action from 2.88.1 to 2.89.0 in the actions-minor-patch group ([#23](https://github.com/alexsavio/deckjay/issues/23))
 
 ## [2026.11.0] - 2026-11-08
 
