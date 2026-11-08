@@ -5,9 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Catches rot while nothing is pushed: a runner image change, a moving
+  # base image, a broken install step.
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: {}
@@ -88,6 +93,8 @@ jobs:
 
   audit:
     name: Security Audit
+    # audit.yml runs cargo audit every Monday.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: read  # actions/checkout
