@@ -31,7 +31,7 @@ anyhow = "1"
 axum = "0.8"
 clap = { version = "4.6", features = ["derive"] }
 cpal = "0.18"
-elgato-streamdeck = "0.13"
+elgato-streamdeck = "0.14"
 hidapi = "2.6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 percent-encoding = "2"
