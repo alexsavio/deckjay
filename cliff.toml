@@ -73,6 +73,8 @@ commit_parsers = [
     { message = "^style", group = "<!-- 5 -->🎨 Styling" },
     { message = "^test", group = "<!-- 6 -->🧪 Testing" },
     { message = "^chore\\(release\\): prepare for", skip = true },
+    # Dependabot security PRs: "chore(deps): [security] bump ..." or "ci: [Security] bump ...".
+    { message = "^(chore|ci)(\\(deps[^)]*\\))?: \\[[Ss]ecurity\\]", group = "<!-- 8 -->🛡️ Security" },
     { message = "^chore\\(deps.*\\)", skip = true },
     { message = "^chore\\(pr\\)", skip = true },
     { message = "^chore\\(pull\\)", skip = true },
