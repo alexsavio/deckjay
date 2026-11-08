@@ -19,6 +19,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 - Run cargo audit every week ([#16](https://github.com/alexsavio/deckjay/issues/16))
 - Run the checks and tests every week ([#18](https://github.com/alexsavio/deckjay/issues/18))
+- Bump action pins, rumdl and git-cliff ([#21](https://github.com/alexsavio/deckjay/issues/21))
 
 ## [2026.10.0] - 2026-10-19
 
