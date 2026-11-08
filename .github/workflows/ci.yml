@@ -15,7 +15,7 @@ permissions: {}
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  RUMDL_VERSION: "0.2.46"
+  RUMDL_VERSION: "0.3.2"
 
 jobs:
   check:
@@ -24,7 +24,7 @@ jobs:
     permissions:
       contents: read  # actions/checkout
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       # cpal needs ALSA and hidapi needs udev on Linux.
@@ -33,7 +33,7 @@ jobs:
       # Installs the version pinned in rust-toolchain.toml, with clippy and rustfmt.
       - name: Install Rust
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
         with:
           shared-key: cargo-${{ runner.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -42,7 +42,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Cache rumdl
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cargo/bin/rumdl
           key: rumdl-${{ env.RUMDL_VERSION }}
@@ -70,7 +70,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Install system libraries
@@ -78,7 +78,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
       - name: Install Rust
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
         with:
           shared-key: cargo-${{ runner.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -92,13 +92,13 @@ jobs:
     permissions:
       contents: read  # actions/checkout
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Install Rust
         run: rustup toolchain install
       - name: Install cargo-audit
-        uses: taiki-e/install-action@b651345a718c8f44efa2460560b3dbf29cbd7ee1  # v2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39  # v2.90.3
         with:
           tool: cargo-audit
       - name: Run cargo audit
@@ -111,7 +111,7 @@ jobs:
       contents: read  # actions/checkout
     needs: check
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       # The image the Pi runs is arm64; this builds the same Dockerfile for
