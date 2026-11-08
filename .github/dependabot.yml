@@ -1,7 +1,11 @@
 # Version updates (the repository setting handles security updates).
 # Every ecosystem waits 7 days after a release before it opens a PR.
-# The Rust toolchain is not listed on purpose: rust-toolchain.toml, Cargo.toml
-# `rust-version` and the Dockerfile `rust:` image are bumped together by hand.
+# Not listed on purpose:
+# - The Rust toolchain: rust-toolchain.toml, Cargo.toml `rust-version` and the
+#   Dockerfile `rust:` image are bumped together by hand.
+# - Docker: `rust:` goes with the toolchain, and `debian:trixie-slim` has no
+#   version tag, so Dependabot cannot compare it. The weekly CI run rebuilds
+#   the image.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -13,12 +17,18 @@ updates:
       timezone: Europe/Berlin
     cooldown:
       default-days: 7
+    # Also refresh indirect crates (most of Cargo.lock).
+    allow:
+      - dependency-type: all
     commit-message:
       prefix: chore
       include: scope
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+        # The USB deck path (src/deck/hid.rs) has no automated test: each bump
+        # needs a check on a real deck, so these get their own PR.
+        exclude-patterns: ["elgato-streamdeck", "hidapi"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -33,22 +43,4 @@ updates:
       prefix: ci
     groups:
       actions-minor-patch:
-        update-types: [minor, patch]
-
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Europe/Berlin
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: chore
-      include: scope
-    ignore:
-      - dependency-name: rust
-    groups:
-      docker-minor-patch:
         update-types: [minor, patch]

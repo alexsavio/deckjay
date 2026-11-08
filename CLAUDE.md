@@ -335,9 +335,12 @@ work together with `#[serde(flatten)]`, so source tables list their keys.
   skips `cargo audit`) and on demand (`workflow_dispatch`); `audit.yml` runs
   `cargo audit` every Monday, so a new advisory shows without a push, and
   Dependabot security updates (a repository setting) open fix PRs, and
-  `.github/dependabot.yml` adds weekly version updates (cargo, github-actions,
-  docker; minor and patch grouped; a 7-day cooldown after each release); the
-  Rust toolchain stays manual (Dependabot ignores the `rust` image);
+  `.github/dependabot.yml` adds weekly version updates (cargo, indirect
+  crates too, and github-actions; minor and patch grouped, except
+  `elgato-streamdeck` and `hidapi`, which get their own PR because the USB
+  deck has no automated test; a 7-day cooldown after each release); security
+  PRs land in the changelog's Security group; the Rust toolchain stays manual
+  and Docker is not tracked;
   `zizmor` checks the workflows.
 - On macOS, quit the Elgato Stream Deck app before running: it holds the HID
   device.
