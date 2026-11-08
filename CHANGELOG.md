@@ -7,6 +7,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+### 🐛 Bug Fixes
+
+- *(deps)* Bump rustls-webpki, webpki-roots and tokio for RUSTSEC-2026-0381, -0382, -0386 ([#17](https://github.com/alexsavio/deckjay/issues/17))
+
 ### 📚 Documentation
 
 - *(pi)* Note Scissor Keys power on the Zero 2 W
