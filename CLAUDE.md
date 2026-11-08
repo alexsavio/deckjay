@@ -329,9 +329,12 @@ work together with `#[serde(flatten)]`, so source tables list their keys.
 - `CHANGELOG.md` is generated from the Conventional Commit messages by
   git-cliff (`cliff.toml`, the `changelog` workflow); do not edit it by hand.
   CI (`.github/workflows/ci.yml`) runs fmt, clippy, rustdoc, rumdl, the
-  tests on Linux and macOS, `cargo audit` and a Docker build; `audit.yml`
-  also runs `cargo audit` every Monday, so a new advisory shows without a
-  push, and Dependabot security updates (a repository setting) open fix PRs;
+  tests on Linux and macOS, `cargo audit` and a Docker build on every pull
+  request and on every push to main, every Monday (05:17 UTC, so rot in a
+  runner image or the base image shows without a push; the scheduled run
+  skips `cargo audit`) and on demand (`workflow_dispatch`); `audit.yml` runs
+  `cargo audit` every Monday, so a new advisory shows without a push, and
+  Dependabot security updates (a repository setting) open fix PRs;
   `zizmor` checks the workflows.
 - On macOS, quit the Elgato Stream Deck app before running: it holds the HID
   device.
