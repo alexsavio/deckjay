@@ -115,7 +115,7 @@ pedantic lint group; the lint settings are in `Cargo.toml`.
 - Commit messages follow
   [Conventional Commits](https://www.conventionalcommits.org);
   `CHANGELOG.md` is generated from them.
-- CI runs on every push and pull request, and also every Monday
+- CI runs on every pull request and every push to main, and also every Monday
   (05:17 UTC) and on demand (Actions tab, "Run workflow"), so a changed
   runner image or base image shows without a push.
 - Code that talks to real devices (Chromecast, HEOS, the USB deck) is
