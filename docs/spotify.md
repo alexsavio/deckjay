@@ -59,7 +59,12 @@ deckjay. The browser then goes to `http://127.0.0.1:8898/callback`:
 
 The login is saved in `<state_dir>/spotify-token.json` (mode 0600): the
 client id and the refresh token, never printed. Access tokens stay in
-memory and are refreshed when they expire. If Spotify stops accepting the
+memory and are refreshed when they expire. The file owns the refresh token:
+before each refresh deckjay reads it again, because Spotify may send a new
+refresh token and another deckjay process (`just doctor`) may have saved
+it. If Spotify still refuses the token, deckjay reads the file once more and
+tries again only when the token in it changed. If the file cannot be read, or
+a new token could not be saved, deckjay uses the copy it holds in memory. If Spotify stops accepting the
 login, the log says to run `spotify-login` again.
 
 Scopes: `user-read-playback-state`, `user-modify-playback-state`,

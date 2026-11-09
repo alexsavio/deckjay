@@ -232,7 +232,10 @@ pub struct Client {
     agent: Agent,
     endpoints: Endpoints,
     state_dir: PathBuf,
+    /// The last token read from the file or saved to it; the file is the owner.
     token: TokenFile,
+    /// A rotated token that could not be saved: the file is behind this copy.
+    unsaved: bool,
     access: Option<Access>,
     /// Spotify asked for no requests before this (429 `Retry-After`).
     retry_at: Option<Instant>,
@@ -258,6 +261,7 @@ impl Client {
             endpoints,
             state_dir: state_dir.to_path_buf(),
             token,
+            unsaved: false,
             access: None,
             retry_at: None,
         }
@@ -481,24 +485,65 @@ impl Client {
         Reply::read(reply)
     }
 
+    /// At most two requests: another client or process may have rotated the
+    /// token, so the file is read before the first and, after `invalid_grant`,
+    /// once more (a second request only if the token in it changed).
+    fn refresh(&mut self) -> Result<auth::Tokens> {
+        self.adopt_saved_token();
+        let first = self.request_refresh();
+        let Err(err) = first else { return first };
+        let refused = err
+            .downcast_ref::<ApiError>()
+            .is_some_and(|api| api.reason.as_deref() == Some("invalid_grant"));
+        let before = self.token.refresh_token.clone();
+        if refused && self.adopt_saved_token() && self.token.refresh_token != before {
+            return self.request_refresh();
+        }
+        Err(err)
+    }
+
+    fn request_refresh(&self) -> Result<auth::Tokens> {
+        auth::refresh(
+            &self.agent,
+            &self.endpoints.accounts,
+            &self.token.client_id,
+            &self.token.refresh_token,
+        )
+    }
+
+    /// Takes the token from the file. If the file cannot be read, or is behind
+    /// a rotated token that could not be saved, the copy in memory stays.
+    fn adopt_saved_token(&mut self) -> bool {
+        if self.unsaved {
+            return false;
+        }
+        match TokenFile::load(&self.state_dir) {
+            Ok(saved) => {
+                self.token = saved;
+                true
+            }
+            Err(err) => {
+                warn!("using the Spotify token in memory: {err:#}");
+                false
+            }
+        }
+    }
+
     fn access_token(&mut self) -> Result<Secret> {
         if let Some(access) = &self.access
             && access.expires_at > Instant::now() + REFRESH_MARGIN
         {
             return Ok(access.token.clone());
         }
-        let tokens = auth::refresh(
-            &self.agent,
-            &self.endpoints.accounts,
-            &self.token.client_id,
-            &self.token.refresh_token,
-        )?;
+        let tokens = self.refresh()?;
         if let Some(refresh_token) = tokens.refresh
             && refresh_token != self.token.refresh_token
         {
             self.token.refresh_token = refresh_token;
-            if let Err(err) = self.token.save(&self.state_dir) {
-                warn!("cannot save the new Spotify refresh token: {err:#}");
+            self.unsaved = true;
+            match self.token.save(&self.state_dir) {
+                Ok(()) => self.unsaved = false,
+                Err(err) => warn!("cannot save the new Spotify refresh token: {err:#}"),
             }
         }
         self.access = Some(Access {

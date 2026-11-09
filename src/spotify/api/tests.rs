@@ -105,6 +105,129 @@ fn a_rotated_refresh_token_is_saved_and_used() {
     );
 }
 
+/// A second client, made before the first one rotated the token.
+fn second_client(rig: &Rig) -> Client {
+    Client::load(rig.dir.path(), rig.fake.endpoints()).unwrap()
+}
+
+fn rotating(rig: &Rig) {
+    let mut script = rig.fake.script();
+    script.rotate = true;
+    script.expires_in = 30;
+}
+
+#[test]
+fn a_client_made_before_a_rotation_refreshes_with_the_saved_token() {
+    let mut rig = Rig::new();
+    rotating(&rig);
+    let mut other = second_client(&rig);
+    rig.client.devices().unwrap();
+
+    other.devices().unwrap();
+    let tokens = rig.fake.token_requests();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(
+        tokens[1].param("refresh_token").as_deref(),
+        Some("refresh-2")
+    );
+}
+
+#[test]
+fn a_refused_refresh_token_is_replaced_by_one_newer_in_the_file_and_retried() {
+    let mut rig = Rig::new();
+    let dir = rig.dir.path().to_path_buf();
+    // Another process rotates the token after this client read the file and
+    // before the accounts service sees this client's request.
+    rig.fake.script().on_token_request = Some(Box::new(move |script| {
+        TokenFile {
+            client_id: fake::CLIENT_ID.into(),
+            refresh_token: Secret::new("refresh-2"),
+        }
+        .save(&dir)
+        .unwrap();
+        script.refresh_token = "refresh-2".into();
+    }));
+
+    rig.client.devices().unwrap();
+    let sent: Vec<_> = rig
+        .fake
+        .token_requests()
+        .iter()
+        .map(|request| request.param("refresh_token").unwrap())
+        .collect();
+    assert_eq!(sent, ["refresh-1", "refresh-2"]);
+}
+
+#[test]
+fn only_invalid_grant_makes_a_refresh_retry() {
+    let mut rig = Rig::new();
+    let dir = rig.dir.path().to_path_buf();
+    rig.fake.can("/api/token", 503, None, "");
+    rig.fake.script().on_token_request = Some(Box::new(move |_| {
+        TokenFile {
+            client_id: fake::CLIENT_ID.into(),
+            refresh_token: Secret::new("refresh-2"),
+        }
+        .save(&dir)
+        .unwrap();
+    }));
+
+    assert!(rig.client.devices().is_err());
+    assert_eq!(rig.fake.token_requests().len(), 1);
+}
+
+#[test]
+fn a_refused_refresh_token_that_the_file_still_holds_is_not_retried() {
+    let mut rig = Rig::new();
+    rig.fake.script().revoked = true;
+    assert!(rig.client.devices().is_err());
+    assert_eq!(rig.fake.token_requests().len(), 1);
+}
+
+#[test]
+fn a_missing_token_file_refreshes_with_the_copy_in_memory() {
+    let mut rig = Rig::new();
+    std::fs::remove_file(TokenFile::path(rig.dir.path())).unwrap();
+    rig.client.devices().unwrap();
+    assert_eq!(rig.fake.token_requests().len(), 1);
+}
+
+#[test]
+fn a_damaged_token_file_refreshes_with_the_copy_in_memory() {
+    let mut rig = Rig::new();
+    std::fs::write(TokenFile::path(rig.dir.path()), "{").unwrap();
+    rig.client.devices().unwrap();
+    assert_eq!(rig.fake.token_requests().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rotated_token_that_could_not_be_saved_stays_in_use() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut rig = Rig::new();
+    rotating(&rig);
+    let dir = rig.dir.path();
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let writable = std::fs::File::create(dir.join("probe")).is_ok();
+    let result = if writable {
+        None
+    } else {
+        Some((rig.client.devices(), rig.client.devices()))
+    };
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let Some((first, second)) = result else {
+        return;
+    };
+    first.unwrap();
+    second.unwrap();
+    let tokens = rig.fake.token_requests();
+    assert_eq!(
+        tokens[1].param("refresh_token").as_deref(),
+        Some("refresh-2")
+    );
+}
+
 #[test]
 fn a_401_gets_a_new_access_token_and_retries_once() {
     let mut rig = Rig::new();
