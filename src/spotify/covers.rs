@@ -1,7 +1,7 @@
 //! Playlist covers, fetched once from the Web API and kept in a folder
 //! (`<state_dir>/spotify-covers/`), so keys show them without the network.
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -73,25 +73,12 @@ fn fetch(client: &mut Client, folder: &Path, uri: &str) -> Result<()> {
         .to_rgb8();
     let target = path(folder, uri);
     std::fs::create_dir_all(folder)?;
-    let tmp = target.with_extension("jpg.tmp");
-    let written = (|| -> Result<()> {
-        let mut jpeg = Vec::new();
-        picture.write_to(
-            &mut std::io::Cursor::new(&mut jpeg),
-            image::ImageFormat::Jpeg,
-        )?;
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(&jpeg)?;
-        file.sync_all()?;
-        std::fs::rename(&tmp, &target)?;
-        Ok(())
-    })();
-    if let Err(err) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(err);
-    }
-    // The rename itself is only on disk once the folder is synced.
-    let _ = std::fs::File::open(folder).and_then(|dir| dir.sync_all());
+    let mut jpeg = Vec::new();
+    picture.write_to(
+        &mut std::io::Cursor::new(&mut jpeg),
+        image::ImageFormat::Jpeg,
+    )?;
+    crate::fsutil::write_atomic(&target, &jpeg, None)?;
     Ok(())
 }
 

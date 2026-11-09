@@ -109,11 +109,8 @@ pub fn episode(
         match attempt(agent, &url, &part, max_bytes)? {
             Attempt::Done(bytes) => {
                 let dest = dir.join(name);
-                return match fs::rename(&part, &dest) {
-                    Ok(()) => {
-                        sync_dir(dir);
-                        Ok(bytes)
-                    }
+                return match crate::fsutil::publish(&part, &dest) {
+                    Ok(()) => Ok(bytes),
                     Err(err) => Err(discard(&part, disk(err, &dest))),
                 };
             }
@@ -208,12 +205,6 @@ fn range_start(reply: &Response<Body>) -> Option<u64> {
     range.split('-').next()?.trim().parse().ok()
 }
 
-/// Makes a rename survive a power cut. Best effort: the file is complete
-/// either way, and not every platform can open a folder.
-fn sync_dir(dir: &Path) {
-    let _ = File::open(dir).and_then(|dir| dir.sync_all());
-}
-
 fn too_big(max_bytes: u64) -> Failure {
     Failure::Rejected(anyhow!("the episode is larger than {} MB", max_bytes / MB))
 }
@@ -236,20 +227,9 @@ pub fn picture(agent: &Agent, url: &str, dir: &Path, name: &str) -> Result<()> {
     let bytes = read_limited(reply.body_mut(), PICTURE_LIMIT, "picture")?;
     let jpeg = shrink(&bytes)?;
     fs::create_dir_all(dir)?;
-    let part = dir.join(cache::part_name(name));
     let dest = dir.join(name);
-    let write = || -> io::Result<()> {
-        let mut file = File::create(&part)?;
-        file.write_all(&jpeg)?;
-        file.sync_all()?;
-        fs::rename(&part, &dest)?;
-        sync_dir(dir);
-        Ok(())
-    };
-    write().map_err(|err| {
-        let _ = cache::delete(&part);
-        anyhow::Error::new(err).context(format!("cannot write {}", dest.display()))
-    })
+    crate::fsutil::write_atomic(&dest, &jpeg, None)
+        .map_err(|err| anyhow::Error::new(err).context(format!("cannot write {}", dest.display())))
 }
 
 fn shrink(bytes: &[u8]) -> Result<Vec<u8>> {

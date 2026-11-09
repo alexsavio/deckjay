@@ -11,8 +11,8 @@
 //! as is, and the sweep deletes nothing that does not match these patterns.
 
 use std::collections::HashSet;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -111,23 +111,8 @@ fn sanitized(manifest: Manifest) -> Manifest {
 pub fn save(dir: &Path, manifest: &Manifest) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let path = dir.join(MANIFEST);
-    let temp = dir.join(part_name(MANIFEST));
     let json = serde_json::to_vec_pretty(manifest)?;
-    let write = || -> io::Result<()> {
-        let mut file = File::create(&temp)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
-        fs::rename(&temp, &path)?;
-        // Makes the rename itself durable; not every platform can open a folder.
-        if let Ok(folder) = File::open(dir) {
-            let _ = folder.sync_all();
-        }
-        Ok(())
-    };
-    write()
-        .inspect_err(|_| {
-            let _ = fs::remove_file(&temp);
-        })
+    crate::fsutil::write_atomic(&path, &json, None)
         .with_context(|| format!("cannot write {}", path.display()))
 }
 

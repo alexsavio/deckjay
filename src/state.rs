@@ -3,8 +3,6 @@
 //! resumes (audiobooks) got.
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -288,24 +286,9 @@ impl Store {
 /// Writes a temporary file and renames it over `path`, so a power cut
 /// leaves the old state or the new one, never half of one.
 fn write_atomically(path: &Path, state: &State) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
     let text = serde_json::to_string_pretty(state)?;
-    let written = File::create(&tmp)
-        .with_context(|| format!("cannot create {}", tmp.display()))
-        .and_then(|mut file| {
-            file.write_all(text.as_bytes())?;
-            file.sync_all()?;
-            Ok(())
-        })
-        .and_then(|()| Ok(std::fs::rename(&tmp, path)?));
-    if let Err(err) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(err);
-    }
-    if let Some(dir) = path.parent() {
-        // The rename itself is only on disk once the folder is synced.
-        let _ = File::open(dir).and_then(|dir| dir.sync_all());
-    }
+    crate::fsutil::write_atomic(path, text.as_bytes(), None)
+        .with_context(|| format!("cannot write {}", path.display()))?;
     Ok(())
 }
 
