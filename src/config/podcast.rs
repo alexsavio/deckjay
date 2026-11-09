@@ -102,26 +102,31 @@ impl RawPodcast {
         check_named("feed", &format!("podcast source {name}"), &self.feed, |f| {
             &f.name
         })?;
+        let mut feeds = Vec::with_capacity(self.feed.len());
         for feed in &self.feed {
-            if crate::net::http_url(&feed.url).is_none() {
+            let Some(url) = crate::net::http_url(&feed.url) else {
                 bail!(
                     "podcast {}: the url must be one address that starts with https:// or http://",
                     feed.name
                 );
-            }
+            };
             if feed.keep.is_some_and(|keep| !keep_ok(keep)) {
                 bail!(
                     "podcast {}: keep must be between 1 and {MAX_KEEP}",
                     feed.name
                 );
             }
+            feeds.push(Feed {
+                url,
+                ..feed.clone()
+            });
         }
         Ok(Podcast {
             keep: self.keep,
             refresh: Duration::from_hours(self.refresh_hours),
             max_cache_bytes: self.max_cache_mb * MB,
             max_episode_bytes: self.max_episode_mb * MB,
-            feeds: self.feed.clone(),
+            feeds,
         })
     }
 }
@@ -231,5 +236,11 @@ mod tests {
             check(&format!("{FEED}{FEED}")).unwrap_err().to_string(),
             "podcast source maus: two feeds are named \"Die Maus\""
         );
+    }
+
+    #[test]
+    fn the_feed_keeps_the_trimmed_url() {
+        let podcast = check("[[feed]]\nname = \"A\"\nurl = \"  https://a/feed \"\n").unwrap();
+        assert_eq!(podcast.feeds[0].url, "https://a/feed");
     }
 }

@@ -48,13 +48,14 @@ impl RawRadio {
         self.station
             .iter()
             .map(|station| {
-                if crate::net::http_url(&station.url).is_none() {
+                let Some(url) = crate::net::http_url(&station.url) else {
                     bail!(
                         "station {}: the url must be one address that starts with https:// or http://",
                         station.name
                     );
-                }
+                };
                 Ok(Station {
+                    url,
                     picture: station.picture.as_ref().map(|p| base.join(p)),
                     ..station.clone()
                 })
@@ -140,5 +141,11 @@ mod tests {
             stations(&format!("{one}{one}")).unwrap_err().to_string(),
             "radio source radio: two stations are named \"A\""
         );
+    }
+
+    #[test]
+    fn the_station_keeps_the_trimmed_url() {
+        let got = stations("[[station]]\nname = \"A\"\nurl = \"  https://a/x.mp3 \"\n").unwrap();
+        assert_eq!(got[0].url, "https://a/x.mp3");
     }
 }
