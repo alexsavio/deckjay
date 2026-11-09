@@ -17,6 +17,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### 🚜 Refactor
 
 - *(ui)* Compute key navigation in Layout only ([#26](https://github.com/alexsavio/deckjay/issues/26))
+- *(player)* Hold what is loaded as one value per speaker ([#31](https://github.com/alexsavio/deckjay/issues/31))
 
 ### ⚙️ Miscellaneous Tasks
 
