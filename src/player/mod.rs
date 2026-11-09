@@ -346,15 +346,20 @@ fn clamp_volume(volume: f32) -> f32 {
     volume.clamp(0.0, 1.0)
 }
 
-/// Like `TcpStream::connect`, with a timeout for each address `host` resolves to.
-fn connect(host: &str, port: u16) -> Result<TcpStream> {
+/// Like `TcpStream::connect`, with a timeout for each address `host` resolves to,
+/// and `io` as the bound on every read and write of the stream.
+fn connect(host: &str, port: u16, io: Duration) -> Result<TcpStream> {
     let mut last_err = anyhow!("cannot resolve {host}");
     for addr in (host, port)
         .to_socket_addrs()
         .with_context(|| format!("cannot resolve {host}"))?
     {
         match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => {
+                stream.set_read_timeout(Some(io))?;
+                stream.set_write_timeout(Some(io))?;
+                return Ok(stream);
+            }
             Err(err) => {
                 last_err = anyhow::Error::new(err).context(format!("speaker {addr} not reachable"));
             }

@@ -248,9 +248,7 @@ impl Speaker for HeosPlayer {
 
 impl HeosPlayer {
     fn control_stream(&self) -> Result<TcpStream> {
-        let stream = super::connect(&self.host, self.control_port)?;
-        stream.set_write_timeout(Some(self.io_timeout))?;
-        Ok(stream)
+        super::connect(&self.host, self.control_port, self.io_timeout)
     }
 
     /// Without an active album, whatever the speaker plays is not known to be

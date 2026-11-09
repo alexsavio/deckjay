@@ -508,9 +508,7 @@ impl CastPlayer {
     }
 
     fn dial(&self) -> Result<Session> {
-        let tcp = super::connect(&self.host, self.port)?;
-        tcp.set_read_timeout(Some(self.io_timeout))?;
-        tcp.set_write_timeout(Some(self.io_timeout))?;
+        let tcp = super::connect(&self.host, self.port, self.io_timeout)?;
         let link: Box<dyn Link> = match self.transport {
             Transport::Tls => Box::new(tls(tcp, &self.host)?),
             #[cfg(test)]
