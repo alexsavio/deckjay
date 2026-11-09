@@ -246,3 +246,10 @@ fn the_power_key_takes_a_free_control_key_else_the_top_right_item_key() {
         "MK.2 with shelves"
     );
 }
+
+#[test]
+fn flip_from_a_page_past_the_end_goes_to_the_next_shelf() {
+    let l = shelves(2, 3, &[5, 1]);
+    assert_eq!(l.pages(0), 3);
+    assert_eq!(l.flip(0, 3), (1, 0));
+}
