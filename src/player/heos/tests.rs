@@ -6,8 +6,7 @@ use std::thread;
 
 use super::cli::{HeosError, PlayerInfo, Reply, command_line};
 use super::*;
-use crate::player::PlayerCmd;
-use crate::player::{Content, Start};
+use crate::player::{Content, PlayerCmd, Start};
 
 const ONE_PLAYER: &str = r#"[{"name": "Kitchen", "pid": 7, "model": "HEOS 1", "version": "1.583.147", "network": "wifi", "ip": "10.0.0.9"}]"#;
 /// String pids; the second player's ip is the host the tests connect to.

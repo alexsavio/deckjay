@@ -73,7 +73,7 @@ fn album() -> PlayerCmd {
     }
 }
 
-/// Content no backend plays yet.
+/// A Spotify playlist, for a player built without `[spotify]`.
 pub(super) fn unsupported() -> Content {
     Content::Spotify(Playlist {
         uri: "spotify:playlist:37i9dQZF1DX0XUsuxWHRQd".into(),

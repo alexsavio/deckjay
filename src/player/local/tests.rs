@@ -12,8 +12,7 @@ use super::decode::Converter;
 use super::engine::{Engine, Format, Sink};
 use super::output::pick;
 use super::*;
-use crate::player::PlayerCmd;
-use crate::player::{Content, Start};
+use crate::player::{Content, PlayerCmd, Start};
 
 /// The fake sound card's rate, also the rate of the test tracks, so their
 /// samples reach the card unchanged.
