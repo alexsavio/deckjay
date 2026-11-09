@@ -133,7 +133,7 @@ fn first_pls_entry(body: &str) -> Option<String> {
                 .strip_prefix("file")?
                 .parse()
                 .ok()?;
-            Some((number, value.trim()))
+            Some((number, value))
         })
         .filter_map(|(number, url)| Some((number, http_url(url)?)))
         .min_by_key(|(number, _)| *number)
