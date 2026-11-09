@@ -32,7 +32,7 @@ pub use self::output::output_devices;
 #[cfg(test)]
 use super::TrackInfo;
 use super::progress::Place;
-use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Start, Station};
+use super::{Device, Emitter, Loaded, Playable, PlayerEvent, Speaker, SpeakerCmd, Start, Station};
 use crate::library::ItemId;
 use crate::radio;
 
@@ -85,19 +85,20 @@ impl LocalPlayer {
 }
 
 impl Speaker for LocalPlayer {
-    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
+    type Play = Playable;
+
+    fn handle(&mut self, cmd: SpeakerCmd<Playable>, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content: Content::Stream(station),
+                play: Playable::Station(station),
                 volume,
             } => self.play_station(item, &station, volume, events),
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content,
+                play: Playable::Tracks(list),
                 volume,
             } => {
-                let list = content.into_tracks()?;
                 self.begin(item, list.progress, volume, events);
                 self.loaded = Loaded::Album {
                     tracks: list.tracks,
@@ -105,12 +106,12 @@ impl Speaker for LocalPlayer {
                 };
                 self.play_from(list.start, false, events)
             }
-            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_)
+            SpeakerCmd::Next | SpeakerCmd::Prev | SpeakerCmd::Seek(_)
                 if self.loaded.station().is_some() =>
             {
                 self.check()
             }
-            PlayerCmd::SetVolume(volume) => {
+            SpeakerCmd::SetVolume(volume) => {
                 self.check()?;
                 self.volume = super::clamp_volume(volume);
                 if let Some(output) = &self.output {
@@ -118,12 +119,11 @@ impl Speaker for LocalPlayer {
                 }
                 Ok(())
             }
-            PlayerCmd::TogglePause => {
+            SpeakerCmd::TogglePause => {
                 self.check()?;
                 self.toggle_pause(events)
             }
-            PlayerCmd::Off => Speaker::stop(self, events),
-            PlayerCmd::Next => {
+            SpeakerCmd::Next => {
                 self.check()?;
                 match self.current {
                     Some(track) if track + 1 < self.loaded.tracks().len() => {
@@ -132,7 +132,7 @@ impl Speaker for LocalPlayer {
                     _ => Ok(()),
                 }
             }
-            PlayerCmd::Prev => {
+            SpeakerCmd::Prev => {
                 self.check()?;
                 let Some(track) = self.current else {
                     return Ok(());
@@ -147,13 +147,15 @@ impl Speaker for LocalPlayer {
                     self.play_from(from_top(track.saturating_sub(1)), false, events)
                 }
             }
-            PlayerCmd::Seek(by) => {
+            SpeakerCmd::Seek(by) => {
                 self.check()?;
                 self.seek(by, events)
             }
         }
     }
+}
 
+impl Device for LocalPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         let (Some(track), Some(output)) = (self.current, &self.output) else {
             return Ok(());

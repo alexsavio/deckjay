@@ -113,7 +113,7 @@ servers:
   platform. With `[spotify]` and `spotify.device` it also builds the Spotify
   player (`spotify.rs`, Web API remote control of a Connect device), and
   `router.rs` sends playlists there and everything else to the speaker,
-  calling `Speaker::stop` on the one that played when the other takes over.
+  calling `Device::stop` on the one that played when the other takes over.
   `mod.rs` owns the command loop for all speaker types: it coalesces commands
   (button mashing; a `SetVolume` before the last `Play` is dropped, since
   `Play` carries the volume, and `Seek`s in a row add up, a sum of 0
@@ -260,10 +260,10 @@ Rendering:
   a free control key (XL), else the top-right item key when more than 6
   item keys remain (MK.2), else none; `Layout::slots` lists the item keys
   left for items and navigation. It sends `PlayerCmd::Off` (the player loop
-  calls `Speaker::stop_everything`, which also stops what deckjay did not
+  calls `Device::stop_everything`, which also stops what deckjay did not
   start, e.g. after a restart: Cast quits every app but the idle screen,
   HEOS sends `set_play_state stop`, Spotify pauses its device; then
-  `Speaker::standby`: HEOS sends `PWSTANDBY` to the receiver's control port
+  `Device::standby`: HEOS sends `PWSTANDBY` to the receiver's control port
   23) and dims the deck; `Ui::wake` swallows the next press. Decks
   whose grid `deck::Grid::new` refuses are ignored.
 - `icons/` draws every icon procedurally (4x supersampling); there are no
