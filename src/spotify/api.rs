@@ -232,7 +232,7 @@ pub struct Client {
     agent: Agent,
     endpoints: Endpoints,
     state_dir: PathBuf,
-    /// The last token read from the file or saved to it; the file is the owner.
+    /// The refresh token in use; the file owns it unless `unsaved` is set.
     token: TokenFile,
     /// A rotated token that could not be saved: the file is behind this copy.
     unsaved: bool,
