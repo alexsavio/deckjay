@@ -243,7 +243,7 @@ mod tests {
         let folder = dir.path().join("covers");
         std::fs::create_dir(&folder).unwrap();
         let stale = folder.join(".abc.jpg.99999999.0.part");
-        let ours = folder.join(format!(".abc.jpg.{}.7.part", std::process::id()));
+        let ours = crate::fsutil::temp_name(&path(&folder, "spotify:playlist:abc"));
         std::fs::write(&stale, b"half").unwrap();
         std::fs::write(&ours, b"in flight").unwrap();
 
