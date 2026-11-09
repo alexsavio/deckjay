@@ -16,6 +16,17 @@ pub(super) const INTERVAL: Duration = Duration::from_secs(5);
 /// seen can be that far from the end.
 pub(super) const END_MARGIN: Duration = Duration::from_secs(10);
 
+/// A length of 0 s is how speakers and files say "unknown".
+pub(super) fn known_length(length: Duration) -> Option<Duration> {
+    (!length.is_zero()).then_some(length)
+}
+
+/// Whether a track stopped at `position` played to its end: within
+/// [`END_MARGIN`] of `length`. With no length known, `if_unknown` decides.
+pub(super) fn played_out(position: Duration, length: Option<Duration>, if_unknown: bool) -> bool {
+    length.map_or(if_unknown, |length| position + END_MARGIN >= length)
+}
+
 /// A place in an item: `track` indexes its tracks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Place {

@@ -23,7 +23,7 @@
 
 mod cli;
 
-use std::io::{self, ErrorKind, Write};
+use std::io::{ErrorKind, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
@@ -31,10 +31,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use tracing::{debug, info, warn};
 
 pub use self::cli::players;
-use self::cli::{Cli, IO_TIMEOUT, Message, NowPlaying};
+use self::cli::{Cli, HeosError, IO_TIMEOUT, Message, NowPlaying};
 #[cfg(test)]
 use super::TrackInfo;
-use super::progress::{END_MARGIN, Place};
+use super::progress::{Place, played_out};
 use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Station};
 use crate::library::ItemId;
 
@@ -376,13 +376,13 @@ impl HeosPlayer {
     /// Pauses a station, or stops it when the receiver will not pause it;
     /// either way play/pause sends it again, live.
     fn pause_station(&mut self, events: &mut Emitter) -> Result<()> {
-        if let Err(err) = self.set_play_state("pause") {
-            // A `fail` reply keeps the connection; an I/O error does not.
-            if self.conn.is_none() {
-                return Err(err);
+        match self.set_play_state("pause") {
+            Ok(()) => {}
+            Err(err @ HeosError::Fail { .. }) => {
+                debug!("the receiver cannot pause the station, stopping it: {err:#}");
+                self.silence();
             }
-            debug!("the receiver cannot pause the station, stopping it: {err:#}");
-            self.silence();
+            Err(err) => return Err(err.into()),
         }
         if let Some(current) = &mut self.current {
             current.paused = true;
@@ -396,12 +396,11 @@ impl HeosPlayer {
         // A Denon AVR-X1600H keeps earlier streams in a hidden queue that
         // `get_queue` does not list: without this, it plays them after our
         // track and never reports `stop`. It fails (eid 4) when the queue is
-        // already empty, which is fine; that `fail` reply keeps the connection,
-        // an I/O error does not.
+        // already empty, which is fine.
         match self.call("player/clear_queue", &[]) {
             Ok(_) => {}
-            Err(err) if self.conn.is_some() => debug!("clear_queue: {err:#}"),
-            Err(err) => return Err(err),
+            Err(err @ HeosError::Fail { .. }) => debug!("clear_queue: {err:#}"),
+            Err(err) => return Err(err.into()),
         }
         self.call("browse/play_stream", &[("url", url)])?;
         // Anything read up to this reply was about the stream before.
@@ -467,7 +466,7 @@ impl HeosPlayer {
         Ok(())
     }
 
-    fn set_play_state(&mut self, state: &str) -> Result<()> {
+    fn set_play_state(&mut self, state: &str) -> Result<(), HeosError> {
         self.call("player/set_play_state", &[("state", state)])?;
         Ok(())
     }
@@ -485,7 +484,7 @@ impl HeosPlayer {
     }
 
     /// Sends `command` for our player (`pid` is added) and returns the reply's message.
-    fn call(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Message> {
+    fn call(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Message, HeosError> {
         let reused = self.conn.is_some();
         match self.call_once(command, args) {
             // The CLI resets idle connections when it recovers from a hang, and
@@ -499,14 +498,25 @@ impl HeosPlayer {
         }
     }
 
-    fn call_once(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Message> {
+    fn call_once(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Message, HeosError> {
         let mut conn = match self.conn.take() {
             Some(conn) => conn,
             None => Connection::open(&self.host, self.port, self.io_timeout)?,
         };
         let events = self.wants_events();
         if conn.events != events {
-            conn.cli.set_change_events(events)?;
+            match conn.cli.set_change_events(events) {
+                Ok(()) => {}
+                // The connection is good and asking again would fail again:
+                // the item plays without progress events.
+                Err(err @ HeosError::Fail { .. }) => {
+                    if !conn.refused {
+                        warn!("the receiver refused change events: {err:#}");
+                        conn.refused = true;
+                    }
+                }
+                Err(err) => return Err(err),
+            }
             conn.events = events;
         }
         let pid = conn.pid.to_string();
@@ -514,7 +524,7 @@ impl HeosPlayer {
             .into_iter()
             .chain(args.iter().copied())
             .collect();
-        // On an I/O error `conn` is dropped here, so the next call reconnects.
+        // On an error `conn` is dropped here, so the next call reconnects.
         let reply = conn.cli.exchange(command, &args)?;
         self.conn = Some(conn);
         Ok(reply.checked(command)?.message())
@@ -524,12 +534,14 @@ impl HeosPlayer {
 struct Connection {
     cli: Cli,
     pid: i64,
-    /// Whether change events are on.
+    /// Whether change events are on, or were asked for and refused.
     events: bool,
+    /// The receiver answered `fail` to a change-events request.
+    refused: bool,
 }
 
 impl Connection {
-    fn open(host: &str, port: u16, io_timeout: Duration) -> Result<Connection> {
+    fn open(host: &str, port: u16, io_timeout: Duration) -> Result<Connection, HeosError> {
         let mut cli = Cli::connect(host, port, io_timeout)?;
         let peer = cli.peer_ip();
         let players = cli.players()?;
@@ -548,28 +560,23 @@ impl Connection {
             cli,
             pid,
             events: false,
+            refused: false,
         })
     }
 }
 
-/// Whether the last track, stopped after `seen`, played to its end; a stop
-/// earlier than [`END_MARGIN`] before it was pressed in the HEOS app. With
-/// no length known, every stop counts as the end.
+/// Whether the last track, stopped after `seen`, played to its end
+/// ([`played_out`]); an earlier stop was pressed in the HEOS app. With no
+/// length known, every stop counts as the end.
 fn ended(seen: Option<NowPlaying>) -> bool {
-    match seen {
-        Some(NowPlaying {
-            position,
-            duration: Some(duration),
-        }) => position + END_MARGIN >= duration,
-        _ => true,
-    }
+    seen.is_none_or(|at| played_out(at.position, at.duration, true))
 }
 
 /// The socket failed at once (reset, closed, broken pipe) rather than timing
 /// out; a read timeout is `WouldBlock` on Unix and `TimedOut` on Windows.
-fn connection_lost(err: &anyhow::Error) -> bool {
-    err.downcast_ref::<io::Error>()
-        .is_some_and(|e| !matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut))
+fn connection_lost(err: &HeosError) -> bool {
+    let HeosError::Io(e) = err else { return false };
+    !matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut)
 }
 
 #[cfg(test)]

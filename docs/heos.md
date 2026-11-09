@@ -98,14 +98,20 @@ Error codes that matter here (spec §6.2):
   the receiver answers `fail` to that; it never gets `play` (see
   [Radio](#radio)).
 - A `fail` reply to `clear_queue` (eid 4 on an empty queue) is logged at
-  debug level and ignored. An I/O error (timeout, reset) ends the track
-  change: no `play_stream` goes out without its `clear_queue`.
+  debug level and ignored. Any other error (an I/O error such as a timeout
+  or reset, or a reply with a `result` that is neither `success` nor `fail`)
+  ends the track change: no `play_stream` goes out without its `clear_queue`.
 - `enable=on` goes before the first command after a progress item's track
   started (usually the first poll), and again after a reconnect. `enable=off`
   goes before the next command once that item is no longer active: the
   `set_play_state stop` at its end, or the next album. Albums that do not
   report progress never turn events on, so their command lines are the ones
   below.
+- A `fail` reply to `register_for_change_events` keeps the connection and
+  is not asked again for the same setting: the command goes on, the item
+  plays without progress events, and one warning is logged per connection.
+  An I/O error (timeout, reset) drops the connection like any other
+  command's.
 - deckjay never sends `get_queue`, `get_now_playing_media`,
   `play_next`, `play_previous` or `heart_beat`.
 
@@ -187,8 +193,9 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    (the album is no longer active), emit `Stopped` and drop the other key
    presses that came with it: each would wait out its own timeout. A
    failed volume change or skip is only logged: the album plays on, and
-   the polls tell if the receiver is gone. A `fail` reply keeps the
-   connection; an I/O error drops it and the next call reconnects. A
+   the polls tell if the receiver is gone. A `fail` reply, or a reply with an
+   unknown `result`, keeps the connection; an I/O error drops it and the
+   next call reconnects. A
    failed poll is logged at debug level; polls failing for 20 s in a row
    (`POLL_FAILURE_GRACE`) end the album the same way, however fast the
    failures come (a refused connection fails at once, a hung one after

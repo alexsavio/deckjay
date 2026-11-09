@@ -606,5 +606,16 @@ fn spotify_does_not_open_the_sound_card() {
     assert_eq!(rig.events(), []);
 }
 
+#[test]
+fn a_file_with_no_samples_has_no_length() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("empty.wav");
+    write_wav(&path, RATE, 2, &[]);
+    assert_eq!(Source::open(&path).unwrap().duration(), None);
+
+    write_wav(&path, RATE, 2, &[0; 8]);
+    assert!(Source::open(&path).unwrap().duration().is_some());
+}
+
 mod resume;
 mod stream;

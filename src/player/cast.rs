@@ -36,7 +36,7 @@ use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
 use tracing::{debug, info, warn};
 
-use super::progress::{END_MARGIN, Place};
+use super::progress::{Place, known_length, played_out};
 use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Start, Station, TrackInfo};
 use crate::library::ItemId;
 use crate::radio;
@@ -645,7 +645,7 @@ fn place(entry: &StatusEntry, tracks: &[TrackInfo]) -> Option<Place> {
             .as_ref()
             .and_then(|m| m.duration)
             .and_then(seconds)
-            .filter(|d| !d.is_zero()),
+            .and_then(known_length),
     })
 }
 
@@ -658,13 +658,11 @@ fn finished(entry: &StatusEntry, tracks: &[TrackInfo]) -> bool {
         && track_index(entry, tracks).is_some_and(|t| t + 1 == tracks.len())
 }
 
-/// Whether `last`, the latest place seen, was on the last track within
-/// [`END_MARGIN`] of its known length. At the end of the queue the receiver
+/// Whether `last`, the latest place seen, was on the last track and
+/// [`played_out`] by its known length. At the end of the queue the receiver
 /// may end the media session, and its status then tells nothing about how.
 fn near_end(last: Option<Place>, tracks: usize) -> bool {
-    last.is_some_and(|at| {
-        at.track + 1 == tracks && at.duration.is_some_and(|d| at.position + END_MARGIN >= d)
-    })
+    last.is_some_and(|at| at.track + 1 == tracks && played_out(at.position, at.duration, false))
 }
 
 /// The track that Next (`forward`) or Prev loads; `None` when the media is

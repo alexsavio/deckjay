@@ -20,6 +20,7 @@ use symphonia::core::units::{Time, TimeBase};
 use tracing::{debug, warn};
 
 use super::netread::{Cancel, NetRead};
+use crate::player::progress::known_length;
 
 /// One audio file, open and ready to decode.
 pub(super) struct Source {
@@ -198,7 +199,7 @@ fn length(track: &Track, rate: Option<u32>) -> Option<Duration> {
     let secs = stated.or_else(counted)?;
     Duration::try_from_secs_f64(secs)
         .ok()
-        .filter(|d| !d.is_zero())
+        .and_then(known_length)
 }
 
 /// Fits decoded audio to the output's sample rate and channels: mono plays on
