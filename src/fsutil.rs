@@ -1,6 +1,7 @@
 //! The one way deckjay saves a file: write a temp file beside it, sync, rename,
 //! sync the folder. A crash leaves the old file or the new one, never half of
-//! one, and at worst a `.part` temp file. Only the podcast cache sweep deletes those.
+//! one, and at worst a `.part` temp file. The podcast cache sweep and
+//! [`remove_stale_temps`] delete those.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -35,7 +36,10 @@ pub fn publish(part: &Path, dest: &Path) -> io::Result<()> {
 /// Deletes the temp files that `write_atomic` of an earlier process left
 /// beside `path` (a crash or a kill between the write and the rename). A temp
 /// file with this process's id stays: another thread may be writing it.
-/// Best effort; call it once at start-up, before the first save.
+/// So a temp left by an earlier process with the same id (pid 1 in Docker)
+/// stays too: the next save to that name fails once with `AlreadyExists`,
+/// its error path removes the temp, and the save after it works. No data is
+/// lost. Best effort; call it before a save, not in a loop.
 pub fn remove_stale_temps(path: &Path) {
     let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
         return;
