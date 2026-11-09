@@ -6,14 +6,68 @@ mod hid;
 mod remote;
 
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use hidapi::HidApi;
 use image::RgbImage;
 
 use crate::simulator::Info;
 use crate::ui::Face;
+
+// Bounds on a deck's grid: the largest real deck has 36 keys, and key
+// images are drawn at 4x, so a bogus grid could exhaust a Pi's memory.
+const MAX_KEYS: usize = 64;
+const KEY_SIZES: RangeInclusive<u32> = 16..=512;
+
+/// A key grid the player can draw: the one rule for every grid it opens (USB
+/// deck and simulator); `deckjay check` applies it to both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Grid {
+    pub rows: usize,
+    pub cols: usize,
+    /// Side length in pixels of a (square) key image.
+    pub key_size: u32,
+}
+
+impl Grid {
+    pub fn new(rows: usize, cols: usize, key_size: u32) -> Result<Grid> {
+        Grid::check_shape(rows, cols)?;
+        if !KEY_SIZES.contains(&key_size) {
+            bail!(
+                "the deck has keys of {key_size} px; the player needs keys of {} to {} px",
+                KEY_SIZES.start(),
+                KEY_SIZES.end()
+            );
+        }
+        Ok(Grid {
+            rows,
+            cols,
+            key_size,
+        })
+    }
+
+    /// The rows and columns part of the rule; the layout needs no key size.
+    pub fn check_shape(rows: usize, cols: usize) -> Result<()> {
+        let too_many_keys = rows.checked_mul(cols).is_none_or(|n| n > MAX_KEYS);
+        // The layout needs two keys above the control row: an item and "more".
+        let too_few_keys = rows < 2 || (rows - 1).checked_mul(cols).is_none_or(|n| n < 2);
+        if too_few_keys || too_many_keys {
+            bail!(
+                "the deck has {rows}x{cols} keys; the player needs at least 2 rows with 2 keys \
+                 above the bottom row and at most {MAX_KEYS} keys"
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Whether the player would open this USB model: what `deckjay check` and
+/// [`Deck::open_usb`] both ask.
+pub(crate) fn usb_usable(kind: elgato_streamdeck::info::Kind) -> bool {
+    hid::usable(kind)
+}
 
 trait Backend {
     fn name(&self) -> String;
@@ -344,5 +398,19 @@ mod tests {
             "only the dropped face is encoded again"
         );
         assert_eq!(log.borrow().writes, [0, 1, 0]);
+    }
+
+    #[test]
+    fn a_grid_is_refused_without_overflowing() {
+        assert!(Grid::new(0, 3, 72).is_err());
+        assert!(Grid::new(usize::MAX, 2, 72).is_err());
+        assert!(Grid::new(2, usize::MAX, 72).is_err());
+    }
+
+    #[test]
+    fn the_largest_and_smallest_grids_are_accepted() {
+        assert!(Grid::new(2, 2, 16).is_ok());
+        assert!(Grid::new(8, 8, 512).is_ok());
+        assert!(Grid::new(5, 13, 512).is_err());
     }
 }
