@@ -32,8 +32,10 @@ use tracing::{debug, info, warn};
 
 pub use self::cli::players;
 use self::cli::{Cli, IO_TIMEOUT, Message, NowPlaying};
+#[cfg(test)]
+use super::TrackInfo;
 use super::progress::{END_MARGIN, Place};
-use super::{Content, Emitter, PlayerCmd, PlayerEvent, Speaker, Station, TrackInfo};
+use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Station};
 use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -57,12 +59,8 @@ pub(super) struct HeosPlayer {
     conn: Option<Connection>,
     /// Id of the item we started last.
     item: ItemId,
-    /// Tracks of the album we started last.
-    tracks: Vec<TrackInfo>,
-    /// Whether that album reports progress.
-    progress: bool,
-    /// The stream of the station we started last, instead of an album.
-    stream: Option<String>,
+    /// The album we started last, or the stream of the station.
+    loaded: Loaded<String>,
     /// `play_stream`s of that station since its key was pressed.
     tries: u32,
     /// `None` while no album or station is active.
@@ -105,9 +103,7 @@ impl HeosPlayer {
             control_port: CONTROL_PORT,
             conn: None,
             item: ItemId(0),
-            tracks: Vec::new(),
-            progress: false,
-            stream: None,
+            loaded: Loaded::Idle,
             tries: 0,
             current: None,
             load_timeout: LOAD_TIMEOUT,
@@ -137,26 +133,28 @@ impl Speaker for HeosPlayer {
                         "HEOS cannot seek: the track starts from its beginning"
                     );
                 }
-                self.report_place(events);
-                events.begin(item, list.progress);
+                events.replace(item, list.progress, self.current_place());
                 self.item = item;
-                self.tracks = list.tracks;
-                self.progress = list.progress;
-                self.stream = None;
+                self.loaded = Loaded::Album {
+                    tracks: list.tracks,
+                    progress: list.progress,
+                };
                 self.current = None;
                 self.set_volume(volume)?;
                 self.play_track(list.start.track, events)
             }
             PlayerCmd::SetVolume(volume) => self.set_volume(volume),
             PlayerCmd::TogglePause => self.toggle_pause(events),
-            PlayerCmd::Next | PlayerCmd::Prev if self.stream.is_some() => Ok(()),
+            PlayerCmd::Next | PlayerCmd::Prev if self.loaded.station().is_some() => Ok(()),
             PlayerCmd::Seek(by) => {
                 debug!(by, "HEOS cannot seek");
                 Ok(())
             }
             PlayerCmd::Off => Speaker::stop(self, events),
             PlayerCmd::Next => match self.current {
-                Some(c) if c.track + 1 < self.tracks.len() => self.play_track(c.track + 1, events),
+                Some(c) if c.track + 1 < self.loaded.tracks().len() => {
+                    self.play_track(c.track + 1, events)
+                }
                 _ => Ok(()),
             },
             PlayerCmd::Prev => match self.current {
@@ -191,7 +189,7 @@ impl Speaker for HeosPlayer {
                 self.current = started;
                 events.emit(PlayerEvent::Paused(self.item));
             }
-            PlayState::Stop if self.stream.is_some() => {
+            PlayState::Stop if self.loaded.station().is_some() => {
                 return self.station_stopped(current, events);
             }
             PlayState::Stop => match current.phase {
@@ -200,7 +198,7 @@ impl Speaker for HeosPlayer {
                     warn!(track = current.track, "the track did not start playing");
                     self.end(events);
                 }
-                Phase::Started(_) if current.track + 1 < self.tracks.len() => {
+                Phase::Started(_) if current.track + 1 < self.loaded.tracks().len() => {
                     if let Err(err) = self.play_track(current.track + 1, events) {
                         self.end(events);
                         return Err(err);
@@ -256,7 +254,7 @@ impl HeosPlayer {
     fn toggle_pause(&mut self, events: &mut Emitter) -> Result<()> {
         let state = self.play_state()?;
         self.report_place(events);
-        let live = self.stream.is_some();
+        let live = self.loaded.station().is_some();
         match (self.current, state) {
             (Some(_), PlayState::Play) if live => self.pause_station(events)?,
             (Some(_), PlayState::Play) => {
@@ -278,7 +276,7 @@ impl HeosPlayer {
                 events.emit(PlayerEvent::Playing(self.item));
             }
             _ if live => self.tune(1, events)?,
-            _ if !self.tracks.is_empty() => {
+            _ if !self.loaded.tracks().is_empty() => {
                 let start = events.resume_point();
                 self.play_track(start.track, events)?;
             }
@@ -289,13 +287,14 @@ impl HeosPlayer {
 
     fn play_track(&mut self, index: usize, events: &mut Emitter) -> Result<()> {
         let url = self
-            .tracks
+            .loaded
+            .tracks()
             .get(index)
             .ok_or_else(|| anyhow!("the album has no track {index}"))?
             .url
             .clone();
         self.play_stream(&url)?;
-        let track = &self.tracks[index];
+        let track = &self.loaded.tracks()[index];
         info!(album = %track.album, track = %track.title, "playing");
         self.current = Some(Current {
             track: index,
@@ -316,12 +315,9 @@ impl HeosPlayer {
         events: &mut Emitter,
     ) -> Result<()> {
         let stream = crate::radio::resolve(&crate::net::stream_agent(), &station.url)?;
-        self.report_place(events);
-        events.begin(item, false);
+        events.replace(item, false, self.current_place());
         self.item = item;
-        self.tracks = Vec::new();
-        self.progress = false;
-        self.stream = Some(stream.url);
+        self.loaded = Loaded::Station(stream.url);
         self.current = None;
         self.set_volume(volume)?;
         info!(station = %station.name, "playing");
@@ -330,7 +326,11 @@ impl HeosPlayer {
 
     /// Sends the station's stream again; `tries` counts this one.
     fn tune(&mut self, tries: u32, events: &mut Emitter) -> Result<()> {
-        let url = self.stream.clone().context("no station to play")?;
+        let url = self
+            .loaded
+            .station()
+            .cloned()
+            .context("no station to play")?;
         self.play_stream(&url)?;
         self.tries = tries;
         self.current = Some(Current {
@@ -411,19 +411,21 @@ impl HeosPlayer {
 
     /// Offers the place from the latest progress event, if one came.
     fn report_place(&mut self, events: &mut Emitter) {
-        let Some(seen) = self.take_progress() else {
-            return;
-        };
-        let Some(current) = &mut self.current else {
-            return;
-        };
+        if let Some(at) = self.current_place() {
+            events.place(at, false);
+        }
+    }
+
+    /// The place from the latest progress event, if one came.
+    fn current_place(&mut self) -> Option<Place> {
+        let seen = self.take_progress()?;
+        let current = self.current.as_mut()?;
         current.seen = Some(seen);
-        let at = Place {
+        Some(Place {
             track: current.track,
             position: seen.position,
             duration: seen.duration,
-        };
-        events.place(at, false);
+        })
     }
 
     fn take_progress(&mut self) -> Option<NowPlaying> {
@@ -433,7 +435,7 @@ impl HeosPlayer {
     /// Change events carry the place, so they are on only while an album
     /// that reports progress is active.
     fn wants_events(&self) -> bool {
-        self.progress && self.current.is_some()
+        self.loaded.wants_progress() && self.current.is_some()
     }
 
     /// A Denon AVR-X1600H keeps retrying a finished URL stream, and sometimes

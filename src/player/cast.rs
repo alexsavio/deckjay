@@ -37,7 +37,7 @@ use rustls::{ClientConfig, ClientConnection, StreamOwned};
 use tracing::{debug, info, warn};
 
 use super::progress::{END_MARGIN, Place};
-use super::{Content, Emitter, PlayerCmd, PlayerEvent, Speaker, Start, Station, TrackInfo};
+use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Start, Station, TrackInfo};
 use crate::library::ItemId;
 use crate::radio;
 
@@ -129,10 +129,8 @@ pub(super) struct CastPlayer {
     io_timeout: Duration,
     /// Id of the item we started last.
     item: ItemId,
-    /// Tracks of the album we started last.
-    tracks: Vec<TrackInfo>,
-    /// The station we started last, instead of an album.
-    live: Option<Live>,
+    /// The album or station we started last.
+    loaded: Loaded<Live>,
     /// True while we believe our album is loaded on the speaker.
     active: bool,
     /// The latest place of our album seen in a status.
@@ -167,8 +165,7 @@ impl CastPlayer {
             transport: Transport::Tls,
             io_timeout: IO_TIMEOUT,
             item: ItemId(0),
-            tracks: Vec::new(),
-            live: None,
+            loaded: Loaded::Idle,
             active: false,
             last_place: None,
         }
@@ -199,13 +196,12 @@ impl Speaker for CastPlayer {
             } => {
                 let list = content.into_tracks()?;
                 let s = self.open()?;
-                if self.active && events.wants_progress() {
-                    self.report_place(&s, events);
-                }
-                events.begin(item, list.progress);
+                events.replace(item, list.progress, self.outgoing(&s, events));
                 self.item = item;
-                self.tracks = list.tracks;
-                self.live = None;
+                self.loaded = Loaded::Album {
+                    tracks: list.tracks,
+                    progress: list.progress,
+                };
                 s.receiver.set_volume(super::clamp_volume(volume))?;
                 self.load(&s, list.start, events)
             }
@@ -216,7 +212,7 @@ impl Speaker for CastPlayer {
             }
             PlayerCmd::TogglePause => {
                 let s = self.open()?;
-                let live = self.live.is_some();
+                let live = self.loaded.station().is_some();
                 match media_status(&s)? {
                     // Keep the track that is about to start, as HEOS does.
                     Some((_, e)) if loading(&e) => events.emit(PlayerEvent::Playing(self.item)),
@@ -237,7 +233,7 @@ impl Speaker for CastPlayer {
                         ) =>
                     {
                         s.media.pause(tid, e.media_session_id)?;
-                        if let Some(at) = place(&e, &self.tracks) {
+                        if let Some(at) = place(&e, self.loaded.tracks()) {
                             self.note_place(at, events);
                         }
                         events.emit(PlayerEvent::Paused(self.item));
@@ -250,7 +246,7 @@ impl Speaker for CastPlayer {
                     _ if live => self.load_live(&s, events)?,
                     // Finished or nothing loaded: start our album again, from
                     // the top or where a resuming item got to.
-                    _ if !self.tracks.is_empty() => {
+                    _ if !self.loaded.tracks().is_empty() => {
                         let start = events.resume_point();
                         self.load(&s, start, events)?;
                     }
@@ -259,14 +255,18 @@ impl Speaker for CastPlayer {
                 Ok(())
             }
             PlayerCmd::Off => Speaker::stop(self, events),
-            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_) if self.live.is_some() => Ok(()),
+            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_)
+                if self.loaded.station().is_some() =>
+            {
+                Ok(())
+            }
             PlayerCmd::Seek(by) => self.seek(by, events),
             PlayerCmd::Next | PlayerCmd::Prev => {
                 let s = self.open()?;
                 let Some((_, entry)) = media_status(&s)? else {
                     return Ok(());
                 };
-                match skip_target(&entry, &self.tracks, matches!(cmd, PlayerCmd::Next)) {
+                match skip_target(&entry, self.loaded.tracks(), matches!(cmd, PlayerCmd::Next)) {
                     Some(track) => self.load(
                         &s,
                         Start {
@@ -284,17 +284,19 @@ impl Speaker for CastPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         let s = self.open()?;
         let entry = media_status(&s)?.map(|(_, e)| e);
-        if let Some(at) = entry.as_ref().and_then(|e| place(e, &self.tracks)) {
+        if let Some(at) = entry.as_ref().and_then(|e| place(e, self.loaded.tracks())) {
             self.note_place(at, events);
         }
-        let live = self.live.as_ref().map(|l| l.url.as_str());
-        let Some(event) = poll_event(entry.as_ref(), &self.tracks, live, self.item) else {
+        let live = self.loaded.station().map(|l| l.url.as_str());
+        let Some(event) = poll_event(entry.as_ref(), self.loaded.tracks(), live, self.item) else {
             return Ok(());
         };
         if event == PlayerEvent::Stopped {
             self.active = false;
-            let ended = entry.as_ref().is_some_and(|e| finished(e, &self.tracks))
-                || near_end(self.last_place, self.tracks.len());
+            let ended = entry
+                .as_ref()
+                .is_some_and(|e| finished(e, self.loaded.tracks()))
+                || near_end(self.last_place, self.loaded.tracks().len());
             if ended {
                 events.finished();
             }
@@ -336,14 +338,16 @@ impl CastPlayer {
     fn load(&mut self, s: &Session, start: Start, events: &mut Emitter) -> Result<()> {
         let index = start.track;
         let track = self
-            .tracks
+            .loaded
+            .tracks()
             .get(index)
             .ok_or_else(|| anyhow!("no track {index}"))?;
         let app = media_app(s)?;
 
         let queue = MediaQueue {
             items: self
-                .tracks
+                .loaded
+                .tracks()
                 .iter()
                 .map(|t| QueueItem {
                     media: t.to_media(),
@@ -383,20 +387,16 @@ impl CastPlayer {
     ) -> Result<()> {
         let stream = radio::resolve(&crate::net::stream_agent(), &station.url)?;
         let s = self.open()?;
-        if self.active && events.wants_progress() {
-            self.report_place(&s, events);
-        }
-        events.begin(item, false);
+        events.replace(item, false, self.outgoing(&s, events));
         self.item = item;
-        self.tracks = Vec::new();
-        self.live = Some(Live::new(station, stream));
+        self.loaded = Loaded::Station(Live::new(station, stream));
         s.receiver.set_volume(super::clamp_volume(volume))?;
         self.load_live(&s, events)
     }
 
     /// Loads our station, live.
     fn load_live(&mut self, s: &Session, events: &mut Emitter) -> Result<()> {
-        let live = self.live.as_ref().context("no station to play")?;
+        let live = self.loaded.station().context("no station to play")?;
         let app = media_app(s)?;
         s.media.load_with_opts(
             app.transport_id,
@@ -423,16 +423,19 @@ impl CastPlayer {
         Ok(())
     }
 
-    /// Reports where the item playing got to; a failure only loses the report.
-    fn report_place(&mut self, s: &Session, events: &mut Emitter) {
+    /// Where the item playing got to, when it asked for progress and our
+    /// album is loaded; a failure only loses the place.
+    fn outgoing(&self, s: &Session, events: &Emitter) -> Option<Place> {
+        if !(self.active && events.wants_progress()) {
+            return None;
+        }
         match media_status(s) {
-            Ok(Some((_, entry))) => {
-                if let Some(at) = place(&entry, &self.tracks) {
-                    self.note_place(at, events);
-                }
+            Ok(Some((_, entry))) => place(&entry, self.loaded.tracks()),
+            Ok(None) => None,
+            Err(err) => {
+                debug!("no place for the item playing: {err:#}");
+                None
             }
-            Ok(None) => {}
-            Err(err) => debug!("no place for the item playing: {err:#}"),
         }
     }
 
@@ -454,11 +457,11 @@ impl CastPlayer {
         let Some((tid, entry)) = media_status(&s)? else {
             return Ok(());
         };
-        if let Some(at) = place(&entry, &self.tracks) {
+        if let Some(at) = place(&entry, self.loaded.tracks()) {
             self.note_place(at, events);
         }
-        let live = self.live.as_ref().map(|l| l.url.as_str());
-        if ours(&entry, &self.tracks, live) {
+        let live = self.loaded.station().map(|l| l.url.as_str());
+        if ours(&entry, self.loaded.tracks(), live) {
             s.media.stop(tid, entry.media_session_id)?;
         }
         Ok(())
@@ -470,7 +473,7 @@ impl CastPlayer {
         let Some((tid, entry)) = media_status(&s)? else {
             return Ok(());
         };
-        let Some(to) = seek_target(&entry, &self.tracks, by) else {
+        let Some(to) = seek_target(&entry, self.loaded.tracks(), by) else {
             return Ok(());
         };
         // `None` keeps the play or pause state.

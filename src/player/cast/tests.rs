@@ -614,7 +614,10 @@ fn a_poll_reads_our_track_playing_from_the_media_app() {
     let fake = FakeCast::start(false, media_receiver(), media);
     let mut player = fake.player();
     player.item = ITEM;
-    player.tracks = tracks();
+    player.loaded = Loaded::Album {
+        tracks: tracks(),
+        progress: false,
+    };
     player.active = true;
     let (tx, events) = mpsc::channel();
     player.poll(&mut Emitter::new(tx)).unwrap();

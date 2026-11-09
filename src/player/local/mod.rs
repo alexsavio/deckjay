@@ -29,8 +29,10 @@ use self::decode::Source;
 use self::netread::{Limits, NetRead};
 use self::output::OpenOutput;
 pub use self::output::output_devices;
+#[cfg(test)]
+use super::TrackInfo;
 use super::progress::Place;
-use super::{Content, Emitter, PlayerCmd, PlayerEvent, Speaker, Start, Station, TrackInfo};
+use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Start, Station};
 use crate::library::ItemId;
 use crate::radio;
 
@@ -49,10 +51,8 @@ pub(super) struct LocalPlayer {
     output: Option<OpenOutput>,
     /// Id of the item we started last.
     item: ItemId,
-    /// Tracks of the album we started last.
-    tracks: Vec<TrackInfo>,
-    /// The station we started last, instead of an album.
-    station: Option<Tuned>,
+    /// The album or station we started last.
+    loaded: Loaded<Tuned>,
     limits: Limits,
     volume: f32,
     /// The track playing or paused (0 for a station); `None` while no album
@@ -74,8 +74,7 @@ impl LocalPlayer {
             open,
             output: None,
             item: ItemId(0),
-            tracks: Vec::new(),
-            station: None,
+            loaded: Loaded::Idle,
             limits: Limits::default(),
             volume: 1.0,
             current: None,
@@ -100,10 +99,15 @@ impl Speaker for LocalPlayer {
             } => {
                 let list = content.into_tracks()?;
                 self.begin(item, list.progress, volume, events);
-                self.tracks = list.tracks;
+                self.loaded = Loaded::Album {
+                    tracks: list.tracks,
+                    progress: list.progress,
+                };
                 self.play_from(list.start, false, events)
             }
-            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_) if self.station.is_some() => {
+            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_)
+                if self.loaded.station().is_some() =>
+            {
                 self.check()
             }
             PlayerCmd::SetVolume(volume) => {
@@ -122,7 +126,7 @@ impl Speaker for LocalPlayer {
             PlayerCmd::Next => {
                 self.check()?;
                 match self.current {
-                    Some(track) if track + 1 < self.tracks.len() => {
+                    Some(track) if track + 1 < self.loaded.tracks().len() => {
                         self.play_from(from_top(track + 1), false, events)
                     }
                     _ => Ok(()),
@@ -158,7 +162,7 @@ impl Speaker for LocalPlayer {
         // A paused track may have ended just before the pause: it moves on
         // once resumed, not while paused.
         if !self.paused && output.engine.finished() {
-            if self.station.is_some() {
+            if self.loaded.station().is_some() {
                 warn!("the station stopped sending");
                 self.end_album(events);
             } else {
@@ -215,7 +219,7 @@ impl LocalPlayer {
 
     fn toggle_pause(&mut self, events: &mut Emitter) -> Result<()> {
         match (self.current, &self.output) {
-            (Some(_), Some(_)) if self.station.is_some() => self.toggle_station(events),
+            (Some(_), Some(_)) if self.loaded.station().is_some() => self.toggle_station(events),
             (Some(_), Some(output)) => {
                 self.paused = !self.paused;
                 output.engine.set_paused(self.paused);
@@ -227,10 +231,10 @@ impl LocalPlayer {
                 }
                 Ok(())
             }
-            _ if self.station.is_some() => self.tune(events),
+            _ if self.loaded.station().is_some() => self.tune(events),
             // The album ended (or failed): start it again, from the top or
             // where a resuming item got to.
-            _ if !self.tracks.is_empty() => {
+            _ if !self.loaded.tracks().is_empty() => {
                 let start = events.resume_point();
                 self.play_from(start, false, events)
             }
@@ -241,13 +245,11 @@ impl LocalPlayer {
         }
     }
 
-    /// `item` replaces what played; the caller sets its tracks or station.
+    /// `item` replaces what played; the caller sets what is loaded.
     fn begin(&mut self, item: ItemId, progress: bool, volume: f32, events: &mut Emitter) {
-        self.report_place(events);
-        events.begin(item, progress);
+        events.replace(item, progress, self.current_place());
         self.item = item;
-        self.tracks = Vec::new();
-        self.station = None;
+        self.loaded = Loaded::Idle;
         self.volume = super::clamp_volume(volume);
         self.current = None;
         // A new item is the moment to try a broken output again.
@@ -269,7 +271,7 @@ impl LocalPlayer {
         let stream = radio::resolve(&crate::net::stream_agent(), &station.url)?;
         decodable(&stream)?;
         self.begin(item, false, volume, events);
-        self.station = Some(Tuned {
+        self.loaded = Loaded::Station(Tuned {
             name: station.name.clone(),
             url: stream.url,
             content_type: stream.content_type,
@@ -279,7 +281,7 @@ impl LocalPlayer {
 
     /// Connects to the station and plays it, live.
     fn tune(&mut self, events: &mut Emitter) -> Result<()> {
-        let station = self.station.as_ref().context("no station to play")?;
+        let station = self.loaded.station().context("no station to play")?;
         let stream = NetRead::open(&station.url, self.limits)?;
         let content_type = station.content_type.as_deref();
         let source = guarded(|| Source::open_stream(stream, content_type))
@@ -328,7 +330,7 @@ impl LocalPlayer {
             empty @ None => empty.insert((self.open)()?),
         };
         output.engine.set_volume(self.volume);
-        for (index, track) in self.tracks.iter().enumerate().skip(start.track) {
+        for (index, track) in self.loaded.tracks().iter().enumerate().skip(start.track) {
             let position = if index == start.track {
                 start.position
             } else {
@@ -414,7 +416,7 @@ impl LocalPlayer {
         if let Some(output) = &mut self.output {
             output.engine.stop();
         }
-        if self.station.is_none() {
+        if self.loaded.station().is_none() {
             info!("end of the album");
         }
         self.current = None;
@@ -424,14 +426,21 @@ impl LocalPlayer {
 
     /// Offers the place in the current track, as far as the sound card got.
     fn report_place(&self, events: &mut Emitter) {
-        if let (Some(track), Some(output)) = (self.current, &self.output) {
-            let at = Place {
-                track,
-                position: output.engine.position(),
-                duration: self.duration,
-            };
+        if let Some(at) = self.current_place() {
             events.place(at, false);
         }
+    }
+
+    /// The place in the current track, as far as the sound card got.
+    fn current_place(&self) -> Option<Place> {
+        let (Some(track), Some(output)) = (self.current, &self.output) else {
+            return None;
+        };
+        Some(Place {
+            track,
+            position: output.engine.position(),
+            duration: self.duration,
+        })
     }
 }
 
