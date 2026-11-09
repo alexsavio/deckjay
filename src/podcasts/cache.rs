@@ -124,7 +124,11 @@ pub fn save(dir: &Path, manifest: &Manifest) -> Result<()> {
         }
         Ok(())
     };
-    write().with_context(|| format!("cannot write {}", path.display()))
+    write()
+        .inspect_err(|_| {
+            let _ = fs::remove_file(&temp);
+        })
+        .with_context(|| format!("cannot write {}", path.display()))
 }
 
 /// The manifest's episodes whose file is there, with the size on disk.
@@ -409,6 +413,21 @@ mod tests {
 
         assert_eq!(load(&folder), Some(manifest));
         assert!(!folder.join(part_name(MANIFEST)).exists());
+    }
+
+    #[test]
+    fn a_failed_manifest_save_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(MANIFEST)).unwrap();
+
+        assert!(save(dir.path(), &Manifest::default()).is_err());
+
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, [MANIFEST], "a temp file was left behind");
     }
 
     #[test]
