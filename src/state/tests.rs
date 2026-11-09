@@ -43,7 +43,11 @@ fn a_missing_file_starts_empty_and_saves_to_the_folder() {
         ),
         (3, "books/Pippi/04.mp3", 61_500, Some(300_000))
     );
-    assert!(!state_dir.join("state.json.tmp").exists());
+    let names: Vec<_> = std::fs::read_dir(&state_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["state.json"], "a temp file was left behind");
 }
 
 #[test]

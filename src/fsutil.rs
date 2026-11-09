@@ -1,6 +1,6 @@
 //! The one way deckjay saves a file: write a temp file beside it, sync, rename,
 //! sync the folder. A crash leaves the old file or the new one, never half of
-//! one, and at worst a `.part` temp file that the podcast sweep deletes.
+//! one, and at worst a `.part` temp file. Only the podcast cache sweep deletes those.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};

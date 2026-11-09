@@ -5,6 +5,7 @@
 //!                    20250107-der-elefant-1a2b3c4d.mp3      date, title, episode id
 //!                    p-9f8e7d6c.jpg                         hash of the picture URL
 //!                    .20250107-der-elefant-1a2b3c4d.mp3.part   unfinished download
+//!                    .feed.json.<pid>.<n>.part                 unfinished manifest or picture save
 //! ```
 //!
 //! Names come from dates, ASCII slugs and hashes only, never from feed text

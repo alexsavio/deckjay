@@ -46,7 +46,7 @@ pub fn fetch_missing(state_dir: &Path, folder: &Path, uris: &[String], endpoints
     }
 }
 
-/// A file of 0 bytes is what an earlier power cut can leave: fetch it again.
+/// A file of 0 bytes is not a cover: fetch it again.
 fn is_kept(cover: &Path) -> bool {
     cover
         .metadata()
