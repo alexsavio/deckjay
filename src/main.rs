@@ -103,7 +103,7 @@ fn run_player(args: &RunArgs) -> Result<()> {
     let mut base_url = base_url(&cfg);
 
     let served = server::Served::new(library.served_files());
-    if cfg.speaker_type != SpeakerType::Local {
+    if cfg.speaker_type.serves_music() {
         serve_music(&cfg, served.clone())?;
         match base_url.try_get() {
             Ok(url) => info!("serving music at {url}/"),
@@ -374,7 +374,7 @@ fn spotify_output(cfg: &Config) -> Option<player::spotify::Connect> {
 }
 
 fn base_url(cfg: &Config) -> BaseUrl {
-    if cfg.speaker_type == SpeakerType::Local {
+    if !cfg.speaker_type.serves_music() {
         // Nothing downloads from us: the music URLs are never used.
         return BaseUrl::fixed(format!("http://127.0.0.1:{}/music", cfg.http_port));
     }
@@ -524,22 +524,27 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
     if let Some(spotify) = &cfg.spotify {
         print_spotify(&cfg, spotify, &mut report);
     }
-    if cfg.speaker_type == SpeakerType::Local {
-        print_audio_outputs(&cfg, &mut report);
-        return Ok(report.finish());
+    match cfg.speaker_type {
+        SpeakerType::Local => print_audio_outputs(&cfg, &mut report),
+        SpeakerType::Cast => {
+            print_speaker_header(&cfg);
+            print_cast_speaker(&cfg, &mut report);
+        }
+        SpeakerType::Heos => {
+            print_speaker_header(&cfg);
+            print_heos_players(&cfg, &mut report);
+        }
     }
+    Ok(report.finish())
+}
+
+fn print_speaker_header(cfg: &Config) {
     println!(
         "\nSpeaker {}:{} ({:?}):",
         cfg.speaker_host,
         cfg.speaker_port(),
         cfg.speaker_type
     );
-    match cfg.speaker_type {
-        SpeakerType::Cast => print_cast_speaker(&cfg, &mut report),
-        SpeakerType::Heos => print_heos_players(&cfg, &mut report),
-        SpeakerType::Local => unreachable!("handled above"),
-    }
-    Ok(report.finish())
 }
 
 fn print_spotify(cfg: &Config, spotify: &config::Spotify, report: &mut Report) {
