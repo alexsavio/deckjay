@@ -1,7 +1,7 @@
 //! Playlist covers, fetched once from the Web API and kept in a folder
 //! (`<state_dir>/spotify-covers/`), so keys show them without the network.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ pub fn path(folder: &Path, uri: &str) -> PathBuf {
 pub fn fetch_missing(state_dir: &Path, folder: &Path, uris: &[String], endpoints: Endpoints) {
     let missing: Vec<&String> = uris
         .iter()
-        .filter(|uri| !path(folder, uri).is_file())
+        .filter(|uri| !is_kept(&path(folder, uri)))
         .collect();
     if missing.is_empty() {
         return;
@@ -44,6 +44,13 @@ pub fn fetch_missing(state_dir: &Path, folder: &Path, uris: &[String], endpoints
             Err(err) => warn!("no cover for {uri}: {err:#}"),
         }
     }
+}
+
+/// A file of 0 bytes is what an earlier power cut can leave: fetch it again.
+fn is_kept(cover: &Path) -> bool {
+    cover
+        .metadata()
+        .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
 }
 
 fn fetch(client: &mut Client, folder: &Path, uri: &str) -> Result<()> {
@@ -67,8 +74,24 @@ fn fetch(client: &mut Client, folder: &Path, uri: &str) -> Result<()> {
     let target = path(folder, uri);
     std::fs::create_dir_all(folder)?;
     let tmp = target.with_extension("jpg.tmp");
-    picture.save_with_format(&tmp, image::ImageFormat::Jpeg)?;
-    std::fs::rename(&tmp, &target)?;
+    let written = (|| -> Result<()> {
+        let mut jpeg = Vec::new();
+        picture.write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )?;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&jpeg)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, &target)?;
+        Ok(())
+    })();
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
+    }
+    // The rename itself is only on disk once the folder is synced.
+    let _ = std::fs::File::open(folder).and_then(|dir| dir.sync_all());
     Ok(())
 }
 
@@ -168,6 +191,59 @@ mod tests {
             1,
             "a kept cover is not fetched again"
         );
+    }
+
+    fn signed_in(dir: &Path, fake: &Fake) {
+        TokenFile {
+            client_id: fake::CLIENT_ID.into(),
+            refresh_token: Secret::new(fake::REFRESH_TOKEN),
+        }
+        .save(dir)
+        .unwrap();
+        fake.script().images = json!([{"url": picture_server(), "width": 800, "height": 800}]);
+    }
+
+    #[test]
+    fn a_cover_file_of_0_bytes_is_fetched_again() {
+        let fake = Fake::start();
+        let dir = tempfile::tempdir().unwrap();
+        signed_in(dir.path(), &fake);
+        let folder = dir.path().join("covers");
+        std::fs::create_dir(&folder).unwrap();
+        let kept = path(&folder, "spotify:playlist:abc");
+        std::fs::write(&kept, b"").unwrap();
+
+        fetch_missing(
+            dir.path(),
+            &folder,
+            &["spotify:playlist:abc".to_string()],
+            fake.endpoints(),
+        );
+
+        assert_eq!(fake.requests_to("/v1/playlists/abc/images").len(), 1);
+        assert!(image::open(&kept).is_ok());
+    }
+
+    #[test]
+    fn a_failed_cover_save_leaves_no_temp_file() {
+        let fake = Fake::start();
+        let dir = tempfile::tempdir().unwrap();
+        signed_in(dir.path(), &fake);
+        let folder = dir.path().join("covers");
+        std::fs::create_dir_all(path(&folder, "spotify:playlist:abc")).unwrap();
+
+        fetch_missing(
+            dir.path(),
+            &folder,
+            &["spotify:playlist:abc".to_string()],
+            fake.endpoints(),
+        );
+
+        let left: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["abc.jpg"], "a temp file was left behind");
     }
 
     #[test]
