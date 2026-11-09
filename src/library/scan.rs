@@ -25,9 +25,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{Item, ItemKey, Media, Track};
-#[cfg(test)]
-use crate::config::SourceBody;
-use crate::config::{Folder, Source};
+use crate::config::Folder;
 
 /// Cover file names (without extension), best match first.
 const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
@@ -38,11 +36,10 @@ const KEY_PICTURE: &str = "key";
 
 /// The items of `source`, in name order; with `one_key`, the source folder
 /// itself is the only item.
-pub(super) fn scan(source: &Source, folder: &Folder) -> Result<Vec<Item>> {
+pub(super) fn scan(source: &str, folder: &Folder) -> Result<Vec<Item>> {
     let entries = usable_entries(&folder.path).with_context(|| {
         format!(
-            "cannot read the folder of source {}: {}",
-            source.name,
+            "cannot read the folder of source {source}: {}",
             folder.path.display()
         )
     })?;
@@ -63,18 +60,15 @@ pub(super) fn scan(source: &Source, folder: &Folder) -> Result<Vec<Item>> {
         })
         .collect();
     for name in folder.items.keys() {
-        let key = format!("{}/{name}", source.name);
+        let key = format!("{source}/{name}");
         if !items.iter().any(|i| i.key.0 == key || i.name == *name) {
-            tracing::warn!(
-                "[source.item.{name:?}] of source {} matches no item",
-                source.name
-            );
+            tracing::warn!("[source.item.{name:?}] of source {source} matches no item");
         }
     }
     Ok(items)
 }
 
-fn folder_item(source: &Source, folder: &Folder, dir: &Path) -> Option<Item> {
+fn folder_item(source: &str, folder: &Folder, dir: &Path) -> Option<Item> {
     let entries = usable_entries(dir)
         .inspect_err(|err| tracing::warn!("skipping {}: {err}", dir.display()))
         .ok()?;
@@ -89,7 +83,7 @@ fn folder_item(source: &Source, folder: &Folder, dir: &Path) -> Option<Item> {
         }
     }
 
-    let tracks = tracks(source, &files);
+    let tracks = tracks(source, folder, &files);
     if tracks.is_empty() {
         tracing::warn!("skipping {}: no playable audio files", dir.display());
         return None;
@@ -105,8 +99,8 @@ fn folder_item(source: &Source, folder: &Folder, dir: &Path) -> Option<Item> {
     Some(item)
 }
 
-fn file_item(source: &Source, folder: &Folder, file: &Path, top_files: &[PathBuf]) -> Option<Item> {
-    let tracks = tracks(source, &[file.to_path_buf()]);
+fn file_item(source: &str, folder: &Folder, file: &Path, top_files: &[PathBuf]) -> Option<Item> {
+    let tracks = tracks(source, folder, &[file.to_path_buf()]);
     if tracks.is_empty() {
         return None;
     }
@@ -121,7 +115,7 @@ fn file_item(source: &Source, folder: &Folder, file: &Path, top_files: &[PathBuf
 /// `key_name` is the entry's name in the source folder. The picture and
 /// colour come from the source's `[source.item]` table for it, if any.
 fn item(
-    source: &Source,
+    source: &str,
     folder: &Folder,
     key_name: &str,
     name: String,
@@ -136,24 +130,26 @@ fn item(
         .unwrap_or_default();
     Item {
         kind: folder.kind.into(),
-        key: ItemKey(format!("{}/{key_name}", source.name)),
+        key: ItemKey(format!("{source}/{key_name}")),
         name,
         media: Media::Tracks(tracks),
-        cover_rel: cover.as_deref().and_then(|c| served_path(source, c)),
+        cover_rel: cover
+            .as_deref()
+            .and_then(|c| served_path(source, &folder.path, c)),
         cover,
         picture: look.picture,
         color: look.color,
     }
 }
 
-fn tracks(source: &Source, files: &[PathBuf]) -> Vec<Track> {
+fn tracks(source: &str, folder: &Folder, files: &[PathBuf]) -> Vec<Track> {
     files
         .iter()
         .filter_map(|f| {
             Some(Track {
                 content_type: content_type(f)?,
                 path: f.clone(),
-                rel_path: served_path(source, f)?,
+                rel_path: served_path(source, &folder.path, f)?,
                 title: f.file_stem()?.to_string_lossy().into_owned(),
             })
         })
@@ -161,8 +157,8 @@ fn tracks(source: &Source, files: &[PathBuf]) -> Vec<Track> {
 }
 
 /// `<source name>/<path in the source folder>`: where the web server serves `path`.
-fn served_path(source: &Source, path: &Path) -> Option<PathBuf> {
-    Some(Path::new(&source.name).join(path.strip_prefix(source.served_root()?).ok()?))
+fn served_path(source: &str, root: &Path, path: &Path) -> Option<PathBuf> {
+    Some(Path::new(source).join(path.strip_prefix(root).ok()?))
 }
 
 /// Entries that are not hidden and have UTF-8 names, in natural name order.
@@ -274,10 +270,11 @@ fn has_stem(p: &Path, stem: &str) -> bool {
 mod tests {
     use super::*;
     use crate::config::SourceKind;
+    use crate::config::{Source, SourceBody};
     use crate::library::Kind;
 
     fn scan(source: &Source) -> Result<Vec<Item>> {
-        super::scan(source, folder(source))
+        super::scan(&source.name, folder(source))
     }
 
     fn folder(source: &Source) -> &Folder {

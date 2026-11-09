@@ -151,7 +151,7 @@ impl Source {
     }
 
     /// The folder the web server serves files from: not for radio and
-    /// Spotify, which have no folder.
+    /// Spotify, which serve no files.
     pub fn served_root(&self) -> Option<&Path> {
         match &self.body {
             SourceBody::Folder(folder) => Some(&folder.path),

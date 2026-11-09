@@ -145,10 +145,12 @@ impl Library {
                 SourceBody::Spotify { covers, playlists } => {
                     self::playlists(&source.name, covers, playlists)
                 }
-                SourceBody::Folder(folder) => scan::scan(source, folder).unwrap_or_else(|err| {
-                    tracing::warn!("{err:#}");
-                    Vec::new()
-                }),
+                SourceBody::Folder(folder) => {
+                    scan::scan(&source.name, folder).unwrap_or_else(|err| {
+                        tracing::warn!("{err:#}");
+                        Vec::new()
+                    })
+                }
             };
             let shelf = Shelf {
                 name: source.name.clone(),
