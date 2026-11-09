@@ -13,8 +13,9 @@ use image::{ImageReader, Limits};
 use ureq::http::Response;
 use ureq::{Agent, Body};
 
+use crate::net::http_url;
+
 use super::cache;
-use super::feed::http_url;
 
 const MB: u64 = 1024 * 1024;
 const FEED_LIMIT: u64 = 20 * MB;
