@@ -290,11 +290,18 @@ impl Store {
 fn write_atomically(path: &Path, state: &State) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
     let text = serde_json::to_string_pretty(state)?;
-    let mut file =
-        File::create(&tmp).with_context(|| format!("cannot create {}", tmp.display()))?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()?;
-    std::fs::rename(&tmp, path)?;
+    let written = File::create(&tmp)
+        .with_context(|| format!("cannot create {}", tmp.display()))
+        .and_then(|mut file| {
+            file.write_all(text.as_bytes())?;
+            file.sync_all()?;
+            Ok(())
+        })
+        .and_then(|()| Ok(std::fs::rename(&tmp, path)?));
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
+    }
     if let Some(dir) = path.parent() {
         // The rename itself is only on disk once the folder is synced.
         let _ = File::open(dir).and_then(|dir| dir.sync_all());

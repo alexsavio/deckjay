@@ -201,3 +201,18 @@ fn a_folder_that_becomes_writable_gets_the_state_that_waited() {
 
     assert_eq!(Store::open(dir.path()).shelf(), Some("books"));
 }
+
+#[test]
+fn a_failed_save_leaves_no_temp_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    std::fs::create_dir(&path).unwrap();
+
+    assert!(write_atomically(&path, &State::default()).is_err());
+
+    let left: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["state.json"], "a temp file was left behind");
+}
