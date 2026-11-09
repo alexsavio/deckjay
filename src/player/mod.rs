@@ -1,7 +1,8 @@
 //! Plays albums on the speaker, on a thread of its own. Three kinds of
 //! speaker are supported: Chromecast ([`cast`]), Denon HEOS ([`heos`]) and
-//! this computer's sound output ([`local`]). All take [`PlayerCmd`]s and
-//! report [`PlayerEvent`]s, so the UI does not know which one it drives.
+//! this computer's sound output ([`local`]). The player thread takes
+//! [`PlayerCmd`]s and hands the speakers [`SpeakerCmd`]s; it reports
+//! [`PlayerEvent`]s, so the UI does not know which one it drives.
 //! [`progress`] decides when an item reports how far it got.
 
 pub mod cast;
@@ -17,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use tracing::{debug, warn};
 
 use self::progress::Place;
@@ -85,9 +86,16 @@ struct TrackList {
     progress: bool,
 }
 
+/// What a speaker can play: [`Content`] without Spotify.
+#[derive(Debug)]
+enum Playable {
+    Tracks(TrackList),
+    Station(Station),
+}
+
 impl Content {
-    /// The tracks to play; a stream or a playlist is an error.
-    fn into_tracks(self) -> Result<TrackList> {
+    /// Spotify playlists go to the Spotify player, the rest to the speaker.
+    fn route(self) -> Routed {
         match self {
             Content::Tracks {
                 tracks,
@@ -99,19 +107,97 @@ impl Content {
                 } else {
                     Start::default()
                 };
-                Ok(TrackList {
+                Routed::Speaker(Playable::Tracks(TrackList {
                     tracks,
                     start,
                     progress,
-                })
+                }))
             }
-            Content::Stream(station) => {
-                bail!("internet radio ({}) is not supported yet", station.name)
-            }
-            Content::Spotify(playlist) => {
-                bail!("Spotify ({}) is not supported yet", playlist.name)
-            }
+            Content::Stream(station) => Routed::Speaker(Playable::Station(station)),
+            Content::Spotify(playlist) => Routed::Spotify(playlist),
         }
+    }
+}
+
+enum Routed {
+    Speaker(Playable),
+    Spotify(Playlist),
+}
+
+/// A [`PlayerCmd`] as a speaker gets it: `Off` is [`power_off`]'s, and `P`
+/// is what the speaker can play.
+#[derive(Debug)]
+enum SpeakerCmd<P> {
+    Play { item: ItemId, play: P, volume: f32 },
+    TogglePause,
+    Next,
+    Prev,
+    Seek(i32),
+    SetVolume(f32),
+}
+
+impl PlayerCmd {
+    /// `None` for [`PlayerCmd::Off`].
+    fn speaker_cmd(self) -> Option<SpeakerCmd<Content>> {
+        Some(match self {
+            PlayerCmd::Play {
+                item,
+                content,
+                volume,
+            } => SpeakerCmd::Play {
+                item,
+                play: content,
+                volume,
+            },
+            PlayerCmd::TogglePause => SpeakerCmd::TogglePause,
+            PlayerCmd::Next => SpeakerCmd::Next,
+            PlayerCmd::Prev => SpeakerCmd::Prev,
+            PlayerCmd::Seek(by) => SpeakerCmd::Seek(by),
+            PlayerCmd::SetVolume(volume) => SpeakerCmd::SetVolume(volume),
+            PlayerCmd::Off => return None,
+        })
+    }
+}
+
+#[cfg(test)]
+impl PlayerCmd {
+    /// The command as a speaker that plays files and streams gets it.
+    fn for_output(self) -> SpeakerCmd<Playable> {
+        let cmd = self.speaker_cmd().expect("not Off");
+        match cmd.control() {
+            Ok(control) => control,
+            Err((item, content, volume)) => match content.route() {
+                Routed::Speaker(play) => SpeakerCmd::Play { item, play, volume },
+                Routed::Spotify(_) => panic!("a playlist is not for the output"),
+            },
+        }
+    }
+
+    /// The command as the Spotify player gets it.
+    fn for_spotify(self) -> SpeakerCmd<Playlist> {
+        let cmd = self.speaker_cmd().expect("not Off");
+        match cmd.control() {
+            Ok(control) => control,
+            Err((item, content, volume)) => match content.route() {
+                Routed::Spotify(play) => SpeakerCmd::Play { item, play, volume },
+                Routed::Speaker(_) => panic!("only playlists are for Spotify"),
+            },
+        }
+    }
+}
+
+impl<P> SpeakerCmd<P> {
+    /// A command that plays nothing keeps its shape for any `Q`; a `Play`
+    /// comes back as its parts.
+    fn control<Q>(self) -> Result<SpeakerCmd<Q>, (ItemId, P, f32)> {
+        Ok(match self {
+            SpeakerCmd::Play { item, play, volume } => return Err((item, play, volume)),
+            SpeakerCmd::TogglePause => SpeakerCmd::TogglePause,
+            SpeakerCmd::Next => SpeakerCmd::Next,
+            SpeakerCmd::Prev => SpeakerCmd::Prev,
+            SpeakerCmd::Seek(by) => SpeakerCmd::Seek(by),
+            SpeakerCmd::SetVolume(volume) => SpeakerCmd::SetVolume(volume),
+        })
     }
 }
 
@@ -243,12 +329,12 @@ pub fn spawn_with(
         // Built on the player thread: a sound card stream cannot move between
         // threads on every platform.
         .spawn(move || {
-            let speaker: Box<dyn Speaker> = match output {
+            let speaker: Box<dyn Speaker<Play = Playable>> = match output {
                 Output::Cast { host, port } => Box::new(cast::CastPlayer::new(host, port)),
                 Output::Heos { host, port } => Box::new(heos::HeosPlayer::new(host, port)),
                 Output::Local { device } => Box::new(local::LocalPlayer::new(device)),
             };
-            let spotify = spotify.map(|connect| -> Box<dyn Speaker> {
+            let spotify = spotify.map(|connect| -> Box<dyn Speaker<Play = Playlist>> {
                 Box::new(spotify::SpotifyPlayer::new(
                     connect,
                     crate::spotify::api::Endpoints::default(),
@@ -265,8 +351,14 @@ pub fn spawn_with(
 }
 
 /// One speaker protocol. The methods run on the player thread.
-trait Speaker {
-    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()>;
+trait Speaker: Device {
+    /// What the speaker can be told to play.
+    type Play;
+    fn handle(&mut self, cmd: SpeakerCmd<Self::Play>, events: &mut Emitter) -> Result<()>;
+}
+
+/// What every speaker does besides taking commands.
+trait Device {
     /// Checks the speaker while an album is active and reports what changed.
     fn poll(&mut self, events: &mut Emitter) -> Result<()>;
     /// `None` while no album is active, so there is nothing to poll.
@@ -295,7 +387,11 @@ trait Speaker {
     }
 }
 
-fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emitter) {
+fn run(
+    mut speaker: Box<dyn Speaker<Play = Content>>,
+    rx: &Receiver<PlayerCmd>,
+    mut events: Emitter,
+) {
     let mut failing_since: Option<Instant> = None;
     loop {
         let next = match speaker.poll_interval() {
@@ -311,9 +407,9 @@ fn run(mut speaker: Box<dyn Speaker>, rx: &Receiver<PlayerCmd>, mut events: Emit
                 for cmd in coalesce(pending) {
                     debug!(?cmd, "speaker command");
                     let guessed = guessed(&cmd);
-                    let done = match cmd {
-                        PlayerCmd::Off => power_off(speaker.as_mut(), &mut events),
-                        cmd => speaker.handle(cmd, &mut events),
+                    let done = match cmd.speaker_cmd() {
+                        Some(cmd) => speaker.handle(cmd, &mut events),
+                        None => power_off(speaker.as_mut(), &mut events),
                     };
                     match done {
                         Ok(()) => failing_since = None,
@@ -364,7 +460,7 @@ fn guessed(cmd: &PlayerCmd) -> bool {
 
 /// Standby is tried even when the stop failed: a receiver's control port
 /// can answer while its HEOS part does not. A failed standby is only logged.
-fn power_off(speaker: &mut dyn Speaker, events: &mut Emitter) -> Result<()> {
+fn power_off(speaker: &mut dyn Device, events: &mut Emitter) -> Result<()> {
     let stopped = speaker.stop_everything(events);
     if let Err(err) = speaker.standby() {
         warn!("cannot put the speaker in standby: {err:#}");

@@ -10,6 +10,7 @@ use rust_cast::message_manager::{CastMessage, CastMessagePayload, MessageManager
 use serde_json::{Value, json};
 
 use super::*;
+use crate::player::{Content, PlayerCmd};
 
 const ITEM: ItemId = ItemId(5);
 
@@ -131,27 +132,6 @@ fn skipping_someone_elses_media_does_nothing() {
     let e = entry(PlayerState::Playing, Some("http://example.com/radio.mp3"));
     assert_eq!(skip_target(&e, &tracks, true), None);
     assert_eq!(skip_target(&e, &tracks, false), None);
-}
-
-#[test]
-fn spotify_is_refused_before_connecting() {
-    // Nothing listens on this port, so a connection attempt would fail with
-    // another error.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let mut player = CastPlayer::new("127.0.0.1".into(), port);
-    let (tx, _events) = std::sync::mpsc::channel();
-    let mut emitter = Emitter::new(tx);
-    let cmd = PlayerCmd::Play {
-        item: ITEM,
-        content: crate::player::tests::unsupported(),
-        volume: 0.2,
-    };
-    let err = player.handle(cmd, &mut emitter).unwrap_err();
-    assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
 }
 
 fn timed(state: PlayerState, track: usize, secs: f32, duration: Option<f32>) -> StatusEntry {
@@ -539,7 +519,7 @@ fn a_speaker_that_accepts_and_never_answers_fails_within_the_timeout() {
     let (tx, _events) = mpsc::channel();
     let started = Instant::now();
     let err = player
-        .handle(PlayerCmd::SetVolume(0.5), &mut Emitter::new(tx))
+        .handle(SpeakerCmd::SetVolume(0.5), &mut Emitter::new(tx))
         .unwrap_err();
     let took = started.elapsed();
     assert!(
@@ -584,7 +564,7 @@ fn a_volume_change_travels_over_the_wire() {
     let mut player = fake.player();
     let (tx, _events) = mpsc::channel();
     player
-        .handle(PlayerCmd::SetVolume(0.5), &mut Emitter::new(tx))
+        .handle(SpeakerCmd::SetVolume(0.5), &mut Emitter::new(tx))
         .unwrap();
     assert_eq!(
         fake.request_types(),
@@ -708,7 +688,7 @@ impl Played {
 
     fn send(&mut self, cmd: PlayerCmd) -> Result<()> {
         self.emitter.last = None;
-        self.player.handle(cmd, &mut self.emitter)
+        self.player.handle(cmd.for_output(), &mut self.emitter)
     }
 
     fn events(&self) -> Vec<PlayerEvent> {

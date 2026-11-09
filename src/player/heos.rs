@@ -35,7 +35,7 @@ use self::cli::{Cli, HeosError, IO_TIMEOUT, Message, NowPlaying};
 #[cfg(test)]
 use super::TrackInfo;
 use super::progress::{Place, played_out};
-use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Station};
+use super::{Device, Emitter, Loaded, Playable, PlayerEvent, Speaker, SpeakerCmd, Station};
 use crate::library::ItemId;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -114,19 +114,20 @@ impl HeosPlayer {
 }
 
 impl Speaker for HeosPlayer {
-    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
+    type Play = Playable;
+
+    fn handle(&mut self, cmd: SpeakerCmd<Playable>, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content: Content::Stream(station),
+                play: Playable::Station(station),
                 volume,
             } => self.play_station(item, &station, volume, events),
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content,
+                play: Playable::Tracks(list),
                 volume,
             } => {
-                let list = content.into_tracks()?;
                 if !list.start.position.is_zero() {
                     debug!(
                         position = ?list.start.position,
@@ -143,27 +144,28 @@ impl Speaker for HeosPlayer {
                 self.set_volume(volume)?;
                 self.play_track(list.start.track, events)
             }
-            PlayerCmd::SetVolume(volume) => self.set_volume(volume),
-            PlayerCmd::TogglePause => self.toggle_pause(events),
-            PlayerCmd::Next | PlayerCmd::Prev if self.loaded.station().is_some() => Ok(()),
-            PlayerCmd::Seek(by) => {
+            SpeakerCmd::SetVolume(volume) => self.set_volume(volume),
+            SpeakerCmd::TogglePause => self.toggle_pause(events),
+            SpeakerCmd::Next | SpeakerCmd::Prev if self.loaded.station().is_some() => Ok(()),
+            SpeakerCmd::Seek(by) => {
                 debug!(by, "HEOS cannot seek");
                 Ok(())
             }
-            PlayerCmd::Off => Speaker::stop(self, events),
-            PlayerCmd::Next => match self.current {
+            SpeakerCmd::Next => match self.current {
                 Some(c) if c.track + 1 < self.loaded.tracks().len() => {
                     self.play_track(c.track + 1, events)
                 }
                 _ => Ok(()),
             },
-            PlayerCmd::Prev => match self.current {
+            SpeakerCmd::Prev => match self.current {
                 Some(c) => self.play_track(c.track.saturating_sub(1), events),
                 None => Ok(()),
             },
         }
     }
+}
 
+impl Device for HeosPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         if self.current.is_none() {
             return Ok(());

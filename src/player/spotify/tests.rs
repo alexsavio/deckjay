@@ -4,6 +4,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
+use crate::player::{Content, PlayerCmd};
 use crate::spotify::fake::{self, Fake};
 use crate::spotify::token::{Secret, TokenFile};
 
@@ -44,7 +45,7 @@ impl Rig {
     }
 
     fn send(&mut self, cmd: PlayerCmd) -> Result<()> {
-        self.player.handle(cmd, &mut self.emitter)
+        self.player.handle(cmd.for_spotify(), &mut self.emitter)
     }
 
     fn play(&mut self) -> Result<()> {

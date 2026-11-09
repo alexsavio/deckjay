@@ -12,7 +12,7 @@ use super::decode::Converter;
 use super::engine::{Engine, Format, Sink};
 use super::output::pick;
 use super::*;
-use crate::player::{Content, Start};
+use crate::player::{Content, PlayerCmd, Start};
 
 /// The fake sound card's rate, also the rate of the test tracks, so their
 /// samples reach the card unchanged.
@@ -243,7 +243,7 @@ impl Rig {
     /// As `player::run` sends a command.
     fn send(&mut self, cmd: PlayerCmd) -> Result<()> {
         self.emitter.last = None;
-        self.player.handle(cmd, &mut self.emitter)
+        self.player.handle(cmd.for_output(), &mut self.emitter)
     }
 
     fn poll(&mut self) -> Result<()> {
@@ -590,20 +590,6 @@ fn a_broken_stream_fails_the_next_command_and_poll_and_an_album_reopens_it() {
     rig.play_album(tracks, 1.0).unwrap();
     assert_eq!(rig.opened.get(), 3);
     assert_eq!(levels(&rig.listen(0.1), 1.0), [1000]);
-}
-
-#[test]
-fn spotify_does_not_open_the_sound_card() {
-    let mut rig = Rig::new();
-    let cmd = PlayerCmd::Play {
-        item: ITEM,
-        content: crate::player::tests::unsupported(),
-        volume: 1.0,
-    };
-    let err = rig.send(cmd).unwrap_err();
-    assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
-    assert_eq!(rig.opened.get(), 0);
-    assert_eq!(rig.events(), []);
 }
 
 #[test]

@@ -5,10 +5,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use tracing::{info, warn};
 
-use super::{Content, Emitter, PlayerCmd, PlayerEvent, Playlist, Speaker, clamp_volume};
+use super::{Device, Emitter, PlayerEvent, Playlist, Speaker, SpeakerCmd, clamp_volume};
 use crate::library::ItemId;
 use crate::spotify::api::{ApiError, Client, Endpoints};
 use crate::spotify::pick_device;
@@ -129,26 +129,26 @@ impl SpotifyPlayer {
 }
 
 impl Speaker for SpotifyPlayer {
-    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
+    type Play = Playlist;
+
+    fn handle(&mut self, cmd: SpeakerCmd<Playlist>, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content: Content::Spotify(playlist),
+                play: playlist,
                 volume,
             } => self.play(item, playlist, volume, events),
-            PlayerCmd::Play { .. } => bail!("Spotify plays playlists only"),
-            PlayerCmd::TogglePause => self.toggle(events),
-            PlayerCmd::Off => Speaker::stop(self, events),
-            PlayerCmd::Next => match self.device_id() {
+            SpeakerCmd::TogglePause => self.toggle(events),
+            SpeakerCmd::Next => match self.device_id() {
                 Some(id) => self.client()?.next(&id),
                 None => Ok(()),
             },
-            PlayerCmd::Prev => match self.device_id() {
+            SpeakerCmd::Prev => match self.device_id() {
                 Some(id) => self.client()?.previous(&id),
                 None => Ok(()),
             },
-            PlayerCmd::Seek(_) => Ok(()),
-            PlayerCmd::SetVolume(volume) => {
+            SpeakerCmd::Seek(_) => Ok(()),
+            SpeakerCmd::SetVolume(volume) => {
                 if let Some(id) = self.device_id()
                     && let Err(err) = self.client()?.set_volume(&id, percent(volume))
                 {
@@ -159,7 +159,9 @@ impl Speaker for SpotifyPlayer {
             }
         }
     }
+}
 
+impl Device for SpotifyPlayer {
     /// Our playlist on our device is ours; anything else means someone took
     /// over in the Spotify app.
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {

@@ -37,7 +37,9 @@ use rustls::{ClientConfig, ClientConnection, StreamOwned};
 use tracing::{debug, info, warn};
 
 use super::progress::{Place, known_length, played_out};
-use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Start, Station, TrackInfo};
+use super::{
+    Device, Emitter, Loaded, Playable, PlayerEvent, Speaker, SpeakerCmd, Start, Station, TrackInfo,
+};
 use crate::library::ItemId;
 use crate::radio;
 
@@ -182,19 +184,20 @@ impl CastPlayer {
 }
 
 impl Speaker for CastPlayer {
-    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
+    type Play = Playable;
+
+    fn handle(&mut self, cmd: SpeakerCmd<Playable>, events: &mut Emitter) -> Result<()> {
         match cmd {
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content: Content::Stream(station),
+                play: Playable::Station(station),
                 volume,
             } => self.play_station(item, &station, volume, events),
-            PlayerCmd::Play {
+            SpeakerCmd::Play {
                 item,
-                content,
+                play: Playable::Tracks(list),
                 volume,
             } => {
-                let list = content.into_tracks()?;
                 let s = self.open()?;
                 events.replace(item, list.progress, self.outgoing(&s, events));
                 self.item = item;
@@ -205,12 +208,12 @@ impl Speaker for CastPlayer {
                 s.receiver.set_volume(super::clamp_volume(volume))?;
                 self.load(&s, list.start, events)
             }
-            PlayerCmd::SetVolume(volume) => {
+            SpeakerCmd::SetVolume(volume) => {
                 let s = self.open()?;
                 s.receiver.set_volume(super::clamp_volume(volume))?;
                 Ok(())
             }
-            PlayerCmd::TogglePause => {
+            SpeakerCmd::TogglePause => {
                 let s = self.open()?;
                 let live = self.loaded.station().is_some();
                 match media_status(&s)? {
@@ -254,19 +257,22 @@ impl Speaker for CastPlayer {
                 }
                 Ok(())
             }
-            PlayerCmd::Off => Speaker::stop(self, events),
-            PlayerCmd::Next | PlayerCmd::Prev | PlayerCmd::Seek(_)
+            SpeakerCmd::Next | SpeakerCmd::Prev | SpeakerCmd::Seek(_)
                 if self.loaded.station().is_some() =>
             {
                 Ok(())
             }
-            PlayerCmd::Seek(by) => self.seek(by, events),
-            PlayerCmd::Next | PlayerCmd::Prev => {
+            SpeakerCmd::Seek(by) => self.seek(by, events),
+            SpeakerCmd::Next | SpeakerCmd::Prev => {
                 let s = self.open()?;
                 let Some((_, entry)) = media_status(&s)? else {
                     return Ok(());
                 };
-                match skip_target(&entry, self.loaded.tracks(), matches!(cmd, PlayerCmd::Next)) {
+                match skip_target(
+                    &entry,
+                    self.loaded.tracks(),
+                    matches!(cmd, SpeakerCmd::Next),
+                ) {
                     Some(track) => self.load(
                         &s,
                         Start {
@@ -280,7 +286,9 @@ impl Speaker for CastPlayer {
             }
         }
     }
+}
 
+impl Device for CastPlayer {
     fn poll(&mut self, events: &mut Emitter) -> Result<()> {
         let s = self.open()?;
         let entry = media_status(&s)?.map(|(_, e)| e);

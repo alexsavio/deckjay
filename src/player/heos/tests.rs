@@ -6,7 +6,7 @@ use std::thread;
 
 use super::cli::{HeosError, PlayerInfo, Reply, command_line};
 use super::*;
-use crate::player::{Content, Start};
+use crate::player::{Content, PlayerCmd, Start};
 
 const ONE_PLAYER: &str = r#"[{"name": "Kitchen", "pid": 7, "model": "HEOS 1", "version": "1.583.147", "network": "wifi", "ip": "10.0.0.9"}]"#;
 /// String pids; the second player's ip is the host the tests connect to.
@@ -233,7 +233,7 @@ impl Rig {
 
     fn send(&mut self, cmd: PlayerCmd) -> Result<()> {
         self.emitter.last = None;
-        self.player.handle(cmd, &mut self.emitter)
+        self.player.handle(cmd.for_output(), &mut self.emitter)
     }
 
     fn poll_with(&mut self, state: &'static str) {
@@ -468,7 +468,7 @@ fn a_silent_cli_fails_within_the_io_timeout() {
     player.io_timeout = Duration::from_millis(100);
     let (tx, _events) = mpsc::channel();
     let start = Instant::now();
-    let result = player.handle(PlayerCmd::SetVolume(0.5), &mut Emitter::new(tx));
+    let result = player.handle(SpeakerCmd::SetVolume(0.5), &mut Emitter::new(tx));
     assert!(result.is_err());
     assert!(
         start.elapsed() < Duration::from_secs(1),
@@ -515,20 +515,6 @@ fn a_failed_play_stream_from_a_poll_ends_the_album() {
         rig.fake.last_command(),
         "player/set_play_state?pid=7&state=stop"
     );
-}
-
-#[test]
-fn spotify_is_refused_before_anything_is_sent() {
-    let mut rig = Rig::new(ONE_PLAYER);
-    let cmd = PlayerCmd::Play {
-        item: ITEM,
-        content: crate::player::tests::unsupported(),
-        volume: 0.2,
-    };
-    let err = rig.send(cmd).unwrap_err();
-    assert!(format!("{err:#}").contains("not supported yet"), "{err:#}");
-    assert_eq!(rig.fake.commands(), Vec::<String>::new());
-    assert_eq!(rig.events(), []);
 }
 
 #[test]
