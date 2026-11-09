@@ -178,7 +178,7 @@ fn extension(mime: &str, url: &str) -> Option<&'static str> {
 }
 
 fn url_extension(url: &str) -> Option<&'static str> {
-    let path = url.split(['?', '#']).next().unwrap_or_default();
+    let path = crate::net::without_query(url);
     let last = path.rsplit('/').next().unwrap_or_default();
     let (_, ext) = last.rsplit_once('.')?;
     KNOWN_EXTENSIONS

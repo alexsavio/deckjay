@@ -28,8 +28,8 @@ pub fn http_url(url: &str) -> Option<String> {
     ok.then(|| url.to_string())
 }
 
-/// Feed and station URLs can carry a private token in the query; logs leave
-/// it out.
+/// The URL without its query and fragment: feed and station URLs can carry a
+/// private token there, so logs leave it out, and extensions come from the path.
 pub fn without_query(url: &str) -> &str {
     url.split(['?', '#']).next().unwrap_or_default()
 }
