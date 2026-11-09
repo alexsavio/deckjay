@@ -249,3 +249,18 @@ fn a_timed_out_change_events_request_stops_the_track_change() {
         .count();
     assert_eq!(opened, 2, "the connection that timed out was dropped");
 }
+
+#[test]
+fn a_last_track_that_stops_within_the_margin_of_its_length_has_ended() {
+    let seen = |position, duration: Option<u64>| {
+        Some(NowPlaying {
+            position: Duration::from_secs(position),
+            duration: duration.map(Duration::from_secs),
+        })
+    };
+    assert!(ended(seen(180, Some(180))));
+    assert!(ended(seen(170, Some(180))));
+    assert!(!ended(seen(169, Some(180))), "stopped earlier");
+    assert!(ended(seen(5, None)), "length unknown");
+    assert!(ended(None), "no place seen");
+}
