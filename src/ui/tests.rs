@@ -339,6 +339,23 @@ fn prev_and_next_jump_in_a_story_too() {
 }
 
 #[test]
+fn on_local_audio_prev_and_next_jump_in_an_audiobook() {
+    let (mut ui, cmds, layout) = music_and_book_ui("speaker_type = \"local\"\n");
+    let (prev, next) = (
+        key_of(&ui, &layout, Face::Prev),
+        key_of(&ui, &layout, Face::Next),
+    );
+
+    ui.press(&layout, 9);
+    ui.press(&layout, 0);
+    assert_eq!(ui.faces(&layout)[prev], Face::SeekBack);
+    ui.press(&layout, prev);
+    ui.press(&layout, next);
+
+    assert_eq!(skips_sent(&cmds), [("seek", -10), ("seek", 10)]);
+}
+
+#[test]
 fn on_heos_prev_and_next_skip_chapters_in_an_audiobook() {
     let (mut ui, cmds, layout) = music_and_book_ui("speaker_type = \"heos\"\n");
     let (prev, next) = (
