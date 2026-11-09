@@ -106,6 +106,10 @@ Error codes that matter here (spec §6.2):
   `set_play_state stop` at its end, or the next album. Albums that do not
   report progress never turn events on, so their command lines are the ones
   below.
+- A `fail` reply to `register_for_change_events` keeps the connection and
+  is not asked again on it: the command goes on, the item plays without
+  progress events, and one warning is logged per connection. An I/O error
+  (timeout, reset) drops the connection like any other command's.
 - deckjay never sends `get_queue`, `get_now_playing_media`,
   `play_next`, `play_previous` or `heart_beat`.
 

@@ -2,16 +2,71 @@
 //! events come on the same lines while they are on; the only one kept is
 //! `event/player_now_playing_progress` of the player we follow.
 
+use std::fmt;
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use serde_json::Value;
 
 /// For each read and write, and for the whole wait for one reply.
 pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Why a HEOS command did not succeed. After `Fail` the connection is still
+/// good; after the other two its state is unknown and the caller drops it.
+#[derive(Debug)]
+pub(super) enum HeosError {
+    /// The speaker answered `result: fail`.
+    Fail {
+        command: String,
+        /// `None` when the reply names none or a non-number.
+        eid: Option<u32>,
+        text: String,
+    },
+    /// The socket failed: reset, closed, broken pipe or a timeout.
+    Io(io::Error),
+    /// A reply the program cannot read, no reply in time, or no `result` it knows.
+    Other(anyhow::Error),
+}
+
+impl fmt::Display for HeosError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HeosError::Fail { command, eid, text } => {
+                write!(f, "HEOS {command} failed: {text} (eid ")?;
+                match eid {
+                    Some(eid) => write!(f, "{eid})"),
+                    None => write!(f, "?)"),
+                }
+            }
+            HeosError::Io(err) => err.fmt(f),
+            HeosError::Other(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for HeosError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            HeosError::Io(err) => Some(err),
+            HeosError::Fail { .. } | HeosError::Other(_) => None,
+        }
+    }
+}
+
+impl From<io::Error> for HeosError {
+    fn from(err: io::Error) -> HeosError {
+        HeosError::Io(err)
+    }
+}
+
+impl From<anyhow::Error> for HeosError {
+    fn from(err: anyhow::Error) -> HeosError {
+        HeosError::Other(err)
+    }
+}
 
 pub(super) struct Cli {
     reader: BufReader<TcpStream>,
@@ -45,7 +100,7 @@ impl Cli {
     }
 
     /// Change events on or off, for this connection only.
-    pub(super) fn set_change_events(&mut self, on: bool) -> Result<()> {
+    pub(super) fn set_change_events(&mut self, on: bool) -> Result<(), HeosError> {
         let enable = if on { "on" } else { "off" };
         self.request("system/register_for_change_events", &[("enable", enable)])?;
         Ok(())
@@ -73,18 +128,21 @@ impl Cli {
         raw.into_iter().map(PlayerInfo::try_from).collect()
     }
 
-    fn request(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Reply> {
+    fn request(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Reply, HeosError> {
         self.exchange(command, args)?.checked(command)
     }
 
     /// Sends `command` and reads lines until its reply. An error here leaves
     /// the connection in an unknown state, so the caller must drop it.
-    pub(super) fn exchange(&mut self, command: &str, args: &[(&str, &str)]) -> Result<Reply> {
+    pub(super) fn exchange(
+        &mut self,
+        command: &str,
+        args: &[(&str, &str)],
+    ) -> Result<Reply, HeosError> {
         let line = command_line(command, args);
-        ensure!(
-            !line.trim_end().contains(['\r', '\n']),
-            "a HEOS command cannot contain a line break"
-        );
+        if line.trim_end().contains(['\r', '\n']) {
+            return Err(anyhow!("a HEOS command cannot contain a line break").into());
+        }
         self.reader.get_mut().write_all(line.as_bytes())?;
         let deadline = Instant::now() + self.io_timeout;
         loop {
@@ -104,7 +162,9 @@ impl Cli {
                 }
                 self.note(&reply);
             }
-            ensure!(Instant::now() < deadline, "no HEOS reply to {command}");
+            if Instant::now() >= deadline {
+                return Err(anyhow!("no HEOS reply to {command}").into());
+            }
         }
     }
 }
@@ -180,18 +240,18 @@ impl Reply {
             && !self.heos.message.contains("command under process")
     }
 
-    pub(super) fn checked(self, command: &str) -> Result<Reply> {
+    pub(super) fn checked(self, command: &str) -> Result<Reply, HeosError> {
         match unspaced(&self.heos.result).as_str() {
             "success" => Ok(self),
             "fail" => {
                 let message = self.message();
-                bail!(
-                    "HEOS {command} failed: {} (eid {})",
-                    message.get("text").unwrap_or("no reason given"),
-                    message.get("eid").unwrap_or("?")
-                )
+                Err(HeosError::Fail {
+                    command: command.to_string(),
+                    eid: message.get("eid").and_then(|eid| eid.parse().ok()),
+                    text: message.get("text").unwrap_or("no reason given").to_string(),
+                })
             }
-            other => bail!("HEOS {command}: unexpected result {other:?}"),
+            other => Err(anyhow!("HEOS {command}: unexpected result {other:?}").into()),
         }
     }
 

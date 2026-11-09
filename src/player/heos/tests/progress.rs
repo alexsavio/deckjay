@@ -202,3 +202,50 @@ fn a_station_reports_the_books_latest_place_first() {
     rig.send(station).unwrap();
     assert_eq!(rig.events(), [at(0, 42, Some(180)), Playing(ITEM)]);
 }
+
+#[test]
+fn a_receiver_that_refuses_change_events_keeps_its_connection() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.fake.script().fail = Some("system/register_for_change_events?enable=on");
+    rig.send(book(3)).unwrap();
+    rig.send(PlayerCmd::Next).unwrap();
+    rig.poll_with("play");
+
+    let commands = rig.fake.commands();
+    let count = |name: &str| commands.iter().filter(|c| c.starts_with(name)).count();
+    assert_eq!(
+        count("player/get_players"),
+        1,
+        "one connection, never reopened"
+    );
+    assert_eq!(
+        count("system/register_for_change_events?enable=on"),
+        1,
+        "asked once"
+    );
+    assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
+}
+
+#[test]
+fn a_timed_out_change_events_request_stops_the_track_change() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.player.io_timeout = Duration::from_millis(100);
+    rig.send(book(3)).unwrap();
+    rig.fake.script().mute = Some("system/register_for_change_events?enable=on");
+    assert!(rig.send(PlayerCmd::Next).is_err());
+    assert_eq!(
+        rig.fake.streamed(),
+        [track_url(0)],
+        "no stream goes out after a lost request"
+    );
+
+    rig.fake.script().mute = None;
+    rig.send(PlayerCmd::Next).unwrap();
+    assert_eq!(rig.fake.streamed(), [track_url(0), track_url(1)]);
+    let commands = rig.fake.commands();
+    let opened = commands
+        .iter()
+        .filter(|c| *c == "player/get_players")
+        .count();
+    assert_eq!(opened, 2, "the connection that timed out was dropped");
+}
