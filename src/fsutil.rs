@@ -64,3 +64,30 @@ fn sync_dir(file: &Path) {
     };
     let _ = File::open(dir).and_then(|dir| dir.sync_all());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_saves_of_one_file_use_two_temp_names() {
+        let path = Path::new("/state/state.json");
+        assert_ne!(temp_name(path), temp_name(path));
+        let name = temp_name(path);
+        assert_eq!(name.parent(), path.parent());
+        assert!(name.to_string_lossy().ends_with(".part"));
+    }
+
+    #[test]
+    fn publish_moves_the_part_over_the_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let (part, dest) = (dir.path().join(".ep.part"), dir.path().join("ep"));
+        fs::write(&part, b"new").unwrap();
+        fs::write(&dest, b"old").unwrap();
+
+        publish(&part, &dest).unwrap();
+
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert!(!part.exists());
+    }
+}
