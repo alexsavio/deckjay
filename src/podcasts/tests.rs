@@ -449,6 +449,58 @@ fn the_playing_episodes_picture_is_kept_until_it_stops() {
     run.stop();
 }
 
+/// Pins episode 1, drops it from the shelf at the next (slow) refresh, then
+/// sends `next` as the new pin; its files must go within `GRACE * 2`.
+fn playing_episode_leaves_the_shelf(next: Option<&str>) {
+    let world = World::new();
+    for n in 1..=2 {
+        fs::write(world.files.path().join(format!("pic{n}.png")), png(64, 64)).unwrap();
+    }
+    world.set_feed_with(&[1], true);
+    let slow = Timing {
+        refresh: Duration::from_secs(3),
+        ..timing()
+    };
+    let run = start(world.settings(&world.feed_url(), 1), slow);
+    let before = run.snapshot_until(titles_are(&["Episode 1"]));
+    let episode = before.feeds[0].episodes[0].file.clone();
+    let picture = before.feeds[0].episodes[0].picture.clone().unwrap();
+    run.now_playing
+        .send(NowPlaying(Some(hash_hex("ep-1"))))
+        .unwrap();
+
+    world.set_feed_with(&[1, 2], true);
+    run.snapshot_until(titles_are(&["Episode 2"]));
+    thread::sleep(GRACE * 2);
+    assert!(
+        episode.is_file() && picture.is_file(),
+        "deleted while playing"
+    );
+
+    run.now_playing
+        .send(NowPlaying(next.map(hash_hex)))
+        .unwrap();
+    let deadline = Instant::now() + GRACE * 2;
+    while episode.exists() || picture.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the files waited for the next refresh after the pin moved"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    run.stop();
+}
+
+#[test]
+fn the_files_of_a_playing_episode_that_left_the_shelf_go_when_it_stops() {
+    playing_episode_leaves_the_shelf(None);
+}
+
+#[test]
+fn the_files_of_a_playing_episode_that_left_the_shelf_go_when_another_item_plays() {
+    playing_episode_leaves_the_shelf(Some("ep-2"));
+}
+
 #[test]
 fn the_budget_keeps_the_newest_of_every_feed() {
     let world = World::new();

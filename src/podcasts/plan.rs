@@ -38,7 +38,7 @@ pub struct Plan {
 
 /// `feed` is `None` when the fetch failed; an empty feed counts as failed
 /// too, so a broken feed never empties the shelf. `pinned` is the id of the
-/// episode that is playing: it is never dropped.
+/// episode that is playing: it is not in `drop`, which only feeds the log count.
 pub fn plan(
     feed: Option<&[RemoteEpisode]>,
     on_disk: &[Stored],
@@ -81,14 +81,16 @@ pub fn plan(
     }
 }
 
-/// Names in the feed's folder that stay: the files and pictures of `manifest`
-/// and of `playing`, the loaded episode, which the manifest may no longer list.
-pub fn keep_files(manifest: &Manifest, playing: Option<&Stored>) -> HashSet<String> {
-    let episodes = manifest.episodes.iter().chain(playing);
-    episodes
+/// Names in the feed's folder that the feed wants: the files and pictures of
+/// `manifest`, and the unfinished downloads in `parts`.
+pub fn keep_files(manifest: &Manifest, parts: &HashSet<String>) -> HashSet<String> {
+    manifest
+        .episodes
+        .iter()
         .flat_map(|e| [Some(e.file.clone()), e.picture.clone()])
         .chain([manifest.picture.clone()])
         .flatten()
+        .chain(parts.iter().cloned())
         .collect()
 }
 
@@ -228,6 +230,21 @@ mod tests {
 
     fn names(ns: &[i64]) -> Vec<String> {
         ns.iter().map(|n| format!("id{n}")).collect()
+    }
+
+    #[test]
+    fn the_feed_keeps_its_manifest_and_unfinished_downloads() {
+        let mut episode = stored(1);
+        episode.picture = Some("p-00000001.jpg".into());
+        let manifest = Manifest {
+            title: "Maus".into(),
+            picture: Some("p-00000000.jpg".into()),
+            episodes: vec![episode],
+        };
+        let parts = HashSet::from([".2.mp3.part".to_string()]);
+        let keep = keep_files(&manifest, &parts);
+        let expected = ["1.mp3", "p-00000001.jpg", "p-00000000.jpg", ".2.mp3.part"];
+        assert_eq!(keep, expected.map(String::from).into_iter().collect());
     }
 
     #[test]

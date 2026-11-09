@@ -12,9 +12,10 @@ use crate::podcasts::{FeedSettings, Order, Settings, Snapshot};
 const MAX_SLUG: usize = 64;
 
 impl ItemKey {
-    /// The episode id of a podcast item's key (`<source>/<feed folder>/<episode id>`).
+    /// The last segment of the key: the episode id of a podcast item
+    /// (`<source>/<feed folder>/<episode id>`).
     pub fn episode_id(&self) -> Option<&str> {
-        self.0.rsplit('/').next()
+        self.0.rsplit_once('/').map(|(_, id)| id)
     }
 }
 
