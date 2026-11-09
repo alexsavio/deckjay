@@ -396,6 +396,7 @@ mod tests {
 
     #[test]
     fn a_grid_is_refused_without_overflowing() {
+        assert!(Grid::new(0, 3, 72).is_err());
         assert!(Grid::new(usize::MAX, 2, 72).is_err());
         assert!(Grid::new(2, usize::MAX, 72).is_err());
     }
@@ -404,6 +405,6 @@ mod tests {
     fn the_largest_and_smallest_grids_are_accepted() {
         assert!(Grid::new(2, 2, 16).is_ok());
         assert!(Grid::new(8, 8, 512).is_ok());
-        assert!(Grid::new(8, 9, 512).is_err());
+        assert!(Grid::new(5, 13, 512).is_err());
     }
 }
