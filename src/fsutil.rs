@@ -33,13 +33,16 @@ pub fn publish(part: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Deletes the temp files that `write_atomic` of an earlier process left
-/// beside `path` (a crash or a kill between the write and the rename). A temp
-/// file with this process's id stays: another thread may be writing it.
-/// So a temp left by an earlier process with the same id (pid 1 in Docker)
-/// stays too: the next save to that name fails once with `AlreadyExists`,
-/// its error path removes the temp, and the save after it works. No data is
-/// lost. Best effort; call it before a save, not in a loop.
+/// Deletes the temp files that `write_atomic` of another process left beside
+/// `path` (a crash or a kill between the write and the rename): any pid but
+/// this one, so also those of a second deckjay running on the same folder (its
+/// failed save is tried again later). A temp with this process's pid stays:
+/// another thread may be writing it. So a temp left by an earlier process
+/// with the same pid (pid 1 in Docker, a pid used again after a reboot) stays
+/// too. It goes only when a save of the same file draws the same counter:
+/// that save fails once with `AlreadyExists` and its error path removes the
+/// temp. If that was the save at exit, the changes since the save before it
+/// are lost. Best effort; call it once for a file, before its saves.
 pub fn remove_stale_temps(path: &Path) {
     let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
         return;
