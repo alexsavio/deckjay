@@ -255,6 +255,12 @@ fn flip_from_a_page_past_the_end_goes_to_the_next_shelf() {
 }
 
 #[test]
+#[should_panic(expected = "too many keys")]
+fn a_grid_with_too_many_keys_is_refused() {
+    Layout::new(5, 13, Vec::new());
+}
+
+#[test]
 #[should_panic(expected = "no room for items")]
 fn a_grid_without_room_for_items_is_refused() {
     Layout::new(1, 3, Vec::new());

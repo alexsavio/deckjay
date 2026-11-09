@@ -135,8 +135,28 @@ mod tests {
             Kind::Mk2ModuleScissor,
             Kind::XlV2Module,
         ];
+        // No `_` arm: a model the crate adds breaks the build here, and must be added to `all`.
+        let expected = |kind: Kind| match kind {
+            Kind::Pedal => false,
+            Kind::Original
+            | Kind::OriginalV2
+            | Kind::Mini
+            | Kind::Xl
+            | Kind::XlV2
+            | Kind::Mk2
+            | Kind::Mk2Scissor
+            | Kind::MiniMk2
+            | Kind::MiniDiscord
+            | Kind::Neo
+            | Kind::Plus
+            | Kind::PlusXl
+            | Kind::MiniMk2Module
+            | Kind::Mk2Module
+            | Kind::Mk2ModuleScissor
+            | Kind::XlV2Module => true,
+        };
         for kind in all {
-            assert_eq!(usable(kind), kind != Kind::Pedal, "{kind:?}");
+            assert_eq!(usable(kind), expected(kind), "{kind:?}");
         }
     }
 }
