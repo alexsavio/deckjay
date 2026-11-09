@@ -24,6 +24,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(ui)* Compute key navigation in Layout only ([#26](https://github.com/alexsavio/deckjay/issues/26))
 - *(player)* Hold what is loaded as one value per speaker ([#31](https://github.com/alexsavio/deckjay/issues/31))
 - Ask SpeakerType what a speaker can do ([#32](https://github.com/alexsavio/deckjay/issues/32))
+- *(podcasts)* Take the podcast settings from the config ([#38](https://github.com/alexsavio/deckjay/issues/38))
 
 ### ⚙️ Miscellaneous Tasks
 
