@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::{Color, Look};
+use super::source::{Color, check_named};
 
 /// One `[[source.station]]` table, checked and with its picture resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -23,20 +23,13 @@ pub struct Station {
 #[serde(deny_unknown_fields)]
 pub(super) struct RawRadio {
     pub(super) name: Option<String>,
-    picture: Option<PathBuf>,
-    color: Option<Color>,
+    pub(super) picture: Option<PathBuf>,
+    pub(super) color: Option<Color>,
     #[serde(default)]
     station: Vec<Station>,
 }
 
 impl RawRadio {
-    pub(super) fn look(&self) -> Look {
-        Look {
-            picture: self.picture.clone(),
-            color: self.color,
-        }
-    }
-
     /// The stations with pictures resolved against `base`; `name` is the
     /// source's name, for the error messages.
     pub(super) fn stations(&self, name: &str, base: &Path) -> Result<Vec<Station>> {
@@ -46,19 +39,15 @@ impl RawRadio {
                  [[source.station]]\nname = \"...\"\nurl = \"https://...\""
             );
         }
-        let mut names = std::collections::HashSet::new();
+        check_named(
+            "station",
+            &format!("radio source {name}"),
+            &self.station,
+            |s| &s.name,
+        )?;
         self.station
             .iter()
             .map(|station| {
-                if station.name.trim().is_empty() {
-                    bail!("radio source {name}: a station has an empty name");
-                }
-                if !names.insert(station.name.as_str()) {
-                    bail!(
-                        "radio source {name}: two stations are named {:?}",
-                        station.name
-                    );
-                }
                 if crate::net::http_url(&station.url).is_none() {
                     bail!(
                         "station {}: the url must be one address that starts with https:// or http://",

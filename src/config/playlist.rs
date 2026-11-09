@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::{Color, Look};
+use super::source::{Color, check_named};
 
 /// One `[[source.playlist]]` table, checked, with its URI normalised and its
 /// picture resolved.
@@ -24,20 +24,13 @@ pub struct Playlist {
 #[serde(deny_unknown_fields)]
 pub(super) struct RawSpotify {
     pub(super) name: Option<String>,
-    picture: Option<PathBuf>,
-    color: Option<Color>,
+    pub(super) picture: Option<PathBuf>,
+    pub(super) color: Option<Color>,
     #[serde(default)]
     playlist: Vec<Playlist>,
 }
 
 impl RawSpotify {
-    pub(super) fn look(&self) -> Look {
-        Look {
-            picture: self.picture.clone(),
-            color: self.color,
-        }
-    }
-
     /// `name` is the source's name, for the error messages.
     pub(super) fn playlists(&self, name: &str, base: &Path) -> Result<Vec<Playlist>> {
         if self.playlist.is_empty() {
@@ -46,19 +39,15 @@ impl RawSpotify {
                  [[source.playlist]]\nname = \"...\"\nuri = \"https://open.spotify.com/playlist/...\""
             );
         }
-        let mut names = std::collections::HashSet::new();
+        check_named(
+            "playlist",
+            &format!("spotify source {name}"),
+            &self.playlist,
+            |p| &p.name,
+        )?;
         self.playlist
             .iter()
             .map(|playlist| {
-                if playlist.name.trim().is_empty() {
-                    bail!("spotify source {name}: a playlist has an empty name");
-                }
-                if !names.insert(playlist.name.as_str()) {
-                    bail!(
-                        "spotify source {name}: two playlists are named {:?}",
-                        playlist.name
-                    );
-                }
                 Ok(Playlist {
                     uri: crate::spotify::normalize_playlist(&playlist.uri)?,
                     picture: playlist.picture.as_ref().map(|p| base.join(p)),

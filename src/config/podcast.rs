@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::Look;
+use super::source::check_named;
 
 /// Checked podcast settings of one source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,13 +79,6 @@ fn default_max_episode_mb() -> u64 {
 }
 
 impl RawPodcast {
-    pub(super) fn look(&self) -> Look {
-        Look {
-            picture: self.picture.clone(),
-            color: self.color,
-        }
-    }
-
     /// `name` is the source's name, for the error messages.
     pub(super) fn check(&self, name: &str) -> Result<Podcast> {
         if self.feed.is_empty() {
@@ -106,14 +99,10 @@ impl RawPodcast {
                 "podcast source {name}: max_cache_mb must be at least 10 and max_episode_mb at least 1"
             );
         }
-        let mut names = std::collections::HashSet::new();
+        check_named("feed", &format!("podcast source {name}"), &self.feed, |f| {
+            &f.name
+        })?;
         for feed in &self.feed {
-            if feed.name.trim().is_empty() {
-                bail!("podcast source {name}: a feed has an empty name");
-            }
-            if !names.insert(feed.name.as_str()) {
-                bail!("podcast source {name}: two feeds are named {:?}", feed.name);
-            }
             if crate::net::http_url(&feed.url).is_none() {
                 bail!(
                     "podcast {}: the url must be one address that starts with https:// or http://",
