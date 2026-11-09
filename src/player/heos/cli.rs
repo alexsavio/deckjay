@@ -17,7 +17,9 @@ use crate::player::progress::known_length;
 pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Why a HEOS command did not succeed. After `Fail` the connection is still
-/// good; after the other two its state is unknown and the caller drops it.
+/// good. After `Io`, and after `Other` from [`Cli::exchange`], its state is
+/// unknown and the caller drops it; `Other` from [`Reply::checked`] (a reply
+/// with a `result` the program does not know) leaves it usable.
 #[derive(Debug)]
 pub(super) enum HeosError {
     /// The speaker answered `result: fail`.
