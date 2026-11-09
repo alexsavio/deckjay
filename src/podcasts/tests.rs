@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use super::feed::hash_hex;
 use super::testserver::{FakeServer, Item, closed_port, png, rss};
 use super::*;
-use crate::config::{PodcastFeed, Source, SourceKind};
+use crate::config::PodcastFeed;
 
 const WAIT: Duration = Duration::from_secs(10);
 const GRACE: Duration = Duration::from_millis(500);
@@ -643,9 +643,8 @@ fn feed_title_falls_back_to_the_feed_then_the_slug() {
     assert_eq!(feed_state(dir, &settings, &empty, &[]).title, "maus");
 }
 
-fn source(feeds: &[(&str, FeedOrder)]) -> Source {
-    let mut source = Source::plain("maus", SourceKind::Podcast, Path::new("/cache/maus"));
-    source.podcast = Some(config::Podcast {
+fn podcast(feeds: &[(&str, FeedOrder)]) -> config::Podcast {
+    config::Podcast {
         keep: 5,
         refresh: Duration::from_hours(6),
         max_cache_bytes: 1000,
@@ -659,19 +658,18 @@ fn source(feeds: &[(&str, FeedOrder)]) -> Source {
                 keep: Some(2),
             })
             .collect(),
-    });
-    source
+    }
 }
 
 #[test]
 fn feed_folders_are_slugs_of_the_names_and_unique() {
-    let source = source(&[
+    let podcast = podcast(&[
         ("Die Maus!", FeedOrder::Newest),
         ("die maus", FeedOrder::Oldest),
         ("Kinderhörspiel", FeedOrder::Newest),
         ("???", FeedOrder::Newest),
     ]);
-    let settings = settings(source.podcast.as_ref().unwrap(), &source.path);
+    let settings = settings(&podcast, Path::new("/cache/maus"));
     let slugs: Vec<&str> = settings.feeds.iter().map(|f| f.slug.as_str()).collect();
     assert_eq!(slugs, ["die-maus", "die-maus-2", "kinderh-rspiel", "feed"]);
     assert_eq!(settings.feeds[1].order, FeedOrder::Oldest);
@@ -692,6 +690,17 @@ fn a_long_name_gives_a_slug_the_cache_accepts() {
 
 #[test]
 fn only_podcast_sources_have_settings() {
-    let music = Source::plain("music", SourceKind::Music, Path::new("/m"));
-    assert!(music.podcast.is_none());
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config.toml");
+    fs::write(
+        &file,
+        "speaker_host = \"192.168.1.50\"\n\
+         [[source]]\ntype = \"music\"\npath = \"m\"\n\
+         [[source]]\ntype = \"podcast\"\n\
+         [[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n",
+    )
+    .unwrap();
+    let cfg = config::Config::load(&file).unwrap();
+    let has_settings: Vec<bool> = cfg.sources.iter().map(|s| s.podcast.is_some()).collect();
+    assert_eq!(has_settings, [false, true]);
 }
