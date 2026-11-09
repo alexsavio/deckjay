@@ -167,6 +167,7 @@ fn extension(mime: &str, url: &str) -> Option<&'static str> {
     let ext = match mime.as_str() {
         "audio/mpeg" | "audio/mp3" => "mp3",
         "audio/mp4" | "audio/x-m4a" => "m4a",
+        "audio/x-m4b" => "m4b",
         "audio/aac" => "aac",
         "audio/ogg" => "ogg",
         "audio/opus" => "opus",
@@ -384,6 +385,14 @@ mod tests {
             assert_eq!(extension(mime, url), Some("m4b"), "{mime} {url}");
         }
         assert_eq!(content_type("m4b"), Some("audio/mp4"));
+    }
+
+    #[test]
+    fn an_m4b_type_needs_no_extension_in_the_url() {
+        assert_eq!(
+            extension("audio/x-m4b", "https://x/download?id=7"),
+            Some("m4b")
+        );
     }
 
     #[test]
