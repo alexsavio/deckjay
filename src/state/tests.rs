@@ -225,9 +225,7 @@ fn a_failed_save_leaves_no_temp_file() {
 fn a_temp_file_of_a_dead_process_is_removed_on_open() {
     let dir = tempfile::tempdir().unwrap();
     let stale = dir.path().join(".state.json.99999999.0.part");
-    let ours = dir
-        .path()
-        .join(format!(".state.json.{}.7.part", std::process::id()));
+    let ours = crate::fsutil::temp_name(&dir.path().join("state.json"));
     std::fs::write(&stale, b"half").unwrap();
     std::fs::write(&ours, b"in flight").unwrap();
 

@@ -33,13 +33,17 @@ pub fn publish(part: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Deletes the temp files that `write_atomic` of an earlier process left
-/// beside `path` (a crash or a kill between the write and the rename). A temp
-/// file with this process's id stays: another thread may be writing it.
-/// So a temp left by an earlier process with the same id (pid 1 in Docker)
-/// stays too: the next save to that name fails once with `AlreadyExists`,
-/// its error path removes the temp, and the save after it works. No data is
-/// lost. Best effort; call it before a save, not in a loop.
+/// Deletes the temp files that `write_atomic` of another process left beside
+/// `path` (a crash or a kill between the write and the rename): any pid but
+/// this one, so also those of a second deckjay running on the same folder (a
+/// failed state save is tried again 10 s later, unless it was the save at exit;
+/// a cover is fetched again at the next start). A temp with this process's pid stays:
+/// another thread may be writing it. So a temp left by an earlier process
+/// with the same pid (pid 1 in Docker, a pid used again after a reboot) stays
+/// too. It goes only when a save of the same file draws the same counter:
+/// that save fails once with `AlreadyExists` and its error path removes the
+/// temp. If that was the save at exit, the changes since the save before it
+/// are lost. Best effort; call it once for a file, before its saves.
 pub fn remove_stale_temps(path: &Path) {
     let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
         return;
@@ -126,5 +130,46 @@ mod tests {
 
         assert_eq!(fs::read(&dest).unwrap(), b"new");
         assert!(!part.exists());
+    }
+
+    #[test]
+    fn only_the_temps_of_another_process_beside_the_target_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("x");
+        let own = temp_name(&target);
+        let own_name = own.file_name().unwrap().to_str().unwrap().to_owned();
+        let other_pid = std::process::id().wrapping_add(1);
+        let gone = format!(".x.{other_pid}.0.part");
+        let kept_files = [
+            "x".to_owned(),
+            own_name,
+            ".x.12.part".into(),
+            ".x.1.2.3.part".into(),
+            ".x..part".into(),
+            "..x.1.2.part".into(),
+            ".x.1.2.part.bak".into(),
+            ".x.bad.1.2.part".into(),
+            ".x.+5.1.part".into(),
+            ".x..5.part".into(),
+            ".x.5..part".into(),
+            ".x.5.6".into(),
+            ".y.1.2.part".into(),
+        ];
+        for name in kept_files.iter().chain([&gone]) {
+            fs::write(dir.path().join(name), b"data").unwrap();
+        }
+        fs::create_dir(dir.path().join(".x.5.6.part")).unwrap();
+
+        remove_stale_temps(&target);
+
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        let mut want: Vec<String> = kept_files.to_vec();
+        want.push(".x.5.6.part".into());
+        want.sort();
+        assert_eq!(left, want);
     }
 }

@@ -31,6 +31,9 @@ pub fn fetch_missing(state_dir: &Path, folder: &Path, uris: &[String], endpoints
     if missing.is_empty() {
         return;
     }
+    for uri in &missing {
+        crate::fsutil::remove_stale_temps(&path(folder, uri));
+    }
     let mut client = match Client::load(state_dir, endpoints) {
         Ok(client) => client,
         Err(err) => {
@@ -73,7 +76,6 @@ fn fetch(client: &mut Client, folder: &Path, uri: &str) -> Result<()> {
         .to_rgb8();
     let target = path(folder, uri);
     std::fs::create_dir_all(folder)?;
-    crate::fsutil::remove_stale_temps(&target);
     let mut jpeg = Vec::new();
     picture.write_to(
         &mut std::io::Cursor::new(&mut jpeg),
@@ -243,7 +245,7 @@ mod tests {
         let folder = dir.path().join("covers");
         std::fs::create_dir(&folder).unwrap();
         let stale = folder.join(".abc.jpg.99999999.0.part");
-        let ours = folder.join(format!(".abc.jpg.{}.7.part", std::process::id()));
+        let ours = crate::fsutil::temp_name(&path(&folder, "spotify:playlist:abc"));
         std::fs::write(&stale, b"half").unwrap();
         std::fs::write(&ours, b"in flight").unwrap();
 
@@ -257,6 +259,24 @@ mod tests {
         assert!(path(&folder, "spotify:playlist:abc").is_file());
         assert!(!stale.exists(), "the temp of an earlier process is left");
         assert!(ours.exists(), "the temp of this process must stay");
+    }
+
+    #[test]
+    fn a_stale_temp_is_removed_even_when_the_fetch_cannot_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("covers");
+        std::fs::create_dir(&folder).unwrap();
+        let stale = folder.join(".abc.jpg.99999999.0.part");
+        std::fs::write(&stale, b"half").unwrap();
+
+        fetch_missing(
+            dir.path(),
+            &folder,
+            &["spotify:playlist:abc".to_string()],
+            Endpoints::default(),
+        );
+
+        assert!(!stale.exists(), "no login: the stale temp is left");
     }
 
     #[test]
