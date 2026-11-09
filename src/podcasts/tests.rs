@@ -701,7 +701,11 @@ fn only_podcast_sources_have_settings() {
     )
     .unwrap();
     let cfg = config::Config::load(&file).unwrap();
-    let has_settings: Vec<bool> = cfg.sources.iter().map(|s| s.podcast.is_some()).collect();
+    let has_settings: Vec<bool> = cfg
+        .sources
+        .iter()
+        .map(|s| matches!(s.body, config::SourceBody::Podcast { .. }))
+        .collect();
     assert_eq!(has_settings, [false, true]);
 }
 

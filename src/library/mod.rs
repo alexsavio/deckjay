@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-use crate::config::{Color, Source, SourceKind};
+use crate::config::{Color, Playlist, Source, SourceBody, Station};
 
 /// File extension and content type of the formats the Chromecast default
 /// receiver can play. The library scan and the podcast feed read this one table.
@@ -46,15 +46,7 @@ pub struct Track {
     pub content_type: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Kind {
-    Music,
-    Audiobook,
-    Story,
-    Radio,
-    Podcast,
-    Spotify,
-}
+pub use crate::config::SourceKind as Kind;
 
 /// Names an item while the program runs: its index in [`Library`], never
 /// reused. Commands, events and key faces carry it; it changes across
@@ -135,32 +127,6 @@ pub struct Library {
     shelves: Vec<Shelf>,
 }
 
-impl Kind {
-    /// Whether a press plays on from where the item stopped.
-    pub fn resumes(self) -> bool {
-        matches!(self, Kind::Audiobook | Kind::Podcast)
-    }
-
-    /// Whether ⏮ and ⏭ jump in the item instead of skipping tracks: the
-    /// spoken kinds, where a track is a long chapter.
-    pub fn seeks(self) -> bool {
-        matches!(self, Kind::Audiobook | Kind::Podcast | Kind::Story)
-    }
-}
-
-impl From<SourceKind> for Kind {
-    fn from(kind: SourceKind) -> Kind {
-        match kind {
-            SourceKind::Music => Kind::Music,
-            SourceKind::Audiobook => Kind::Audiobook,
-            SourceKind::Story => Kind::Story,
-            SourceKind::Podcast => Kind::Podcast,
-            SourceKind::Radio => Kind::Radio,
-            SourceKind::Spotify => Kind::Spotify,
-        }
-    }
-}
-
 impl Library {
     /// One shelf per source, in config order. A source whose folder cannot
     /// be read gets an empty shelf and a warning, so the others still play.
@@ -171,21 +137,24 @@ impl Library {
             shelves: Vec::new(),
         };
         for source in sources {
-            let items = if let Some(config) = &source.podcast {
-                podcast::items(source, &crate::podcasts::load_cached(config, &source.path))
-            } else if source.kind == SourceKind::Radio {
-                stations(source)
-            } else if source.kind == SourceKind::Spotify {
-                playlists(source)
-            } else {
-                scan::scan(source).unwrap_or_else(|err| {
-                    tracing::warn!("{err:#}");
-                    Vec::new()
-                })
+            let items = match &source.body {
+                SourceBody::Podcast { settings, cache } => {
+                    podcast::items(source, &crate::podcasts::load_cached(settings, cache))
+                }
+                SourceBody::Radio(list) => stations(&source.name, list),
+                SourceBody::Spotify { covers, playlists } => {
+                    self::playlists(&source.name, covers, playlists)
+                }
+                SourceBody::Folder(folder) => {
+                    scan::scan(&source.name, folder).unwrap_or_else(|err| {
+                        tracing::warn!("{err:#}");
+                        Vec::new()
+                    })
+                }
             };
             let shelf = Shelf {
                 name: source.name.clone(),
-                kind: source.kind.into(),
+                kind: source.kind(),
                 items: Vec::new(),
                 picture: source.look.picture.clone(),
                 color: source.look.color,
@@ -291,13 +260,12 @@ impl Library {
     }
 }
 
-fn stations(source: &Source) -> Vec<Item> {
-    source
-        .stations
+fn stations(source: &str, stations: &[Station]) -> Vec<Item> {
+    stations
         .iter()
         .map(|station| Item {
             kind: Kind::Radio,
-            key: ItemKey(format!("{}/{}", source.name, station.name)),
+            key: ItemKey(format!("{source}/{}", station.name)),
             name: station.name.clone(),
             media: Media::Stream {
                 url: station.url.clone(),
@@ -312,18 +280,17 @@ fn stations(source: &Source) -> Vec<Item> {
 
 /// One item per playlist of a Spotify source, with the covers kept in its
 /// folder.
-fn playlists(source: &Source) -> Vec<Item> {
-    source
-        .playlists
+fn playlists(source: &str, covers: &Path, playlists: &[Playlist]) -> Vec<Item> {
+    playlists
         .iter()
         .map(|playlist| Item {
             kind: Kind::Spotify,
-            key: ItemKey(format!("{}/{}", source.name, playlist.name)),
+            key: ItemKey(format!("{source}/{}", playlist.name)),
             name: playlist.name.clone(),
             media: Media::Spotify {
                 uri: playlist.uri.clone(),
             },
-            cover: Some(crate::spotify::covers::path(&source.path, &playlist.uri))
+            cover: Some(crate::spotify::covers::path(covers, &playlist.uri))
                 .filter(|cover| cover.is_file()),
             cover_rel: None,
             picture: playlist.picture.clone(),
@@ -354,6 +321,7 @@ pub fn url_for(base: &str, rel_path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SourceKind;
 
     #[test]
     fn encodes_each_segment() {
@@ -452,14 +420,13 @@ mod tests {
 
     #[test]
     fn every_station_of_a_radio_source_is_an_item() {
-        use crate::config::Station;
         let mut radio = Source::plain("radio", SourceKind::Radio, Path::new(""));
-        radio.stations = vec![Station {
+        radio.body = SourceBody::Radio(vec![Station {
             name: "Kinder".into(),
             url: "https://example.org/kinder.mp3".into(),
             picture: Some("/pics/kinder.png".into()),
             color: None,
-        }];
+        }]);
 
         let library = Library::scan(&[radio]);
 
@@ -481,14 +448,16 @@ mod tests {
 
     #[test]
     fn every_playlist_of_a_spotify_source_is_an_item() {
-        use crate::config::Playlist;
         let mut spotify = Source::plain("spotify", SourceKind::Spotify, Path::new(""));
-        spotify.playlists = vec![Playlist {
-            name: "Bedtime".into(),
-            uri: "spotify:playlist:abc".into(),
-            picture: None,
-            color: None,
-        }];
+        spotify.body = SourceBody::Spotify {
+            covers: PathBuf::new(),
+            playlists: vec![Playlist {
+                name: "Bedtime".into(),
+                uri: "spotify:playlist:abc".into(),
+                picture: None,
+                color: None,
+            }],
+        };
 
         let library = Library::scan(&[spotify]);
 
@@ -498,5 +467,37 @@ mod tests {
             (Kind::Spotify, "spotify/Bedtime")
         );
         assert!(matches!(&item.media, Media::Spotify { uri } if uri == "spotify:playlist:abc"));
+    }
+
+    #[test]
+    fn a_playlist_cover_is_read_from_the_covers_folder_of_its_source() {
+        let covers = tempfile::tempdir().unwrap();
+        touch(&covers.path().join("abc.jpg"));
+        let mut spotify = Source::plain("spotify", SourceKind::Spotify, covers.path());
+        spotify.body = SourceBody::Spotify {
+            covers: covers.path().to_path_buf(),
+            playlists: vec![
+                Playlist {
+                    name: "With".into(),
+                    uri: "spotify:playlist:abc".into(),
+                    picture: None,
+                    color: None,
+                },
+                Playlist {
+                    name: "Without".into(),
+                    uri: "spotify:playlist:def".into(),
+                    picture: None,
+                    color: None,
+                },
+            ],
+        };
+
+        let library = Library::scan(&[spotify]);
+
+        assert_eq!(
+            library.item(ItemId(0)).cover,
+            Some(covers.path().join("abc.jpg"))
+        );
+        assert_eq!(library.item(ItemId(1)).cover, None);
     }
 }

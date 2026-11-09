@@ -10,32 +10,71 @@ use super::playlist::{Playlist, RawSpotify};
 use super::podcast::{Podcast, RawPodcast};
 use super::radio::{RawRadio, Station};
 
-/// One `[[source]]` table, checked and with its path resolved.
+/// One `[[source]]` table, checked and with its paths resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source {
     /// Names the source in item keys and music URLs: letters, digits, `-`
     /// and `_` only. Defaults to the type (`music`, `audiobook`, `story`).
     pub name: String,
-    pub kind: SourceKind,
-    /// The folder to scan; for a podcast source its cache folder, for a
-    /// Spotify source the folder of its playlist covers; empty for a radio
-    /// source. Relative paths are resolved against the folder
-    /// the config file lives in.
-    pub path: PathBuf,
     /// How the shelf key looks.
     pub look: Look,
+    pub body: SourceBody,
+}
+
+/// What a source holds, by type: each variant has only the fields its type
+/// uses. Relative paths are resolved against the folder the config file
+/// lives in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceBody {
+    /// `type = "music"`, `"audiobook"` or `"story"`.
+    Folder(Folder),
+    /// `type = "podcast"`.
+    Podcast {
+        settings: Podcast,
+        /// The folder the episodes are downloaded into.
+        cache: PathBuf,
+    },
+    /// `type = "radio"`.
+    Radio(Vec<Station>),
+    /// `type = "spotify"`.
+    Spotify {
+        /// The folder of the playlist covers.
+        covers: PathBuf,
+        playlists: Vec<Playlist>,
+    },
+}
+
+/// The body of a music, audiobook or story source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Folder {
+    pub kind: FolderKind,
+    /// The folder to scan.
+    pub path: PathBuf,
     /// How single items look, by their name in the folder (with or without
     /// the file extension).
     pub items: BTreeMap<String, Look>,
-    /// For `type = "podcast"`.
-    pub podcast: Option<Podcast>,
-    /// For `type = "radio"`.
-    pub stations: Vec<Station>,
-    /// For `type = "spotify"`.
-    pub playlists: Vec<Playlist>,
     /// The whole folder is one key, instead of one key per folder or file
     /// in it.
     pub one_key: bool,
+}
+
+/// The kinds of source that scan a folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderKind {
+    Music,
+    Audiobook,
+    /// Stories and sound effects.
+    Story,
+}
+
+impl From<FolderKind> for SourceKind {
+    fn from(kind: FolderKind) -> SourceKind {
+        match kind {
+            FolderKind::Music => SourceKind::Music,
+            FolderKind::Audiobook => SourceKind::Audiobook,
+            FolderKind::Story => SourceKind::Story,
+        }
+    }
 }
 
 /// A picture or a colour for a key; pictures are resolved like `path`.
@@ -102,30 +141,66 @@ impl TryFrom<String> for Color {
 }
 
 impl Source {
-    /// Whether the web server serves files from `path`: not for radio and
-    /// Spotify, which have no folder.
-    pub fn serves_files(&self) -> bool {
-        !matches!(self.kind, SourceKind::Radio | SourceKind::Spotify)
+    pub fn kind(&self) -> SourceKind {
+        match &self.body {
+            SourceBody::Folder(folder) => folder.kind.into(),
+            SourceBody::Podcast { .. } => SourceKind::Podcast,
+            SourceBody::Radio(_) => SourceKind::Radio,
+            SourceBody::Spotify { .. } => SourceKind::Spotify,
+        }
     }
 
-    /// A source with no pictures or colours.
+    /// The folder the web server serves files from: not for radio and
+    /// Spotify, which serve no files.
+    pub fn served_root(&self) -> Option<&Path> {
+        match &self.body {
+            SourceBody::Folder(folder) => Some(&folder.path),
+            SourceBody::Podcast { cache, .. } => Some(cache),
+            SourceBody::Radio(_) | SourceBody::Spotify { .. } => None,
+        }
+    }
+
+    /// A source with no pictures or colours and nothing in it.
     #[cfg(test)]
     pub fn plain(name: &str, kind: SourceKind, path: &Path) -> Source {
+        let folder = |kind| {
+            SourceBody::Folder(Folder {
+                kind,
+                path: path.into(),
+                items: BTreeMap::new(),
+                one_key: false,
+            })
+        };
+        let body = match kind {
+            SourceKind::Music => folder(FolderKind::Music),
+            SourceKind::Audiobook => folder(FolderKind::Audiobook),
+            SourceKind::Story => folder(FolderKind::Story),
+            SourceKind::Podcast => SourceBody::Podcast {
+                settings: Podcast {
+                    keep: 5,
+                    refresh: std::time::Duration::from_hours(6),
+                    max_cache_bytes: 0,
+                    max_episode_bytes: 0,
+                    feeds: Vec::new(),
+                },
+                cache: path.into(),
+            },
+            SourceKind::Radio => SourceBody::Radio(Vec::new()),
+            SourceKind::Spotify => SourceBody::Spotify {
+                covers: path.into(),
+                playlists: Vec::new(),
+            },
+        };
         Source {
             name: name.into(),
-            kind,
-            path: path.into(),
             look: Look::default(),
-            items: BTreeMap::new(),
-            podcast: None,
-            stations: Vec::new(),
-            playlists: Vec::new(),
-            one_key: false,
+            body,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a source plays, also the kind of its shelf and items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SourceKind {
     Music,
     Audiobook,
@@ -137,6 +212,20 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
+    /// Whether a press plays on from where the item stopped.
+    pub fn resumes(self) -> bool {
+        matches!(self, SourceKind::Audiobook | SourceKind::Podcast)
+    }
+
+    /// Whether ⏮ and ⏭ jump in the item instead of skipping tracks: the
+    /// spoken kinds, where a track is a long chapter.
+    pub fn seeks(self) -> bool {
+        matches!(
+            self,
+            SourceKind::Audiobook | SourceKind::Podcast | SourceKind::Story
+        )
+    }
+
     fn name(self) -> &'static str {
         match self {
             SourceKind::Music => "music",
@@ -153,25 +242,36 @@ impl SourceKind {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum RawSource {
-    Music(Folder),
-    Audiobook(Folder),
-    Story(Folder),
+    Music(raw::Folder),
+    Audiobook(raw::Folder),
+    Story(raw::Folder),
     Podcast(RawPodcast),
     Radio(RawRadio),
     Spotify(RawSpotify),
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct Folder {
-    name: Option<String>,
-    path: PathBuf,
-    picture: Option<PathBuf>,
-    color: Option<Color>,
-    #[serde(default)]
-    item: BTreeMap<String, Look>,
-    #[serde(default)]
-    one_key: bool,
+/// Named `Folder` so that serde's error text for a malformed source still
+/// says `struct Folder`.
+mod raw {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use serde::Deserialize;
+
+    use super::{Color, Look};
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(in crate::config) struct Folder {
+        pub(super) name: Option<String>,
+        pub(super) path: PathBuf,
+        pub(super) picture: Option<PathBuf>,
+        pub(super) color: Option<Color>,
+        #[serde(default)]
+        pub(super) item: BTreeMap<String, Look>,
+        #[serde(default)]
+        pub(super) one_key: bool,
+    }
 }
 
 /// Checks names and resolves relative paths against `base`; podcast caches
@@ -188,16 +288,15 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
     raw.into_iter()
         .map(|raw| {
             let (kind, folder) = match raw {
-                RawSource::Music(f) => (SourceKind::Music, f),
-                RawSource::Audiobook(f) => (SourceKind::Audiobook, f),
-                RawSource::Story(f) => (SourceKind::Story, f),
+                RawSource::Music(f) => (FolderKind::Music, f),
+                RawSource::Audiobook(f) => (FolderKind::Audiobook, f),
+                RawSource::Story(f) => (FolderKind::Story, f),
                 RawSource::Podcast(p) => {
                     let source = podcast_source(&p, base, state_dir, &mut names)?;
-                    if !caches.insert(source.path.clone()) {
-                        bail!(
-                            "two podcast sources use the cache_dir {}",
-                            source.path.display()
-                        );
+                    if let SourceBody::Podcast { cache, .. } = &source.body
+                        && !caches.insert(cache.clone())
+                    {
+                        bail!("two podcast sources use the cache_dir {}", cache.display());
                     }
                     return Ok(source);
                 }
@@ -208,15 +307,9 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                         .unwrap_or_else(|| SourceKind::Radio.name().into());
                     check_unique(&name, &mut names)?;
                     return Ok(Source {
-                        stations: r.stations(&name, base)?,
+                        body: SourceBody::Radio(r.stations(&name, base)?),
                         look: look(r.picture.clone(), r.color).resolve(base),
                         name,
-                        kind: SourceKind::Radio,
-                        path: PathBuf::new(),
-                        items: BTreeMap::new(),
-                        podcast: None,
-                        playlists: Vec::new(),
-                        one_key: false,
                     });
                 }
                 RawSource::Spotify(s) => {
@@ -226,34 +319,32 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                         .unwrap_or_else(|| SourceKind::Spotify.name().into());
                     check_unique(&name, &mut names)?;
                     return Ok(Source {
-                        playlists: s.playlists(&name, base)?,
-                        one_key: false,
+                        body: SourceBody::Spotify {
+                            playlists: s.playlists(&name, base)?,
+                            covers: state_dir.join("spotify-covers"),
+                        },
                         look: look(s.picture.clone(), s.color).resolve(base),
                         name,
-                        kind: SourceKind::Spotify,
-                        path: state_dir.join("spotify-covers"),
-                        items: BTreeMap::new(),
-                        podcast: None,
-                        stations: Vec::new(),
                     });
                 }
             };
-            let name = folder.name.unwrap_or_else(|| kind.name().into());
+            let name = folder
+                .name
+                .unwrap_or_else(|| SourceKind::from(kind).name().into());
             check_unique(&name, &mut names)?;
             Ok(Source {
                 name,
-                kind,
-                path: base.join(folder.path),
                 look: look(folder.picture, folder.color).resolve(base),
-                items: folder
-                    .item
-                    .into_iter()
-                    .map(|(name, look)| (name, look.resolve(base)))
-                    .collect(),
-                podcast: None,
-                stations: Vec::new(),
-                playlists: Vec::new(),
-                one_key: folder.one_key,
+                body: SourceBody::Folder(Folder {
+                    kind,
+                    path: base.join(folder.path),
+                    items: folder
+                        .item
+                        .into_iter()
+                        .map(|(name, look)| (name, look.resolve(base)))
+                        .collect(),
+                    one_key: folder.one_key,
+                }),
             })
         })
         .collect()
@@ -270,20 +361,17 @@ fn podcast_source(
         .clone()
         .unwrap_or_else(|| SourceKind::Podcast.name().into());
     check_unique(&name, names)?;
-    let path = match &raw.cache_dir {
+    let cache = match &raw.cache_dir {
         Some(dir) => base.join(dir),
         None => state_dir.join("podcasts").join(&name),
     };
     Ok(Source {
-        podcast: Some(raw.check(&name)?),
+        body: SourceBody::Podcast {
+            settings: raw.check(&name)?,
+            cache,
+        },
         look: look(raw.picture.clone(), raw.color).resolve(base),
         name,
-        kind: SourceKind::Podcast,
-        path,
-        items: BTreeMap::new(),
-        stations: Vec::new(),
-        playlists: Vec::new(),
-        one_key: false,
     })
 }
 
@@ -341,36 +429,33 @@ mod tests {
             [
                 Source {
                     name: "music".into(),
-                    kind: SourceKind::Music,
-                    path: "/srv/deck/music".into(),
                     look: Look::default(),
-                    items: BTreeMap::new(),
-                    podcast: None,
-                    stations: Vec::new(),
-                    playlists: Vec::new(),
-                    one_key: false,
+                    body: SourceBody::Folder(Folder {
+                        kind: FolderKind::Music,
+                        path: "/srv/deck/music".into(),
+                        items: BTreeMap::new(),
+                        one_key: false,
+                    }),
                 },
                 Source {
                     name: "books".into(),
-                    kind: SourceKind::Audiobook,
-                    path: "/mnt/usb/books".into(),
                     look: Look::default(),
-                    items: BTreeMap::new(),
-                    podcast: None,
-                    stations: Vec::new(),
-                    playlists: Vec::new(),
-                    one_key: false,
+                    body: SourceBody::Folder(Folder {
+                        kind: FolderKind::Audiobook,
+                        path: "/mnt/usb/books".into(),
+                        items: BTreeMap::new(),
+                        one_key: false,
+                    }),
                 },
                 Source {
                     name: "story".into(),
-                    kind: SourceKind::Story,
-                    path: "/srv/deck/sounds".into(),
                     look: Look::default(),
-                    items: BTreeMap::new(),
-                    podcast: None,
-                    stations: Vec::new(),
-                    playlists: Vec::new(),
-                    one_key: false,
+                    body: SourceBody::Folder(Folder {
+                        kind: FolderKind::Story,
+                        path: "/srv/deck/sounds".into(),
+                        items: BTreeMap::new(),
+                        one_key: false,
+                    }),
                 },
             ]
         );
@@ -429,6 +514,9 @@ mod tests {
         )
         .unwrap();
         let music = &got[0];
+        let SourceBody::Folder(folder) = &music.body else {
+            panic!("not a folder: {music:?}");
+        };
         assert_eq!(
             music.look,
             Look {
@@ -437,10 +525,10 @@ mod tests {
             }
         );
         assert_eq!(
-            music.items["01 Animal Songs"].picture.as_deref(),
+            folder.items["01 Animal Songs"].picture.as_deref(),
             Some(Path::new("/pics/animals.png"))
         );
-        assert_eq!(music.items["Rain.mp3"].color, Some(Color([0, 0, 0])));
+        assert_eq!(folder.items["Rain.mp3"].color, Some(Color([0, 0, 0])));
     }
 
     #[test]
@@ -470,15 +558,18 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(
-            (got[0].name.as_str(), got[0].kind, got[0].path.as_path()),
+            (got[0].name.as_str(), got[0].kind(), got[0].served_root()),
             (
                 "podcast",
                 SourceKind::Podcast,
-                Path::new("/srv/deck/state/podcasts/podcast")
+                Some(Path::new("/srv/deck/state/podcasts/podcast"))
             )
         );
-        assert_eq!(got[0].podcast.as_ref().unwrap().feeds[0].name, "Maus");
-        assert_eq!(got[1].path, Path::new("/mnt/usb/news"));
+        let SourceBody::Podcast { settings, .. } = &got[0].body else {
+            panic!("not a podcast: {:?}", got[0]);
+        };
+        assert_eq!(settings.feeds[0].name, "Maus");
+        assert_eq!(got[1].served_root(), Some(Path::new("/mnt/usb/news")));
     }
 
     #[test]
@@ -499,7 +590,109 @@ mod tests {
              [[source]]\ntype = \"story\"\npath = \"s\"\n",
         )
         .unwrap();
-        assert!(got[0].one_key);
-        assert!(!got[1].one_key);
+        let one_key = |source: &Source| match &source.body {
+            SourceBody::Folder(folder) => folder.one_key,
+            body => panic!("not a folder: {body:?}"),
+        };
+        assert!(one_key(&got[0]));
+        assert!(!one_key(&got[1]));
+    }
+
+    #[test]
+    fn every_source_type_resolves_to_its_fields() {
+        let got = sources(
+            "[[source]]\ntype = \"music\"\npath = \"band\"\none_key = true\n\
+             [source.item.\"A\"]\ncolor = \"#000000\"\n\
+             [[source]]\ntype = \"radio\"\npicture = \"r.png\"\n\
+             [[source.station]]\nname = \"Kinder\"\nurl = \"https://example.org/k.mp3\"\n\
+             [[source]]\ntype = \"spotify\"\ncolor = \"#ffffff\"\n\
+             [[source.playlist]]\nname = \"Bedtime\"\nuri = \"spotify:playlist:abc\"\n\
+             [[source]]\ntype = \"podcast\"\n\
+             [[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n",
+        )
+        .unwrap();
+        let SourceBody::Podcast { settings, .. } = got[3].body.clone() else {
+            panic!("not a podcast: {:?}", got[3]);
+        };
+        assert_eq!(
+            got,
+            [
+                Source {
+                    name: "music".into(),
+                    look: Look::default(),
+                    body: SourceBody::Folder(Folder {
+                        kind: FolderKind::Music,
+                        path: "/srv/deck/band".into(),
+                        items: BTreeMap::from([(
+                            "A".to_owned(),
+                            Look {
+                                picture: None,
+                                color: Some(Color([0, 0, 0])),
+                            },
+                        )]),
+                        one_key: true,
+                    }),
+                },
+                Source {
+                    name: "radio".into(),
+                    look: Look {
+                        picture: Some("/srv/deck/r.png".into()),
+                        color: None,
+                    },
+                    body: SourceBody::Radio(vec![Station {
+                        name: "Kinder".into(),
+                        url: "https://example.org/k.mp3".into(),
+                        picture: None,
+                        color: None,
+                    }]),
+                },
+                Source {
+                    name: "spotify".into(),
+                    look: Look {
+                        picture: None,
+                        color: Some(Color([255, 255, 255])),
+                    },
+                    body: SourceBody::Spotify {
+                        covers: "/srv/deck/state/spotify-covers".into(),
+                        playlists: vec![Playlist {
+                            name: "Bedtime".into(),
+                            uri: "spotify:playlist:abc".into(),
+                            picture: None,
+                            color: None,
+                        }],
+                    },
+                },
+                Source {
+                    name: "podcast".into(),
+                    look: Look::default(),
+                    body: SourceBody::Podcast {
+                        settings,
+                        cache: "/srv/deck/state/podcasts/podcast".into(),
+                    },
+                },
+            ]
+        );
+        let serves: Vec<bool> = got.iter().map(|s| s.served_root().is_some()).collect();
+        assert_eq!(serves, [true, false, false, true]);
+    }
+
+    #[test]
+    fn only_audiobooks_and_podcasts_resume_and_the_spoken_kinds_seek() {
+        use SourceKind::*;
+        let kinds = [Music, Audiobook, Story, Podcast, Radio, Spotify];
+        let resumes: Vec<bool> = kinds.iter().map(|k| k.resumes()).collect();
+        let seeks: Vec<bool> = kinds.iter().map(|k| k.seeks()).collect();
+        assert_eq!(resumes, [false, true, false, true, false, false]);
+        assert_eq!(seeks, [false, true, true, true, false, false]);
+    }
+
+    #[test]
+    fn a_source_written_as_a_list_names_the_folder_struct_in_the_error() {
+        let err = sources("source = [[\"music\"]]\n").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expected struct Folder with 6 elements"),
+            "{err:#}"
+        );
     }
 }

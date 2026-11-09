@@ -48,7 +48,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Command, RunArgs};
-use crate::config::{Config, SpeakerType};
+use crate::config::{Config, SourceBody, SpeakerType};
 use crate::deck::Deck;
 use crate::library::Library;
 use crate::net::BaseUrl;
@@ -224,11 +224,11 @@ fn scan_sources(cfg: &Config) -> Library {
     let library = Library::scan(&cfg.sources);
     for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
         let count = shelf.items.len();
-        if source.serves_files() {
+        if let Some(root) = source.served_root() {
             info!(
                 "found {count} items in {} ({})",
                 source.name,
-                source.path.display()
+                root.display()
             );
         } else {
             info!("found {count} items in {}", source.name);
@@ -244,13 +244,15 @@ fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThrea
         .iter()
         .enumerate()
         .filter_map(|(shelf, source)| {
-            let podcast = source.podcast.as_ref()?;
+            let SourceBody::Podcast { settings, cache } = &source.body else {
+                return None;
+            };
             let (snapshot_tx, snapshots) = mpsc::channel();
             let files = server::PodcastFiles {
                 source: source.name.clone(),
                 served: served.clone(),
             };
-            match podcasts::start(podcast, &source.path, Box::new(files), snapshot_tx) {
+            match podcasts::start(settings, cache, Box::new(files), snapshot_tx) {
                 Ok(now_playing) => Some(ui::PodcastThread::new(
                     shelf,
                     source.clone(),
@@ -270,8 +272,7 @@ fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
     let roots = cfg
         .sources
         .iter()
-        .filter(|s| s.serves_files())
-        .map(|s| (s.name.clone(), s.path.clone()))
+        .filter_map(|s| Some((s.name.clone(), s.served_root()?.to_path_buf())))
         .collect();
     server::spawn(roots, cfg.http_port, served)
 }
@@ -339,9 +340,15 @@ fn output(cfg: &Config) -> player::Output {
 
 /// In the background: new covers show from the next start.
 fn fetch_playlist_covers(cfg: &Config) {
-    for source in cfg.sources.iter().filter(|s| !s.playlists.is_empty()) {
-        let uris: Vec<String> = source.playlists.iter().map(|p| p.uri.clone()).collect();
-        let (state_dir, folder) = (cfg.state_dir.clone(), source.path.clone());
+    for source in &cfg.sources {
+        let SourceBody::Spotify { covers, playlists } = &source.body else {
+            continue;
+        };
+        if playlists.is_empty() {
+            continue;
+        }
+        let uris: Vec<String> = playlists.iter().map(|p| p.uri.clone()).collect();
+        let (state_dir, folder) = (cfg.state_dir.clone(), covers.clone());
         let fetch = move || {
             spotify::covers::fetch_missing(
                 &state_dir,
@@ -437,13 +444,17 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
     let mut base_url = base_url(&cfg);
     let mut report = Report::default();
     for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
-        if source.serves_files() {
-            let (name, kind, path) = (&source.name, source.kind, source.path.display());
+        if let Some(root) = source.served_root() {
+            let (name, kind, path) = (&source.name, source.kind(), root.display());
             println!("Source {name} ({kind:?}) in {path}:");
         } else {
-            println!("Source {} ({:?}):", source.name, source.kind);
+            println!("Source {} ({:?}):", source.name, source.kind());
         }
-        if let Some(podcast) = &source.podcast {
+        let podcast = match &source.body {
+            SourceBody::Podcast { settings, .. } => Some(settings),
+            _ => None,
+        };
+        if let Some(podcast) = podcast {
             for feed in &podcast.feeds {
                 match podcasts::check_feed(&feed.url) {
                     Ok((title, episodes)) => {
@@ -456,7 +467,7 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
             }
         }
         if shelf.items.is_empty() {
-            if source.podcast.is_some() {
+            if podcast.is_some() {
                 // The episodes come with the first refresh, after the start.
                 report.warning("  nothing to play yet: the episodes come with the first refresh");
             } else {

@@ -19,7 +19,7 @@ impl ItemKey {
 /// across refreshes.
 pub fn items(source: &Source, snapshot: &Snapshot) -> Vec<Item> {
     let served = |path: &Path| -> Option<PathBuf> {
-        Some(Path::new(&source.name).join(path.strip_prefix(&source.path).ok()?))
+        Some(Path::new(&source.name).join(path.strip_prefix(source.served_root()?).ok()?))
     };
     snapshot
         .feeds
