@@ -11,6 +11,8 @@ use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::player::progress::known_length;
+
 /// For each read and write, and for the whole wait for one reply.
 pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -189,7 +191,7 @@ impl Cli {
         if let Some(position) = millis("cur_pos") {
             self.progress = Some(NowPlaying {
                 position,
-                duration: millis("duration").filter(|d| !d.is_zero()),
+                duration: millis("duration").and_then(known_length),
             });
         }
     }

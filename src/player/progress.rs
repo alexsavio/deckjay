@@ -16,6 +16,17 @@ pub(super) const INTERVAL: Duration = Duration::from_secs(5);
 /// seen can be that far from the end.
 pub(super) const END_MARGIN: Duration = Duration::from_secs(10);
 
+/// A length of 0 s is how speakers and files say "unknown".
+pub(super) fn known_length(length: Duration) -> Option<Duration> {
+    (!length.is_zero()).then_some(length)
+}
+
+/// Whether a track stopped at `position` played to its end: within
+/// [`END_MARGIN`] of `length`. With no length known, `if_unknown` decides.
+pub(super) fn played_out(position: Duration, length: Option<Duration>, if_unknown: bool) -> bool {
+    length.map_or(if_unknown, |length| position + END_MARGIN >= length)
+}
+
 /// A place in an item: `track` indexes its tracks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Place {
@@ -138,6 +149,26 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_length_of_zero_is_unknown() {
+        assert_eq!(known_length(Duration::ZERO), None);
+        assert_eq!(known_length(secs(0.001)), Some(secs(0.001)));
+    }
+
+    #[test]
+    fn played_out_is_within_the_margin_of_a_known_length() {
+        let out = |position, length| played_out(secs(position), Some(secs(length)), false);
+        assert!(out(300.0, 300.0));
+        assert!(out(290.0, 300.0));
+        assert!(!out(289.9, 300.0));
+    }
+
+    #[test]
+    fn played_out_with_no_length_is_the_callers_answer() {
+        assert!(played_out(secs(5.0), None, true));
+        assert!(!played_out(secs(5.0), None, false));
+    }
 
     const BOOK: ItemId = ItemId(7);
     const SONGS: ItemId = ItemId(8);

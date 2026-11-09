@@ -34,7 +34,7 @@ pub use self::cli::players;
 use self::cli::{Cli, HeosError, IO_TIMEOUT, Message, NowPlaying};
 #[cfg(test)]
 use super::TrackInfo;
-use super::progress::{END_MARGIN, Place};
+use super::progress::{Place, played_out};
 use super::{Content, Emitter, Loaded, PlayerCmd, PlayerEvent, Speaker, Station};
 use crate::library::ItemId;
 
@@ -566,16 +566,10 @@ impl Connection {
 }
 
 /// Whether the last track, stopped after `seen`, played to its end; a stop
-/// earlier than [`END_MARGIN`] before it was pressed in the HEOS app. With
+/// earlier than the [`played_out`] margin before it was pressed in the HEOS app. With
 /// no length known, every stop counts as the end.
 fn ended(seen: Option<NowPlaying>) -> bool {
-    match seen {
-        Some(NowPlaying {
-            position,
-            duration: Some(duration),
-        }) => position + END_MARGIN >= duration,
-        _ => true,
-    }
+    seen.is_none_or(|at| played_out(at.position, at.duration, true))
 }
 
 /// The socket failed at once (reset, closed, broken pipe) rather than timing
