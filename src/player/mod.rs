@@ -128,7 +128,6 @@ enum Loaded<S> {
 }
 
 impl<S> Loaded<S> {
-    /// The album's tracks; none for a station or when idle.
     fn tracks(&self) -> &[TrackInfo] {
         match self {
             Loaded::Album { tracks, .. } => tracks,
@@ -434,9 +433,8 @@ impl Emitter {
         self.send(Some(PlayerEvent::Trouble(text)));
     }
 
-    /// `item` replaces the one playing. The place of that one, as the speaker
-    /// tells it now (`outgoing`), and then its latest place, are reported
-    /// first.
+    /// `item` replaces the one playing; `outgoing` is that item's place as
+    /// the speaker reads it now, reported before `begin` reports its latest.
     fn replace(&mut self, item: ItemId, progress: bool, outgoing: Option<Place>) {
         if let Some(at) = outgoing {
             self.place(at, false);

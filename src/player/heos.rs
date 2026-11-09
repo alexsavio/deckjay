@@ -416,7 +416,7 @@ impl HeosPlayer {
         }
     }
 
-    /// The place from the latest progress event, if one came.
+    /// Consumes the latest progress event and returns it as a place.
     fn current_place(&mut self) -> Option<Place> {
         let seen = self.take_progress()?;
         let current = self.current.as_mut()?;
