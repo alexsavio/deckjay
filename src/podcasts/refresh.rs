@@ -29,6 +29,9 @@ pub(super) struct Worker {
     api: Agent,
     stream: Agent,
     pinned: Option<String>,
+    /// The pinned episode as the last refresh saw it, with its picture and its feed
+    /// folder: the manifest forgets it once it leaves the shelf.
+    playing: Option<(String, Stored)>,
     /// Paths given to the publisher and not taken back since.
     published: HashSet<PathBuf>,
     /// Slugs of the feeds whose last fetch failed.
@@ -77,6 +80,7 @@ impl Worker {
             api: net::api_agent(download::FEED_TIMEOUT),
             stream: net::stream_agent(),
             pinned: None,
+            playing: None,
             published: HashSet::new(),
             failing: HashSet::new(),
             broken_pictures: HashSet::new(),
@@ -113,7 +117,7 @@ impl Worker {
             }
             let wake = sweep_at.map_or(next_refresh, |at| at.min(next_refresh));
             match self.pins.recv_timeout(wake.saturating_duration_since(now)) {
-                Ok(NowPlaying(id)) => self.pinned = id,
+                Ok(NowPlaying(id)) => self.pin(id),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
@@ -122,8 +126,20 @@ impl Worker {
 
     fn drain_pins(&mut self) {
         while let Ok(NowPlaying(id)) = self.pins.try_recv() {
-            self.pinned = id;
+            self.pin(id);
         }
+    }
+
+    fn pin(&mut self, id: Option<String>) {
+        if self
+            .playing
+            .as_ref()
+            .is_none_or(|(_, s)| id.as_deref() != Some(s.id.as_str()))
+        {
+            self.playing = None;
+            self.doomed.spare(HashSet::new());
+        }
+        self.pinned = id;
     }
 
     fn log_foreign_folders(&self) {
@@ -188,6 +204,8 @@ impl Worker {
         }
 
         self.drain_pins();
+        self.playing = self.find_playing(&runs);
+        self.doomed.spare(self.playing_files());
         let mut snapshot = Snapshot::default();
         let mut wanted = BTreeSet::new();
         let mut unwanted = Vec::new();
@@ -199,7 +217,7 @@ impl Worker {
             // Without the feed or the old manifest, `manifest` can miss cached
             // files that are still good; they wait for a refresh that has both.
             if run.remote.is_some() && !run.manifest_broken {
-                let keep = keep_names(run, &manifest);
+                let keep = plan::keep_files(&manifest, &run.parts);
                 let stale = cache::unwanted(&run.dir, &keep);
                 unwanted.extend(
                     stale
@@ -220,6 +238,27 @@ impl Worker {
         log_summary(&runs, &snapshot, dropped);
         self.snapshots.send(snapshot).ok()?;
         Some(!runs.is_empty() && runs.iter().all(|run| run.remote.is_none()))
+    }
+
+    fn find_playing(&mut self, runs: &[Run]) -> Option<(String, Stored)> {
+        let id = self.pinned.as_deref()?;
+        let on_disk = runs.iter().find_map(|run| {
+            let stored = run.disk.iter().find(|s| s.id == id)?;
+            Some((run.feed.slug.clone(), stored.clone()))
+        });
+        on_disk.or_else(|| self.playing.take().filter(|(_, s)| s.id == id))
+    }
+
+    /// `<feed folder>/<name>` of the playing episode's file and picture.
+    fn playing_files(&self) -> HashSet<PathBuf> {
+        let Some((slug, stored)) = &self.playing else {
+            return HashSet::new();
+        };
+        [Some(&stored.file), stored.picture.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(|name| Path::new(slug).join(name))
+            .collect()
     }
 
     fn fetch(&mut self, feed: FeedSettings) -> Option<Run> {
@@ -458,18 +497,6 @@ fn files_to_publish(dir: &Path, slug: &str, manifest: &Manifest) -> Vec<PathBuf>
         .collect()
 }
 
-fn keep_names(run: &Run, manifest: &Manifest) -> HashSet<String> {
-    let episodes = manifest
-        .episodes
-        .iter()
-        .flat_map(|e| [Some(e.file.clone()), e.picture.clone()]);
-    episodes
-        .chain([manifest.picture.clone()])
-        .flatten()
-        .chain(run.parts.iter().cloned())
-        .collect()
-}
-
 fn log_summary(runs: &[Run], snapshot: &Snapshot, dropped: usize) {
     let ok = runs.iter().filter(|run| run.remote.is_some()).count();
     let new: usize = runs.iter().map(|run| run.downloaded).sum();
@@ -487,42 +514,55 @@ fn later(now: Instant, delay: Duration) -> Instant {
     now.checked_add(delay).unwrap_or(now + YEAR)
 }
 
-/// Unwanted cache files and the time each may be deleted.
+/// Unwanted cache files and the time each may be deleted, and the names that
+/// wait while the episode that owns them plays.
 #[derive(Debug, Default)]
-struct Doomed(HashMap<PathBuf, Instant>);
+struct Doomed {
+    due: HashMap<PathBuf, Instant>,
+    spared: HashSet<PathBuf>,
+}
 
 impl Doomed {
     /// Files already waiting keep their time; files that are wanted again
-    /// are spared.
+    /// leave the list.
     fn schedule(&mut self, unwanted: Vec<PathBuf>, now: Instant, grace: Duration) {
         let due = later(now, grace);
-        self.0 = unwanted
+        self.due = unwanted
             .into_iter()
             .map(|rel| {
-                let at = self.0.get(&rel).copied().unwrap_or(due);
+                let at = self.due.get(&rel).copied().unwrap_or(due);
                 (rel, at)
             })
             .collect();
     }
 
-    /// The next deletion; files of the pinned episode wait.
+    /// Names that wait while the episode that owns them plays.
+    fn spare(&mut self, names: HashSet<PathBuf>) {
+        self.spared = names;
+    }
+
+    fn waits(&self, rel: &Path, pinned: Option<&str>) -> bool {
+        self.spared.contains(rel) || is_pinned(rel, pinned)
+    }
+
+    /// The next deletion; spared files and files of the pinned episode wait.
     fn next(&self, pinned: Option<&str>) -> Option<Instant> {
-        self.0
+        self.due
             .iter()
-            .filter(|(rel, _)| !is_pinned(rel, pinned))
+            .filter(|(rel, _)| !self.waits(rel, pinned))
             .map(|(_, &at)| at)
             .min()
     }
 
     fn take_due(&mut self, now: Instant, pinned: Option<&str>) -> Vec<PathBuf> {
         let due: Vec<PathBuf> = self
-            .0
+            .due
             .iter()
-            .filter(|&(rel, &at)| at <= now && !is_pinned(rel, pinned))
+            .filter(|&(rel, &at)| at <= now && !self.waits(rel, pinned))
             .map(|(rel, _)| rel.clone())
             .collect();
         for rel in &due {
-            self.0.remove(rel);
+            self.due.remove(rel);
         }
         due
     }
@@ -587,6 +627,21 @@ mod tests {
         );
         assert_eq!(doomed.next(Some("ffffffff00000000")), Some(t0 + grace));
         assert_eq!(doomed.take_due(t0 + grace * 10, None), [episode]);
+    }
+
+    #[test]
+    fn spared_names_wait_until_they_are_cleared() {
+        let grace = Duration::from_secs(60);
+        let t0 = Instant::now();
+        let mut doomed = Doomed::default();
+        doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace);
+        doomed.spare(HashSet::from([rel("p-00000000.jpg")]));
+
+        assert_eq!(doomed.next(None), None);
+        assert_eq!(doomed.take_due(t0 + grace * 10, None), [] as [PathBuf; 0]);
+        doomed.spare(HashSet::new());
+        assert_eq!(doomed.next(None), Some(t0 + grace));
+        assert_eq!(doomed.take_due(t0 + grace, None), [rel("p-00000000.jpg")]);
     }
 
     #[test]

@@ -147,3 +147,9 @@ fn a_refill_keeps_the_ids_of_known_episodes() {
         }
     );
 }
+
+#[test]
+fn the_episode_id_is_the_last_segment_of_the_key() {
+    assert_eq!(ItemKey("maus/die-maus/a1".into()).episode_id(), Some("a1"));
+    assert_eq!(ItemKey("a1".into()).episode_id(), None);
+}
