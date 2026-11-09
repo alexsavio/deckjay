@@ -403,11 +403,11 @@ impl Ui {
         debug!(key, ?action, "key pressed");
         match action {
             Action::More => {
-                self.pages[self.shelf] = (self.page() + 1) % layout.pages(self.shelf);
+                self.pages[self.shelf] = layout.next_page(self.shelf, self.page());
                 self.remember_place();
             }
             Action::Shelf => {
-                self.shelf = (self.shelf + 1) % layout.shelf_count();
+                self.shelf = layout.next_shelf(self.shelf);
                 self.remember_place();
             }
             Action::Flip => {
@@ -683,7 +683,7 @@ impl Ui {
                     pages: layout.pages(self.shelf),
                 },
                 Some(Action::Shelf) => {
-                    let next = (self.shelf + 1) % layout.shelf_count();
+                    let next = layout.next_shelf(self.shelf);
                     Face::Shelf {
                         shelf: self.deck_shelves[next],
                         position: next,
