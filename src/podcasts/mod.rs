@@ -9,7 +9,7 @@
 
 mod cache;
 mod download;
-pub(crate) mod feed;
+mod feed;
 mod plan;
 mod refresh;
 #[cfg(test)]

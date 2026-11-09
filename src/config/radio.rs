@@ -59,7 +59,7 @@ impl RawRadio {
                         station.name
                     );
                 }
-                if crate::podcasts::feed::http_url(&station.url).is_none() {
+                if crate::net::http_url(&station.url).is_none() {
                     bail!(
                         "station {}: the url must be one address that starts with https:// or http://",
                         station.name

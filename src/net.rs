@@ -19,6 +19,21 @@ pub fn install_crypto() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
+/// Only http(s): the URL is fetched by this program and by the speaker.
+pub fn http_url(url: &str) -> Option<String> {
+    let url = url.trim();
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    let ok = (lower.starts_with("http://") || lower.starts_with("https://"))
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control());
+    ok.then(|| url.to_string())
+}
+
+/// Feed and station URLs can carry a private token in the query; logs leave
+/// it out.
+pub fn without_query(url: &str) -> &str {
+    url.split(['?', '#']).next().unwrap_or_default()
+}
+
 fn tls() -> TlsConfig {
     TlsConfig::builder()
         .provider(TlsProvider::Rustls)

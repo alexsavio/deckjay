@@ -11,6 +11,8 @@ use anyhow::{Result, bail};
 use chrono::DateTime;
 use rss::Channel;
 
+pub use crate::net::http_url;
+
 /// Longer titles are cut: they are only for logs and the manifest.
 const MAX_TITLE_CHARS: usize = 200;
 
@@ -151,15 +153,6 @@ fn clean_title(title: &str) -> String {
         .chars()
         .take(MAX_TITLE_CHARS)
         .collect()
-}
-
-/// Only http(s): the URL is fetched by this program and by the speaker.
-pub fn http_url(url: &str) -> Option<String> {
-    let url = url.trim();
-    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
-    let ok = (lower.starts_with("http://") || lower.starts_with("https://"))
-        && !url.chars().any(|c| c.is_whitespace() || c.is_control());
-    ok.then(|| url.to_string())
 }
 
 /// From the enclosure's type, else from the URL. Some feeds send audio as

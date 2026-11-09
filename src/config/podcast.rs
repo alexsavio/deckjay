@@ -114,7 +114,7 @@ impl RawPodcast {
             if !names.insert(feed.name.as_str()) {
                 bail!("podcast source {name}: two feeds are named {:?}", feed.name);
             }
-            if crate::podcasts::feed::http_url(&feed.url).is_none() {
+            if crate::net::http_url(&feed.url).is_none() {
                 bail!(
                     "podcast {}: the url must be one address that starts with https:// or http://",
                     feed.name

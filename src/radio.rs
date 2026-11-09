@@ -7,6 +7,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use ureq::Agent;
 
+use crate::net::{http_url, without_query};
+
 /// A playlist is a few lines; a bigger body is not one.
 const PLAYLIST_LIMIT: u64 = 64 * 1024;
 /// A playlist may name another playlist, but not endlessly.
@@ -133,19 +135,14 @@ fn first_pls_entry(body: &str) -> Option<String> {
                 .ok()?;
             Some((number, value.trim()))
         })
-        .filter_map(|(number, url)| Some((number, crate::podcasts::feed::http_url(url)?)))
+        .filter_map(|(number, url)| Some((number, http_url(url)?)))
         .min_by_key(|(number, _)| *number)
         .map(|(_, url)| url)
 }
 
 /// The first line that is not a `#` comment.
 fn first_m3u_entry(body: &str) -> Option<String> {
-    body.lines().find_map(crate::podcasts::feed::http_url)
-}
-
-/// Station URLs can carry listener tokens in the query; logs leave it out.
-fn without_query(url: &str) -> &str {
-    url.split(['?', '#']).next().unwrap_or(url)
+    body.lines().find_map(http_url)
 }
 
 #[cfg(test)]
