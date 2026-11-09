@@ -114,10 +114,9 @@ impl RawPodcast {
             if !names.insert(feed.name.as_str()) {
                 bail!("podcast source {name}: two feeds are named {:?}", feed.name);
             }
-            let scheme_ok = feed.url.starts_with("https://") || feed.url.starts_with("http://");
-            if !scheme_ok {
+            if crate::podcasts::feed::http_url(&feed.url).is_none() {
                 bail!(
-                    "podcast {}: the url must start with https:// or http://",
+                    "podcast {}: the url must be one address that starts with https:// or http://",
                     feed.name
                 );
             }
@@ -216,5 +215,19 @@ mod tests {
             let err = check(text).unwrap_err();
             assert!(format!("{err:#}").contains(needle), "{text}: {err:#}");
         }
+    }
+
+    #[test]
+    fn refuses_a_feed_url_the_program_cannot_fetch() {
+        for url in ["https://a b", "https://a/\tb", "feed.xml", "  "] {
+            let text = format!("[[feed]]\nname = \"A\"\nurl = {url:?}\n");
+            let err = check(&text).unwrap_err();
+            assert!(format!("{err:#}").contains("http"), "{url:?}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn a_feed_url_scheme_may_be_upper_case() {
+        check("[[feed]]\nname = \"A\"\nurl = \"HTTPS://a/feed\"\n").unwrap();
     }
 }
