@@ -140,7 +140,7 @@ fn first_pls_entry(body: &str) -> Option<String> {
         .map(|(_, url)| url)
 }
 
-/// The first line that is not a `#` comment.
+/// The first line that is a usable http(s) URL; other lines are skipped.
 fn first_m3u_entry(body: &str) -> Option<String> {
     body.lines().find_map(http_url)
 }
