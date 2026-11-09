@@ -54,6 +54,8 @@ pub(crate) struct Canned {
     pub body: String,
 }
 
+type Hook = Box<dyn FnOnce(&mut Script) + Send>;
+
 /// What the fake answers and what it was sent.
 pub(crate) struct Script {
     pub requests: Vec<Request>,
@@ -74,6 +76,8 @@ pub(crate) struct Script {
     pub images: Value,
     /// Used, in order, for requests to their path before the normal answer.
     pub canned: Vec<(String, Canned)>,
+    /// Runs once, before the next token request is answered (also by a canned answer).
+    pub on_token_request: Option<Hook>,
 }
 
 impl Default for Script {
@@ -104,6 +108,7 @@ impl Default for Script {
                 {"url": "https://i.scdn.co/image/any", "width": null, "height": null}
             ]),
             canned: Vec::new(),
+            on_token_request: None,
         }
     }
 }
@@ -204,6 +209,11 @@ async fn handle(
 impl Script {
     fn answer(&mut self, request: &Request) -> Canned {
         self.requests.push(request.clone());
+        if request.path == "/api/token"
+            && let Some(hook) = self.on_token_request.take()
+        {
+            hook(self);
+        }
         if let Some(index) = self
             .canned
             .iter()
