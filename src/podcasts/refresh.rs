@@ -514,19 +514,23 @@ fn later(now: Instant, delay: Duration) -> Instant {
     now.checked_add(delay).unwrap_or(now + YEAR)
 }
 
-/// Unwanted cache files and the time each may be deleted.
+/// Unwanted cache files and the time each may be deleted, and the names that
+/// wait while the episode that owns them plays.
 #[derive(Debug, Default)]
-struct Doomed(HashMap<PathBuf, Instant>, HashSet<PathBuf>);
+struct Doomed {
+    due: HashMap<PathBuf, Instant>,
+    spared: HashSet<PathBuf>,
+}
 
 impl Doomed {
     /// Files already waiting keep their time; files that are wanted again
     /// are spared.
     fn schedule(&mut self, unwanted: Vec<PathBuf>, now: Instant, grace: Duration) {
         let due = later(now, grace);
-        self.0 = unwanted
+        self.due = unwanted
             .into_iter()
             .map(|rel| {
-                let at = self.0.get(&rel).copied().unwrap_or(due);
+                let at = self.due.get(&rel).copied().unwrap_or(due);
                 (rel, at)
             })
             .collect();
@@ -534,16 +538,16 @@ impl Doomed {
 
     /// Names that wait while the episode that owns them plays.
     fn spare(&mut self, names: HashSet<PathBuf>) {
-        self.1 = names;
+        self.spared = names;
     }
 
     fn waits(&self, rel: &Path, pinned: Option<&str>) -> bool {
-        self.1.contains(rel) || is_pinned(rel, pinned)
+        self.spared.contains(rel) || is_pinned(rel, pinned)
     }
 
-    /// The next deletion; files of the pinned episode wait.
+    /// The next deletion; spared files and files of the pinned episode wait.
     fn next(&self, pinned: Option<&str>) -> Option<Instant> {
-        self.0
+        self.due
             .iter()
             .filter(|(rel, _)| !self.waits(rel, pinned))
             .map(|(_, &at)| at)
@@ -552,13 +556,13 @@ impl Doomed {
 
     fn take_due(&mut self, now: Instant, pinned: Option<&str>) -> Vec<PathBuf> {
         let due: Vec<PathBuf> = self
-            .0
+            .due
             .iter()
             .filter(|&(rel, &at)| at <= now && !self.waits(rel, pinned))
             .map(|(rel, _)| rel.clone())
             .collect();
         for rel in &due {
-            self.0.remove(rel);
+            self.due.remove(rel);
         }
         due
     }
