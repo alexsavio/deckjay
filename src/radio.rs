@@ -133,21 +133,14 @@ fn first_pls_entry(body: &str) -> Option<String> {
                 .ok()?;
             Some((number, value.trim()))
         })
-        .filter(|(_, url)| is_http(url))
+        .filter_map(|(number, url)| Some((number, crate::podcasts::feed::http_url(url)?)))
         .min_by_key(|(number, _)| *number)
-        .map(|(_, url)| url.to_string())
+        .map(|(_, url)| url)
 }
 
 /// The first line that is not a `#` comment.
 fn first_m3u_entry(body: &str) -> Option<String> {
-    body.lines()
-        .map(str::trim)
-        .find(|line| is_http(line))
-        .map(str::to_string)
-}
-
-fn is_http(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
+    body.lines().find_map(crate::podcasts::feed::http_url)
 }
 
 /// Station URLs can carry listener tokens in the query; logs leave it out.
