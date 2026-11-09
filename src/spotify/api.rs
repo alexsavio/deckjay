@@ -496,6 +496,10 @@ impl Client {
             .downcast_ref::<ApiError>()
             .is_some_and(|api| api.reason.as_deref() == Some("invalid_grant"));
         let before = self.token.refresh_token.clone();
+        if refused {
+            // Spotify refused the copy in memory, so the file is not behind it.
+            self.unsaved = false;
+        }
         if refused && self.adopt_saved_token() && self.token.refresh_token != before {
             return self.request_refresh();
         }

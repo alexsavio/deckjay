@@ -251,6 +251,40 @@ fn a_rotated_token_that_could_not_be_saved_stays_in_use() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_refused_copy_in_memory_gives_way_to_a_newer_token_in_the_file() {
+    let mut rig = Rig::new();
+    rotating(&rig);
+    let Some(read_only) = ReadOnly::new(rig.dir.path()) else {
+        return;
+    };
+    let first = rig.client.devices();
+    drop(read_only);
+    first.unwrap();
+    // A new sign-in replaces the token, which Spotify now accepts only in the file.
+    TokenFile {
+        client_id: fake::CLIENT_ID.into(),
+        refresh_token: Secret::new("refresh-9"),
+    }
+    .save(rig.dir.path())
+    .unwrap();
+    {
+        let mut script = rig.fake.script();
+        script.refresh_token = "refresh-9".into();
+        script.rotate = false;
+    }
+
+    rig.client.devices().unwrap();
+    let sent: Vec<_> = rig
+        .fake
+        .token_requests()
+        .iter()
+        .map(|request| request.param("refresh_token").unwrap())
+        .collect();
+    assert_eq!(sent, ["refresh-1", "refresh-2", "refresh-9"]);
+}
+
 #[test]
 fn a_client_refreshes_with_the_token_another_client_saved_after_its_own_rotation() {
     let mut rig = Rig::new();
