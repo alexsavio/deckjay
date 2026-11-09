@@ -37,7 +37,7 @@ use image::{Rgb, RgbImage};
 use tracing::{debug, info, warn};
 
 use self::layout::{Action, Control, Layout};
-use crate::config::{Config, SpeakerType};
+use crate::config::Config;
 use crate::deck::Deck;
 use crate::icons::{self, Decor};
 use crate::library::{self, ItemId, Kind, Library, Media};
@@ -120,9 +120,9 @@ pub struct Ui {
     max_volume: f32,
     volume_step: f32,
     volume: f32,
-    /// Seconds ⏪ and ⏩ jump; 0 for a speaker that cannot seek (HEOS), whose
+    /// Seconds ⏪ and ⏩ jump; `None` for a speaker that cannot seek (HEOS), whose
     /// ⏮ and ⏭ keep skipping tracks.
-    seek_seconds: u16,
+    seek_seconds: Option<u16>,
 
     /// The library shelves the deck shows: those with items.
     deck_shelves: Vec<usize>,
@@ -212,11 +212,7 @@ impl Ui {
             gone: None,
             max_volume: cfg.max_volume,
             volume_step: cfg.volume_step,
-            seek_seconds: if cfg.speaker_type == SpeakerType::Heos {
-                0
-            } else {
-                cfg.seek_seconds
-            },
+            seek_seconds: cfg.speaker_type.can_seek().then_some(cfg.seek_seconds),
             volume: cfg.start_volume,
             current: None,
             playing: false,
@@ -445,7 +441,7 @@ impl Ui {
                 self.playing = !self.playing;
             }
             Control::Next | Control::Prev if self.seeking() => {
-                let by = i32::from(self.seek_seconds);
+                let by = i32::from(self.seek_seconds.unwrap_or_default());
                 self.send(PlayerCmd::Seek(if control == Control::Next {
                     by
                 } else {
@@ -475,7 +471,7 @@ impl Ui {
 
     /// Whether ⏮ and ⏭ jump in the loaded item instead of skipping tracks.
     fn seeking(&self) -> bool {
-        self.seek_seconds > 0
+        self.seek_seconds.is_some()
             && self
                 .current
                 .is_some_and(|id| self.library.item(id).kind.seeks())

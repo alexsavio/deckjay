@@ -115,6 +115,22 @@ impl SpeakerType {
             SpeakerType::Local => 0,
         }
     }
+
+    /// Whether the speaker jumps within a track; HEOS cannot.
+    pub fn can_seek(self) -> bool {
+        match self {
+            SpeakerType::Cast | SpeakerType::Local => true,
+            SpeakerType::Heos => false,
+        }
+    }
+
+    /// Whether the speaker downloads from our music server; local audio reads the files itself.
+    pub fn serves_music(self) -> bool {
+        match self {
+            SpeakerType::Cast | SpeakerType::Heos => true,
+            SpeakerType::Local => false,
+        }
+    }
 }
 fn default_state_dir() -> PathBuf {
     "state".into()
@@ -258,6 +274,14 @@ mod tests {
         let cfg = parse("speaker_type = \"heos\"\n").unwrap();
         assert_eq!(cfg.speaker_type, SpeakerType::Heos);
         assert_eq!(cfg.speaker_port(), 1255);
+    }
+
+    #[test]
+    fn each_speaker_type_says_what_it_can_do() {
+        let abilities = |t: SpeakerType| (t.can_seek(), t.serves_music());
+        assert_eq!(abilities(SpeakerType::Cast), (true, true));
+        assert_eq!(abilities(SpeakerType::Heos), (false, true));
+        assert_eq!(abilities(SpeakerType::Local), (true, false));
     }
 
     #[test]
