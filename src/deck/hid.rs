@@ -13,8 +13,7 @@ use hidapi::HidApi;
 use image::{DynamicImage, RgbImage};
 use tracing::debug;
 
-use super::Backend;
-use super::remote::check_grid;
+use super::{Backend, Grid};
 
 pub(super) struct HidDeck {
     device: Arc<StreamDeck>,
@@ -25,7 +24,7 @@ pub(super) struct HidDeck {
 /// A deck with keys the player can draw on, in a grid it can lay out.
 fn usable(kind: Kind) -> bool {
     kind.is_visual()
-        && check_grid(
+        && Grid::new(
             kind.row_count().into(),
             kind.column_count().into(),
             kind.key_image_format().size.0 as u32,

@@ -1,23 +1,17 @@
 //! The web Stream Deck simulator ([`crate::simulator`]) over HTTP.
 
 use std::io::Cursor;
-use std::ops::RangeInclusive;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use image::{ImageFormat, RgbImage};
 use ureq::Agent;
 
-use super::Backend;
+use super::{Backend, Grid};
 use crate::simulator::{Brightness, Info, Notice};
 
 /// Time allowed for one request, on top of a long-poll's own wait.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
-// Bounds on a simulator's grid: the largest real deck has 36 keys, and key
-// images are drawn at 4x, so a bogus grid could exhaust a Pi's memory.
-const MAX_KEYS: usize = 64;
-const KEY_SIZES: RangeInclusive<u32> = 16..=512;
-
 pub(super) struct RemoteDeck {
     agent: Agent,
     base: String,
@@ -57,25 +51,8 @@ pub(super) fn fetch_info(agent: &Agent, url: &str) -> Result<Option<Info>> {
     let body = reply.body_mut().read_to_string()?;
     let info: Info =
         serde_json::from_str(&body).with_context(|| format!("bad reply from {base}"))?;
-    check_grid(info.rows, info.cols, info.key_size)?;
+    Grid::new(info.rows, info.cols, info.key_size)?;
     Ok(Some(info))
-}
-
-/// Refuses a grid the player cannot draw.
-pub(super) fn check_grid(rows: usize, cols: usize, key_size: u32) -> Result<()> {
-    let too_many_keys = rows.checked_mul(cols).is_none_or(|n| n > MAX_KEYS);
-    // The layout needs two keys above the control row: an item and "more".
-    let too_few_keys = rows < 2 || (rows - 1).checked_mul(cols).is_none_or(|n| n < 2);
-    if too_few_keys || too_many_keys || !KEY_SIZES.contains(&key_size) {
-        bail!(
-            "the deck has {rows}x{cols} keys of {key_size} px; the player needs at least 2 \
-             rows with 2 keys above the bottom row, at most {MAX_KEYS} keys and keys of \
-             {} to {} px",
-            KEY_SIZES.start(),
-            KEY_SIZES.end()
-        );
-    }
-    Ok(())
 }
 
 impl RemoteDeck {

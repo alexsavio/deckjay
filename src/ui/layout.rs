@@ -1,6 +1,7 @@
 //! Which key shows what: items on top, controls in the bottom row, and the
 //! keys that move between pages and shelves in the last item keys.
 
+use crate::deck::Grid;
 use crate::library::ItemId;
 
 /// Below this many item keys, a shelf key plus a "more" key would leave too
@@ -60,7 +61,7 @@ impl Layout {
         // With one item key, paging would turn it into the "more" key and
         // hide every item; the deck backends only open bigger grids.
         debug_assert!(
-            rows >= 2 && (rows - 1) * cols >= 2,
+            Grid::check_shape(rows, cols).is_ok(),
             "no room for items on a {rows}x{cols} deck"
         );
         let item_keys = (rows - 1) * cols;
