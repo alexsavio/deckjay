@@ -12,7 +12,7 @@ use chrono::DateTime;
 use rss::Channel;
 
 use crate::library::{AUDIO_TYPES, audio_type};
-pub use crate::net::http_url;
+use crate::net::http_url;
 
 /// Longer titles are cut: they are only for logs and the manifest.
 const MAX_TITLE_CHARS: usize = 200;
