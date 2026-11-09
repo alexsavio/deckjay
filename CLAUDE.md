@@ -228,8 +228,8 @@ blocking `ureq`, PNG encoding, `pressed_keys` is a long-poll
 such as "connection refused" or "host not found". An HTTP error status or a
 URL ureq cannot use (no `http://`, `https://`) is a real error. One rule,
 `deck::Grid::new`, checks every grid the player opens (USB deck and simulator;
-`deckjay check` applies it to the simulator's): at least 2 rows, at most 64
-keys, keys of 16 to 512 px.
+`deckjay check` applies it to the simulator's): at least 2 rows with 2 keys
+above the bottom row, at most 64 keys, keys of 16 to 512 px.
 
 Simulator (`simulator/`): `deckjay simulator` runs an axum server on its
 own single-thread tokio runtime with the page (`page.html`) and the
@@ -264,8 +264,8 @@ Rendering:
   start, e.g. after a restart: Cast quits every app but the idle screen,
   HEOS sends `set_play_state stop`, Spotify pauses its device; then
   `Speaker::standby`: HEOS sends `PWSTANDBY` to the receiver's control port
-  23) and dims the deck; `Ui::wake` swallows the next press. Decks with
-  fewer than 2 rows are ignored.
+  23) and dims the deck; `Ui::wake` swallows the next press. Decks
+  whose grid `deck::Grid::new` refuses are ignored.
 - `icons/` draws every icon procedurally (4x supersampling); there are no
   image or font assets. `glyphs.rs` has the kind glyphs (note, book, star,
   waves, mic, Spotify); `decorate` adds the "playing" frame, the kind badge,
