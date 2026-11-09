@@ -704,3 +704,19 @@ fn only_podcast_sources_have_settings() {
     let has_settings: Vec<bool> = cfg.sources.iter().map(|s| s.podcast.is_some()).collect();
     assert_eq!(has_settings, [false, true]);
 }
+
+#[test]
+fn load_cached_reads_the_cache_the_settings_describe() {
+    let world = World::new();
+    world.set_feed(&[1, 2]);
+    let run = start(world.settings(&world.feed_url(), 2), timing());
+    run.snapshot_until(titles_are(&["Episode 2", "Episode 1"]));
+    run.stop();
+    let podcast = podcast(&[("maus", FeedOrder::Newest)]);
+    let dir = world.cache.path();
+
+    let loaded = load_cached(&podcast, dir);
+
+    assert_eq!(loaded, cached(&settings(&podcast, dir)));
+    assert_eq!(loaded.feeds[0].episodes.len(), 2);
+}
