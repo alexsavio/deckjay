@@ -264,3 +264,14 @@ fn a_last_track_that_stops_within_the_margin_of_its_length_has_ended() {
     assert!(ended(seen(5, None)), "length unknown");
     assert!(ended(None), "no place seen");
 }
+
+#[test]
+fn a_progress_event_with_a_length_of_zero_reports_no_length() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.emitter.progress.interval = Duration::ZERO;
+    rig.fake.script().progress = Some("pid=7&cur_pos=12000&duration=0");
+    rig.send(book(3)).unwrap();
+    rig.events();
+    rig.poll_with("play");
+    assert_eq!(rig.events(), [at(0, 12, None)]);
+}
