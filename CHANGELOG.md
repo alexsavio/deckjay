@@ -7,6 +7,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+### 🚜 Refactor
+
+- *(ui)* Compute key navigation in Layout only ([#26](https://github.com/alexsavio/deckjay/issues/26))
+
 ### ⚙️ Miscellaneous Tasks
 
 - Refine Dependabot updates and log security bumps ([#24](https://github.com/alexsavio/deckjay/issues/24))
