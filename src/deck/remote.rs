@@ -62,7 +62,7 @@ pub(super) fn fetch_info(agent: &Agent, url: &str) -> Result<Option<Info>> {
 }
 
 /// Refuses a grid the player cannot draw.
-fn check_grid(rows: usize, cols: usize, key_size: u32) -> Result<()> {
+pub(super) fn check_grid(rows: usize, cols: usize, key_size: u32) -> Result<()> {
     let too_many_keys = rows.checked_mul(cols).is_none_or(|n| n > MAX_KEYS);
     // The layout needs two keys above the control row: an item and "more".
     let too_few_keys = rows < 2 || (rows - 1).checked_mul(cols).is_none_or(|n| n < 2);

@@ -14,11 +14,23 @@ use image::{DynamicImage, RgbImage};
 use tracing::debug;
 
 use super::Backend;
+use super::remote::check_grid;
 
 pub(super) struct HidDeck {
     device: Arc<StreamDeck>,
     reader: Arc<DeviceStateReader>,
     kind: Kind,
+}
+
+/// A deck with keys the player can draw on, in a grid it can lay out.
+fn usable(kind: Kind) -> bool {
+    kind.is_visual()
+        && check_grid(
+            kind.row_count().into(),
+            kind.column_count().into(),
+            kind.key_image_format().size.0 as u32,
+        )
+        .is_ok()
 }
 
 impl HidDeck {
@@ -29,10 +41,7 @@ impl HidDeck {
         for (kind, serial) in &devices {
             debug!(?kind, %serial, rows = kind.row_count(), "found an Elgato device");
         }
-        let Some((kind, serial)) = devices
-            .into_iter()
-            .find(|(kind, _)| kind.is_visual() && kind.row_count() >= 2)
-        else {
+        let Some((kind, serial)) = devices.into_iter().find(|(kind, _)| usable(*kind)) else {
             return Ok(None);
         };
         #[expect(
@@ -99,5 +108,36 @@ impl Backend for HidDeck {
                 _ => None,
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_model_the_crate_knows_opens_except_the_pedal() {
+        let all = [
+            Kind::Original,
+            Kind::OriginalV2,
+            Kind::Mini,
+            Kind::Xl,
+            Kind::XlV2,
+            Kind::Mk2,
+            Kind::Mk2Scissor,
+            Kind::MiniMk2,
+            Kind::MiniDiscord,
+            Kind::Neo,
+            Kind::Pedal,
+            Kind::Plus,
+            Kind::PlusXl,
+            Kind::MiniMk2Module,
+            Kind::Mk2Module,
+            Kind::Mk2ModuleScissor,
+            Kind::XlV2Module,
+        ];
+        for kind in all {
+            assert_eq!(usable(kind), kind != Kind::Pedal, "{kind:?}");
+        }
     }
 }
