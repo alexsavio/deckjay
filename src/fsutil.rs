@@ -35,8 +35,9 @@ pub fn publish(part: &Path, dest: &Path) -> io::Result<()> {
 
 /// Deletes the temp files that `write_atomic` of another process left beside
 /// `path` (a crash or a kill between the write and the rename): any pid but
-/// this one, so also those of a second deckjay running on the same folder (its
-/// failed save is tried again later). A temp with this process's pid stays:
+/// this one, so also those of a second deckjay running on the same folder (a
+/// failed state save is tried again 10 s later, unless it was the save at exit;
+/// a cover is fetched again at the next start). A temp with this process's pid stays:
 /// another thread may be writing it. So a temp left by an earlier process
 /// with the same pid (pid 1 in Docker, a pid used again after a reboot) stays
 /// too. It goes only when a save of the same file draws the same counter:
@@ -149,6 +150,9 @@ mod tests {
             ".x.1.2.part.bak".into(),
             ".x.bad.1.2.part".into(),
             ".x.+5.1.part".into(),
+            ".x..5.part".into(),
+            ".x.5..part".into(),
+            ".x.5.6".into(),
             ".y.1.2.part".into(),
         ];
         for name in kept_files.iter().chain([&gone]) {
