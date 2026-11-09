@@ -25,7 +25,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{Item, ItemKey, Media, Track};
-use crate::config::Source;
+#[cfg(test)]
+use crate::config::SourceBody;
+use crate::config::{Folder, Source};
 
 /// Cover file names (without extension), best match first.
 const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
@@ -36,29 +38,31 @@ const KEY_PICTURE: &str = "key";
 
 /// The items of `source`, in name order; with `one_key`, the source folder
 /// itself is the only item.
-pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
-    let entries = usable_entries(&source.path).with_context(|| {
+pub(super) fn scan(source: &Source, folder: &Folder) -> Result<Vec<Item>> {
+    let entries = usable_entries(&folder.path).with_context(|| {
         format!(
             "cannot read the folder of source {}: {}",
             source.name,
-            source.path.display()
+            folder.path.display()
         )
     })?;
-    if source.one_key {
-        return Ok(folder_item(source, &source.path).into_iter().collect());
+    if folder.one_key {
+        return Ok(folder_item(source, folder, &folder.path)
+            .into_iter()
+            .collect());
     }
     let top_files: Vec<PathBuf> = entries.iter().filter(|p| p.is_file()).cloned().collect();
     let items: Vec<Item> = entries
         .iter()
         .filter_map(|entry| {
             if entry.is_dir() {
-                folder_item(source, entry)
+                folder_item(source, folder, entry)
             } else {
-                file_item(source, entry, &top_files)
+                file_item(source, folder, entry, &top_files)
             }
         })
         .collect();
-    for name in source.items.keys() {
+    for name in folder.items.keys() {
         let key = format!("{}/{name}", source.name);
         if !items.iter().any(|i| i.key.0 == key || i.name == *name) {
             tracing::warn!(
@@ -70,7 +74,7 @@ pub(super) fn scan(source: &Source) -> Result<Vec<Item>> {
     Ok(items)
 }
 
-fn folder_item(source: &Source, dir: &Path) -> Option<Item> {
+fn folder_item(source: &Source, folder: &Folder, dir: &Path) -> Option<Item> {
     let entries = usable_entries(dir)
         .inspect_err(|err| tracing::warn!("skipping {}: {err}", dir.display()))
         .ok()?;
@@ -96,12 +100,12 @@ fn folder_item(source: &Source, dir: &Path) -> Option<Item> {
         .iter()
         .find(|f| is_image(f) && has_stem(f, KEY_PICTURE))
         .cloned();
-    let mut item = item(source, &name, name.clone(), tracks, cover);
+    let mut item = item(source, folder, &name, name.clone(), tracks, cover);
     item.picture = item.picture.or(key_picture);
     Some(item)
 }
 
-fn file_item(source: &Source, file: &Path, top_files: &[PathBuf]) -> Option<Item> {
+fn file_item(source: &Source, folder: &Folder, file: &Path, top_files: &[PathBuf]) -> Option<Item> {
     let tracks = tracks(source, &[file.to_path_buf()]);
     if tracks.is_empty() {
         return None;
@@ -111,26 +115,27 @@ fn file_item(source: &Source, file: &Path, top_files: &[PathBuf]) -> Option<Item
         .iter()
         .find(|f| is_image(f) && f.file_stem().is_some_and(|s| s.to_string_lossy() == stem))
         .cloned();
-    Some(item(source, &file_name(file), stem, tracks, cover))
+    Some(item(source, folder, &file_name(file), stem, tracks, cover))
 }
 
 /// `key_name` is the entry's name in the source folder. The picture and
 /// colour come from the source's `[source.item]` table for it, if any.
 fn item(
     source: &Source,
+    folder: &Folder,
     key_name: &str,
     name: String,
     tracks: Vec<Track>,
     cover: Option<PathBuf>,
 ) -> Item {
-    let look = source
+    let look = folder
         .items
         .get(key_name)
-        .or_else(|| source.items.get(&name))
+        .or_else(|| folder.items.get(&name))
         .cloned()
         .unwrap_or_default();
     Item {
-        kind: source.kind.into(),
+        kind: folder.kind.into(),
         key: ItemKey(format!("{}/{key_name}", source.name)),
         name,
         media: Media::Tracks(tracks),
@@ -157,7 +162,7 @@ fn tracks(source: &Source, files: &[PathBuf]) -> Vec<Track> {
 
 /// `<source name>/<path in the source folder>`: where the web server serves `path`.
 fn served_path(source: &Source, path: &Path) -> Option<PathBuf> {
-    Some(Path::new(&source.name).join(path.strip_prefix(&source.path).ok()?))
+    Some(Path::new(&source.name).join(path.strip_prefix(source.served_root()?).ok()?))
 }
 
 /// Entries that are not hidden and have UTF-8 names, in natural name order.
@@ -270,6 +275,24 @@ mod tests {
     use super::*;
     use crate::config::SourceKind;
     use crate::library::Kind;
+
+    fn scan(source: &Source) -> Result<Vec<Item>> {
+        super::scan(source, folder(source))
+    }
+
+    fn folder(source: &Source) -> &Folder {
+        match &source.body {
+            SourceBody::Folder(folder) => folder,
+            body => panic!("not a folder source: {body:?}"),
+        }
+    }
+
+    fn folder_mut(source: &mut Source) -> &mut Folder {
+        match &mut source.body {
+            SourceBody::Folder(folder) => folder,
+            body => panic!("not a folder source: {body:?}"),
+        }
+    }
 
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -655,7 +678,7 @@ mod tests {
             picture: picture.map(PathBuf::from),
             color,
         };
-        source.items = [
+        folder_mut(&mut source).items = [
             ("Album".to_string(), look(Some("/pics/a.png"), None)),
             ("Rain.mp3".to_string(), look(None, Some(Color([1, 2, 3])))),
             ("Wind".to_string(), look(None, Some(Color([4, 5, 6])))),
@@ -679,7 +702,7 @@ mod tests {
         touch(&root.join("Album B/Deeper/01.mp3"));
         touch(&root.join("cover.jpg"));
         let mut source = Source::plain("band", SourceKind::Music, &root);
-        source.one_key = true;
+        folder_mut(&mut source).one_key = true;
 
         let items = scan(&source).unwrap();
 

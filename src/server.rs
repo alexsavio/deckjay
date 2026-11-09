@@ -135,7 +135,7 @@ mod tests {
         let base = format!("http://{}/music", listener.local_addr().unwrap());
         let roots = sources
             .iter()
-            .map(|s| (s.name.clone(), s.path.clone()))
+            .filter_map(|s| Some((s.name.clone(), s.served_root()?.to_path_buf())))
             .collect();
         let served = Served::new(Library::scan(sources).served_files());
         serve(listener, roots, served).unwrap();

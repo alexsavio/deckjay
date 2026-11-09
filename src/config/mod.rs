@@ -10,18 +10,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-#[cfg(test)]
 pub use self::playlist::Playlist;
 #[cfg(test)]
 pub use self::podcast::Feed as PodcastFeed;
 pub use self::podcast::Order as FeedOrder;
 pub use self::podcast::Podcast;
-#[cfg(test)]
 pub use self::radio::Station;
 #[cfg(test)]
 pub use self::source::Look;
 use self::source::RawSource;
-pub use self::source::{Color, Source, SourceKind};
+pub use self::source::{Color, Folder, Source, SourceBody, SourceKind};
 
 /// Unknown keys are an error, so typos are caught.
 #[derive(Debug, Deserialize)]
@@ -177,7 +175,7 @@ impl Config {
         }
         cfg.state_dir = base.join(&cfg.state_dir);
         cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base, &cfg.state_dir)?;
-        let plays_spotify = cfg.sources.iter().any(|s| s.kind == SourceKind::Spotify);
+        let plays_spotify = cfg.sources.iter().any(|s| s.kind() == SourceKind::Spotify);
         if plays_spotify && cfg.spotify.as_ref().is_none_or(|s| s.device.is_none()) {
             bail!(
                 "a spotify source needs a [spotify] table with client_id and device, \
@@ -309,7 +307,10 @@ mod tests {
     #[test]
     fn resolves_relative_paths_against_config_folder() {
         let cfg = parse("").unwrap();
-        assert_eq!(cfg.sources[0].path, Path::new("/srv/deck/music"));
+        assert_eq!(
+            cfg.sources[0].served_root(),
+            Some(Path::new("/srv/deck/music"))
+        );
         assert_eq!(cfg.state_dir, Path::new("/srv/deck/state"));
     }
 
@@ -321,7 +322,7 @@ mod tests {
             Path::new("/srv/deck"),
         )
         .unwrap();
-        assert_eq!(cfg.sources[0].path, Path::new("/data/music"));
+        assert_eq!(cfg.sources[0].served_root(), Some(Path::new("/data/music")));
         assert_eq!(cfg.state_dir, Path::new("/var/lib/deck"));
     }
 
@@ -479,8 +480,8 @@ mod tests {
             "[spotify]\nclient_id = \"abc\"\ndevice = \"Den\"\n{source}"
         ))
         .unwrap();
-        assert_eq!(cfg.sources[0].kind, SourceKind::Spotify);
-        assert!(!cfg.sources[0].serves_files());
+        assert_eq!(cfg.sources[0].kind(), SourceKind::Spotify);
+        assert!(cfg.sources[0].served_root().is_none());
     }
 
     #[test]

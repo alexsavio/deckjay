@@ -1,27 +1,30 @@
 use std::time::Duration;
 
 use super::*;
-use crate::config::{FeedOrder, Podcast, PodcastFeed, SourceKind};
+use crate::config::{FeedOrder, Podcast, PodcastFeed, SourceBody, SourceKind};
 use crate::library::{ItemId, Library, Refilled};
 use crate::podcasts::{Episode, FeedState};
 
 fn source(feeds: &[(&str, FeedOrder)]) -> Source {
     let mut source = Source::plain("maus", SourceKind::Podcast, Path::new("/cache/maus"));
-    source.podcast = Some(Podcast {
-        keep: 5,
-        refresh: Duration::from_hours(6),
-        max_cache_bytes: 1000,
-        max_episode_bytes: 100,
-        feeds: feeds
-            .iter()
-            .map(|&(name, order)| PodcastFeed {
-                name: name.into(),
-                url: "https://example.org/feed".into(),
-                order,
-                keep: Some(2),
-            })
-            .collect(),
-    });
+    source.body = SourceBody::Podcast {
+        cache: "/cache/maus".into(),
+        settings: Podcast {
+            keep: 5,
+            refresh: Duration::from_hours(6),
+            max_cache_bytes: 1000,
+            max_episode_bytes: 100,
+            feeds: feeds
+                .iter()
+                .map(|&(name, order)| PodcastFeed {
+                    name: name.into(),
+                    url: "https://example.org/feed".into(),
+                    order,
+                    keep: Some(2),
+                })
+                .collect(),
+        },
+    };
     source
 }
 
