@@ -4,7 +4,7 @@
 //! report [`PlayerEvent`]s, so the UI does not know which one it drives.
 //! [`progress`] decides when an item reports how far it got.
 
-mod cast;
+pub mod cast;
 pub mod heos;
 pub mod local;
 mod progress;

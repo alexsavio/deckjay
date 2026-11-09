@@ -550,6 +550,21 @@ fn a_speaker_that_accepts_and_never_answers_fails_within_the_timeout() {
 }
 
 #[test]
+fn a_status_check_against_a_speaker_that_never_answers_fails_within_the_timeout() {
+    let fake = FakeCast::start(true, json!([]), json!([]));
+    let player = fake.player();
+    let (tx, done) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(player.status().is_err());
+    });
+    assert_eq!(
+        done.recv_timeout(Duration::from_secs(3)),
+        Ok(true),
+        "the check hung or succeeded"
+    );
+}
+
+#[test]
 fn a_volume_change_travels_over_the_wire() {
     let fake = FakeCast::start(false, json!([]), json!([]));
     let mut player = fake.player();
