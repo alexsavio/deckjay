@@ -384,9 +384,11 @@ Speaker 192.168.1.50:8009 (Cast):
 ```
 
 It never launches an app or loads media, so a clean result proves the
-network path, TLS and the receiver namespace, not playback. A failure
-prints `NOT reachable: <error>`. Against a local port that accepts TCP but
-does not speak TLS it printed `NOT reachable: unexpected end of file`.
+network path, TLS and the receiver namespace, not playback. A refused
+connection prints the connect error, `speaker <host>:<port> not reachable:
+<cause>`. A speaker that accepts TCP and then goes quiet, or does not speak
+TLS, prints `<host>:<port> sent no Cast status: <cause>`; a silent one takes
+15 s, the read bound.
 
 To watch the messages:
 

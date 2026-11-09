@@ -32,9 +32,7 @@ pub(super) struct NowPlaying {
 
 impl Cli {
     pub(super) fn connect(host: &str, port: u16, io_timeout: Duration) -> Result<Cli> {
-        let stream = super::super::connect(host, port)?;
-        stream.set_read_timeout(Some(io_timeout))?;
-        stream.set_write_timeout(Some(io_timeout))?;
+        let stream = super::super::connect(host, port, io_timeout)?;
         let mut cli = Cli {
             reader: BufReader::new(stream),
             io_timeout,

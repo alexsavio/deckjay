@@ -48,7 +48,7 @@ fn connect_tries_every_address() {
     // `localhost` resolves to ::1 first on macOS, and only IPv4 listens here.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    connect("localhost", port).unwrap();
+    connect("localhost", port, Duration::from_secs(1)).unwrap();
 }
 
 #[test]

@@ -30,7 +30,7 @@ use rust_cast::channels::media::{
     Metadata, MusicTrackMediaMetadata, PlayerState, QueueItem, QueueType, ResumeState, StatusEntry,
     StreamType,
 };
-use rust_cast::channels::receiver::{Application, CastDeviceApp, ReceiverChannel};
+use rust_cast::channels::receiver::{Application, CastDeviceApp, ReceiverChannel, Status};
 use rust_cast::message_manager::MessageManager;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
@@ -500,10 +500,17 @@ impl CastPlayer {
         Ok(s)
     }
 
+    fn status(&self) -> Result<Status> {
+        let session = self.dial()?;
+        let ask = || -> Result<Status> {
+            session.connection.connect(RECEIVER)?;
+            Ok(session.receiver.get_status()?)
+        };
+        ask().with_context(|| format!("{}:{} sent no Cast status", self.host, self.port))
+    }
+
     fn dial(&self) -> Result<Session> {
-        let tcp = super::connect(&self.host, self.port)?;
-        tcp.set_read_timeout(Some(self.io_timeout))?;
-        tcp.set_write_timeout(Some(self.io_timeout))?;
+        let tcp = super::connect(&self.host, self.port, self.io_timeout)?;
         let link: Box<dyn Link> = match self.transport {
             Transport::Tls => Box::new(tls(tcp, &self.host)?),
             #[cfg(test)]
@@ -517,6 +524,11 @@ impl CastPlayer {
             app: None,
         })
     }
+}
+
+/// Bounded like every other command: connect, read and write all time out.
+pub fn probe(host: &str, port: u16) -> Result<Status> {
+    CastPlayer::new(host.to_owned(), port).status()
 }
 
 fn tls(tcp: TcpStream, host: &str) -> Result<StreamOwned<ClientConnection, TcpStream>> {

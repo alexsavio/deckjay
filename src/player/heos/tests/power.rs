@@ -20,6 +20,17 @@ fn standby_sends_the_receiver_its_standby_command() {
 }
 
 #[test]
+fn the_control_socket_has_a_write_timeout() {
+    let control = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut player = HeosPlayer::new("127.0.0.1".into(), 1);
+    player.control_port = control.local_addr().unwrap().port();
+
+    let stream = player.control_stream().unwrap();
+
+    assert!(stream.write_timeout().unwrap().is_some());
+}
+
+#[test]
 fn a_speaker_without_a_control_port_still_stops() {
     let unused = TcpListener::bind("127.0.0.1:0").unwrap();
     let closed = unused.local_addr().unwrap().port();

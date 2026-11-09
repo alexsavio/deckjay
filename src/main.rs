@@ -34,7 +34,7 @@ mod systemd;
 mod ui;
 
 use std::fmt::Display;
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -582,24 +582,7 @@ fn print_audio_outputs(cfg: &Config, report: &mut Report) {
 }
 
 fn print_cast_speaker(cfg: &Config, report: &mut Report) {
-    let reachable = (cfg.speaker_host.as_str(), cfg.speaker_port())
-        .to_socket_addrs()
-        .map_err(anyhow::Error::from)
-        .and_then(|mut addrs| addrs.next().context("cannot resolve speaker address"))
-        .and_then(|addr| Ok(TcpStream::connect_timeout(&addr, Duration::from_secs(3))?));
-    if let Err(err) = reachable {
-        report.problem(format!("  NOT reachable: {err:#}"));
-        return;
-    }
-    match rust_cast::CastDevice::connect_without_host_verification(
-        cfg.speaker_host.clone(),
-        cfg.speaker_port(),
-    )
-    .map_err(anyhow::Error::from)
-    .and_then(|device| {
-        device.connection.connect("receiver-0")?;
-        Ok(device.receiver.get_status()?)
-    }) {
+    match player::cast::probe(&cfg.speaker_host, cfg.speaker_port()) {
         Ok(status) => {
             let volume = status
                 .volume
@@ -610,7 +593,7 @@ fn print_cast_speaker(cfg: &Config, report: &mut Report) {
                 println!("  running app: {} ({})", app.display_name, app.app_id);
             }
         }
-        Err(err) => report.problem(format!("  NOT reachable: {err:#}")),
+        Err(err) => report.problem(format!("  {err:#}")),
     }
 }
 

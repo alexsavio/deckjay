@@ -24,6 +24,7 @@
 mod cli;
 
 use std::io::{self, ErrorKind, Write};
+use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -238,7 +239,7 @@ impl Speaker for HeosPlayer {
     /// Plain HEOS speakers have no control port; the connection is refused
     /// and the power key only stops them.
     fn standby(&mut self) -> Result<()> {
-        let mut control = super::connect(&self.host, self.control_port)?;
+        let mut control = self.control_stream()?;
         control.write_all(b"PWSTANDBY\r")?;
         info!("put the receiver in standby");
         Ok(())
@@ -246,6 +247,10 @@ impl Speaker for HeosPlayer {
 }
 
 impl HeosPlayer {
+    fn control_stream(&self) -> Result<TcpStream> {
+        super::connect(&self.host, self.control_port, self.io_timeout)
+    }
+
     /// Without an active album, whatever the speaker plays is not known to be
     /// ours, so the album starts over instead of pausing it.
     fn toggle_pause(&mut self, events: &mut Emitter) -> Result<()> {
