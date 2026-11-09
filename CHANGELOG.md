@@ -16,6 +16,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(spotify)* Read the refresh token from its file before a refresh ([#33](https://github.com/alexsavio/deckjay/issues/33))
 - *(podcasts)* Read audio types from the library's table, with m4b ([#34](https://github.com/alexsavio/deckjay/issues/34))
 - *(spotify)* Sweep a cover's stale temps before the fetch, and fix a flaky test ([#35](https://github.com/alexsavio/deckjay/issues/35))
+- *(podcasts)* Keep the playing episode's picture ([#36](https://github.com/alexsavio/deckjay/issues/36))
 
 ### 🚜 Refactor
 
