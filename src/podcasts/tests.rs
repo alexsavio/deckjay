@@ -720,3 +720,31 @@ fn load_cached_reads_the_cache_the_settings_describe() {
     assert_eq!(loaded, cached(&settings(&podcast, dir)));
     assert_eq!(loaded.feeds[0].episodes.len(), 2);
 }
+
+#[test]
+fn settings_copy_every_field_of_the_config() {
+    let mut podcast = podcast(&[("Die Maus", FeedOrder::Oldest)]);
+    podcast.feeds[0].url = "https://example.org/maus.xml".into();
+    podcast.keep = 3;
+    podcast.refresh = Duration::from_hours(12);
+
+    let got = settings(&podcast, Path::new("/cache/maus"));
+
+    assert_eq!(
+        got,
+        Settings {
+            cache_dir: PathBuf::from("/cache/maus"),
+            keep: 3,
+            refresh: Duration::from_hours(12),
+            max_cache_bytes: 1000,
+            max_episode_bytes: 100,
+            feeds: vec![FeedSettings {
+                slug: "die-maus".into(),
+                name: "Die Maus".into(),
+                url: "https://example.org/maus.xml".into(),
+                keep: Some(2),
+                order: FeedOrder::Oldest,
+            }],
+        }
+    );
+}
