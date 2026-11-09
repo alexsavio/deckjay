@@ -59,10 +59,12 @@ impl Layout {
     /// No shelves count as one empty shelf.
     pub(super) fn new(rows: usize, cols: usize, shelves: Vec<Vec<ItemId>>) -> Layout {
         // With one item key, paging would turn it into the "more" key and
-        // hide every item; the deck backends only open bigger grids.
+        // hide every item; the deck backends only open grids that pass
+        // `Grid::check_shape`.
         debug_assert!(
             Grid::check_shape(rows, cols).is_ok(),
-            "no room for items on a {rows}x{cols} deck"
+            "a {rows}x{cols} deck is not a grid the player can draw: no room for items or too \
+             many keys"
         );
         let item_keys = (rows - 1) * cols;
         let shelves = if shelves.is_empty() {
