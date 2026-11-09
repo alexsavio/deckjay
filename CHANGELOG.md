@@ -27,6 +27,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(podcasts)* Take the podcast settings from the config ([#38](https://github.com/alexsavio/deckjay/issues/38))
 - *(player)* Hand the speakers only the commands they can get ([#39](https://github.com/alexsavio/deckjay/issues/39))
 
+### 🧪 Testing
+
+- *(podcasts)* Pin every field settings copies from the config ([#40](https://github.com/alexsavio/deckjay/issues/40))
+
 ### ⚙️ Miscellaneous Tasks
 
 - Refine Dependabot updates and log security bumps ([#24](https://github.com/alexsavio/deckjay/issues/24))
