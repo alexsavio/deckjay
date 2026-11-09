@@ -502,4 +502,93 @@ mod tests {
         assert!(got[0].one_key);
         assert!(!got[1].one_key);
     }
+
+    #[test]
+    fn every_source_type_resolves_to_its_fields() {
+        let got = sources(
+            "[[source]]\ntype = \"music\"\npath = \"band\"\none_key = true\n\
+             [source.item.\"A\"]\ncolor = \"#000000\"\n\
+             [[source]]\ntype = \"radio\"\npicture = \"r.png\"\n\
+             [[source.station]]\nname = \"Kinder\"\nurl = \"https://example.org/k.mp3\"\n\
+             [[source]]\ntype = \"spotify\"\ncolor = \"#ffffff\"\n\
+             [[source.playlist]]\nname = \"Bedtime\"\nuri = \"spotify:playlist:abc\"\n\
+             [[source]]\ntype = \"podcast\"\n\
+             [[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n",
+        )
+        .unwrap();
+        let feeds = got[3].podcast.clone().unwrap();
+        assert_eq!(
+            got,
+            [
+                Source {
+                    name: "music".into(),
+                    kind: SourceKind::Music,
+                    path: "/srv/deck/band".into(),
+                    look: Look::default(),
+                    items: BTreeMap::from([(
+                        "A".to_owned(),
+                        Look {
+                            picture: None,
+                            color: Some(Color([0, 0, 0])),
+                        },
+                    )]),
+                    podcast: None,
+                    stations: Vec::new(),
+                    playlists: Vec::new(),
+                    one_key: true,
+                },
+                Source {
+                    name: "radio".into(),
+                    kind: SourceKind::Radio,
+                    path: PathBuf::new(),
+                    look: Look {
+                        picture: Some("/srv/deck/r.png".into()),
+                        color: None,
+                    },
+                    items: BTreeMap::new(),
+                    podcast: None,
+                    stations: vec![Station {
+                        name: "Kinder".into(),
+                        url: "https://example.org/k.mp3".into(),
+                        picture: None,
+                        color: None,
+                    }],
+                    playlists: Vec::new(),
+                    one_key: false,
+                },
+                Source {
+                    name: "spotify".into(),
+                    kind: SourceKind::Spotify,
+                    path: "/srv/deck/state/spotify-covers".into(),
+                    look: Look {
+                        picture: None,
+                        color: Some(Color([255, 255, 255])),
+                    },
+                    items: BTreeMap::new(),
+                    podcast: None,
+                    stations: Vec::new(),
+                    playlists: vec![Playlist {
+                        name: "Bedtime".into(),
+                        uri: "spotify:playlist:abc".into(),
+                        picture: None,
+                        color: None,
+                    }],
+                    one_key: false,
+                },
+                Source {
+                    name: "podcast".into(),
+                    kind: SourceKind::Podcast,
+                    path: "/srv/deck/state/podcasts/podcast".into(),
+                    look: Look::default(),
+                    items: BTreeMap::new(),
+                    podcast: Some(feeds),
+                    stations: Vec::new(),
+                    playlists: Vec::new(),
+                    one_key: false,
+                },
+            ]
+        );
+        let serves: Vec<bool> = got.iter().map(Source::serves_files).collect();
+        assert_eq!(serves, [true, false, false, true]);
+    }
 }
