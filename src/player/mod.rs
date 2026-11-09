@@ -1,7 +1,8 @@
 //! Plays albums on the speaker, on a thread of its own. Three kinds of
 //! speaker are supported: Chromecast ([`cast`]), Denon HEOS ([`heos`]) and
-//! this computer's sound output ([`local`]). All take [`PlayerCmd`]s and
-//! report [`PlayerEvent`]s, so the UI does not know which one it drives.
+//! this computer's sound output ([`local`]). The player thread takes
+//! [`PlayerCmd`]s and hands the speakers [`SpeakerCmd`]s; it reports
+//! [`PlayerEvent`]s, so the UI does not know which one it drives.
 //! [`progress`] decides when an item reports how far it got.
 
 pub mod cast;

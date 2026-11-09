@@ -218,7 +218,7 @@ Every command opens its own connection and drops it at the end, without a
    A failed poll is logged at debug level; polls failing for 20 s in a row
    (`POLL_FAILURE_GRACE`) end the album the same way. A poll or command
    that works restarts the clock.
-9. **Stop** (`Speaker::stop`, before another speaker takes over): only
+9. **Stop** (`Device::stop`, before another speaker takes over): only
    while an item of ours is active. Media `GET_STATUS` (an item that
    reports progress takes its place from it), then `STOP` to the media
    session when the media is ours. Polling stops, and the caller reports

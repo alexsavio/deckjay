@@ -201,7 +201,7 @@ heos://browse/play_stream?pid=7&url=http://10.0.0.2:8765/music/A/01.m4a
    failures come (a refused connection fails at once, a hung one after
    its 5 s timeout). A poll or command that works restarts the clock. A
    failed `play_stream` from a poll ends the album.
-9. **Stop** (`Speaker::stop`, before another speaker takes over): only
+9. **Stop** (`Device::stop`, before another speaker takes over): only
    while an album or station is active. `set_play_state stop` (an item that
    reports progress first offers its latest place); polling stops, and the
    caller reports what follows. A failure is logged as a warning and
