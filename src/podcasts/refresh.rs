@@ -29,6 +29,9 @@ pub(super) struct Worker {
     api: Agent,
     stream: Agent,
     pinned: Option<String>,
+    /// The pinned episode as the last refresh saw it, with its picture: the manifest
+    /// forgets it once it leaves the shelf, but its files stay while it plays.
+    playing: Option<Stored>,
     /// Paths given to the publisher and not taken back since.
     published: HashSet<PathBuf>,
     /// Slugs of the feeds whose last fetch failed.
@@ -77,6 +80,7 @@ impl Worker {
             api: net::api_agent(download::FEED_TIMEOUT),
             stream: net::stream_agent(),
             pinned: None,
+            playing: None,
             published: HashSet::new(),
             failing: HashSet::new(),
             broken_pictures: HashSet::new(),
@@ -188,6 +192,7 @@ impl Worker {
         }
 
         self.drain_pins();
+        self.playing = self.find_playing(&runs);
         let mut snapshot = Snapshot::default();
         let mut wanted = BTreeSet::new();
         let mut unwanted = Vec::new();
@@ -199,7 +204,7 @@ impl Worker {
             // Without the feed or the old manifest, `manifest` can miss cached
             // files that are still good; they wait for a refresh that has both.
             if run.remote.is_some() && !run.manifest_broken {
-                let keep = keep_names(run, &manifest);
+                let keep = keep_names(run, &manifest, self.playing.as_ref());
                 let stale = cache::unwanted(&run.dir, &keep);
                 unwanted.extend(
                     stale
@@ -220,6 +225,14 @@ impl Worker {
         log_summary(&runs, &snapshot, dropped);
         self.snapshots.send(snapshot).ok()?;
         Some(!runs.is_empty() && runs.iter().all(|run| run.remote.is_none()))
+    }
+
+    fn find_playing(&mut self, runs: &[Run]) -> Option<Stored> {
+        let id = self.pinned.as_deref()?;
+        let on_disk = runs.iter().flat_map(|run| &run.disk).find(|s| s.id == id);
+        on_disk
+            .cloned()
+            .or_else(|| self.playing.take().filter(|s| s.id == id))
     }
 
     fn fetch(&mut self, feed: FeedSettings) -> Option<Run> {
@@ -458,10 +471,11 @@ fn files_to_publish(dir: &Path, slug: &str, manifest: &Manifest) -> Vec<PathBuf>
         .collect()
 }
 
-fn keep_names(run: &Run, manifest: &Manifest) -> HashSet<String> {
+fn keep_names(run: &Run, manifest: &Manifest, playing: Option<&Stored>) -> HashSet<String> {
     let episodes = manifest
         .episodes
         .iter()
+        .chain(playing)
         .flat_map(|e| [Some(e.file.clone()), e.picture.clone()]);
     episodes
         .chain([manifest.picture.clone()])

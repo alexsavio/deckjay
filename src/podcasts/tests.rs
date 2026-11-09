@@ -43,7 +43,7 @@ impl Publisher for Recorder {
 
 struct World {
     server: FakeServer,
-    _files: tempfile::TempDir,
+    files: tempfile::TempDir,
     cache: tempfile::TempDir,
 }
 
@@ -58,7 +58,7 @@ impl World {
         fs::write(files.path().join("cover.png"), png(1024, 768)).unwrap();
         World {
             server: FakeServer::start(files.path()),
-            _files: files,
+            files,
             cache: tempfile::tempdir().unwrap(),
         }
     }
@@ -405,6 +405,62 @@ fn the_playing_episode_is_kept_until_it_stops() {
     };
     assert_eq!(removed, std::slice::from_ref(&old));
     assert!(!world.cache.path().join(&old).exists());
+    run.stop();
+}
+
+#[test]
+fn the_playing_episodes_picture_is_kept_until_it_stops() {
+    let world = World::new();
+    for n in 1..=2 {
+        fs::write(world.files.path().join(format!("pic{n}.png")), png(64, 64)).unwrap();
+    }
+    let set_feed = |episodes: &[u8]| {
+        let titles: Vec<String> = episodes.iter().map(|n| format!("Episode {n}")).collect();
+        let guids: Vec<String> = episodes.iter().map(|n| format!("ep-{n}")).collect();
+        let dates: Vec<String> = episodes
+            .iter()
+            .map(|n| format!("{n:02} Jan 2025 10:00:00 +0000"))
+            .collect();
+        let urls: Vec<String> = episodes
+            .iter()
+            .map(|n| world.server.url(&format!("/files/e{n}.mp3")))
+            .collect();
+        let pics: Vec<String> = episodes
+            .iter()
+            .map(|n| world.server.url(&format!("/files/pic{n}.png")))
+            .collect();
+        let items: Vec<Item> = (0..episodes.len())
+            .map(|i| Item {
+                guid: &guids[i],
+                title: &titles[i],
+                date: &dates[i],
+                url: &urls[i],
+                picture: Some(&pics[i]),
+            })
+            .collect();
+        world.server.set_feed(&rss("Maus", None, &items));
+    };
+    set_feed(&[1]);
+    let run = start(world.settings(&world.feed_url(), 1), timing());
+    let before = run.snapshot_until(titles_are(&["Episode 1"]));
+    let picture = before.feeds[0].episodes[0].picture.clone().unwrap();
+    assert!(picture.is_file());
+    run.next_event();
+    run.now_playing
+        .send(NowPlaying(Some(hash_hex("ep-1"))))
+        .unwrap();
+
+    set_feed(&[1, 2]);
+    run.snapshot_until(titles_are(&["Episode 2"]));
+    thread::sleep(GRACE * 3);
+    assert!(picture.is_file(), "the playing episode lost its picture");
+
+    run.now_playing.send(NowPlaying(None)).unwrap();
+    let deadline = Instant::now() + WAIT;
+    while picture.exists() {
+        assert!(Instant::now() < deadline, "the picture stayed after stop");
+        thread::sleep(Duration::from_millis(20));
+    }
     run.stop();
 }
 
