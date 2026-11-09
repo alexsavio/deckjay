@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use super::cache::Manifest;
 use super::feed::RemoteEpisode;
 
 /// An episode file in the cache, as the manifest records it.
@@ -78,6 +79,17 @@ pub fn plan(
         publish,
         drop,
     }
+}
+
+/// Names in the feed's folder that stay: the files and pictures of `manifest`
+/// and of `playing`, the loaded episode, which the manifest may no longer list.
+pub fn keep_files(manifest: &Manifest, playing: Option<&Stored>) -> HashSet<String> {
+    let episodes = manifest.episodes.iter().chain(playing);
+    episodes
+        .flat_map(|e| [Some(e.file.clone()), e.picture.clone()])
+        .chain([manifest.picture.clone()])
+        .flatten()
+        .collect()
 }
 
 /// Sizes of the newest `keep` episodes of feed and disk, newest first: the

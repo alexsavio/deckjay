@@ -11,6 +11,13 @@ use crate::podcasts::{FeedSettings, Order, Settings, Snapshot};
 /// The longest cache folder name the podcasts thread accepts.
 const MAX_SLUG: usize = 64;
 
+impl ItemKey {
+    /// The episode id of a podcast item's key (`<source>/<feed folder>/<episode id>`).
+    pub fn episode_id(&self) -> Option<&str> {
+        self.0.rsplit('/').next()
+    }
+}
+
 /// `None` unless `source` is a podcast source.
 pub fn settings(source: &Source) -> Option<Settings> {
     let podcast = source.podcast.as_ref()?;

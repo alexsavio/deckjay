@@ -74,11 +74,9 @@ impl Ui {
         for thread in &mut self.podcasts {
             let prefix = format!("{}/", thread.source.name);
             let episode = self.current.and_then(|id| {
-                let key = &self.library.item(id).key.0;
-                key.strip_prefix(&prefix)?
-                    .rsplit('/')
-                    .next()
-                    .map(str::to_string)
+                let key = &self.library.item(id).key;
+                key.0.starts_with(&prefix).then_some(())?;
+                key.episode_id().map(str::to_string)
             });
             if episode != thread.pinned {
                 if thread

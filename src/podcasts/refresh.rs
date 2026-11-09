@@ -204,7 +204,8 @@ impl Worker {
             // Without the feed or the old manifest, `manifest` can miss cached
             // files that are still good; they wait for a refresh that has both.
             if run.remote.is_some() && !run.manifest_broken {
-                let keep = keep_names(run, &manifest, self.playing.as_ref());
+                let mut keep = plan::keep_files(&manifest, self.playing.as_ref());
+                keep.extend(run.parts.iter().cloned());
                 let stale = cache::unwanted(&run.dir, &keep);
                 unwanted.extend(
                     stale
@@ -468,19 +469,6 @@ fn files_to_publish(dir: &Path, slug: &str, manifest: &Manifest) -> Vec<PathBuf>
         .flatten()
         .filter(|name| dir.join(name).is_file())
         .map(|name| Path::new(slug).join(name))
-        .collect()
-}
-
-fn keep_names(run: &Run, manifest: &Manifest, playing: Option<&Stored>) -> HashSet<String> {
-    let episodes = manifest
-        .episodes
-        .iter()
-        .chain(playing)
-        .flat_map(|e| [Some(e.file.clone()), e.picture.clone()]);
-    episodes
-        .chain([manifest.picture.clone()])
-        .flatten()
-        .chain(run.parts.iter().cloned())
         .collect()
 }
 
