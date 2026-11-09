@@ -116,4 +116,18 @@ mod tests {
             assert!(format!("{err:#}").contains(needle), "{text}: {err:#}");
         }
     }
+
+    #[test]
+    fn name_errors_keep_their_exact_text() {
+        let one = "[[playlist]]\nname = \"A\"\nuri = \"spotify:playlist:abc\"\n";
+        let blank = "[[playlist]]\nname = \" \"\nuri = \"spotify:playlist:abc\"\n";
+        assert_eq!(
+            playlists(blank).unwrap_err().to_string(),
+            "spotify source spotify: a playlist has an empty name"
+        );
+        assert_eq!(
+            playlists(&format!("{one}{one}")).unwrap_err().to_string(),
+            "spotify source spotify: two playlists are named \"A\""
+        );
+    }
 }

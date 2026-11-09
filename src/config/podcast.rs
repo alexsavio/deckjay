@@ -230,4 +230,17 @@ mod tests {
     fn a_feed_url_scheme_may_be_upper_case() {
         check("[[feed]]\nname = \"A\"\nurl = \"HTTPS://a/feed\"\n").unwrap();
     }
+
+    #[test]
+    fn name_errors_keep_their_exact_text() {
+        let blank = "[[feed]]\nname = \" \"\nurl = \"https://a/feed\"\n";
+        assert_eq!(
+            check(blank).unwrap_err().to_string(),
+            "podcast source maus: a feed has an empty name"
+        );
+        assert_eq!(
+            check(&format!("{FEED}{FEED}")).unwrap_err().to_string(),
+            "podcast source maus: two feeds are named \"Die Maus\""
+        );
+    }
 }

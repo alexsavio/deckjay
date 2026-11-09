@@ -138,4 +138,18 @@ mod tests {
     fn a_station_url_scheme_may_be_upper_case() {
         stations("[[station]]\nname = \"A\"\nurl = \"HTTPS://x\"\n").unwrap();
     }
+
+    #[test]
+    fn name_errors_keep_their_exact_text() {
+        let one = "[[station]]\nname = \"A\"\nurl = \"https://a/x\"\n";
+        let blank = "[[station]]\nname = \" \"\nurl = \"https://a/x\"\n";
+        assert_eq!(
+            stations(blank).unwrap_err().to_string(),
+            "radio source radio: a station has an empty name"
+        );
+        assert_eq!(
+            stations(&format!("{one}{one}")).unwrap_err().to_string(),
+            "radio source radio: two stations are named \"A\""
+        );
+    }
 }
