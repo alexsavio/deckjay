@@ -10,6 +10,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### 🐛 Bug Fixes
 
 - *(player)* Bound IO on every speaker socket ([#27](https://github.com/alexsavio/deckjay/issues/27))
+- *(config)* One http(s) URL rule for config, radio and podcasts ([#28](https://github.com/alexsavio/deckjay/issues/28))
 
 ### 🚜 Refactor
 
