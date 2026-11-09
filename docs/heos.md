@@ -108,8 +108,9 @@ Error codes that matter here (spec §6.2):
   below.
 - A `fail` reply to `register_for_change_events` keeps the connection and
   is not asked again for the same setting: the command goes on, the item
-  plays without progress events, and one warning is logged per connection. An I/O error
-  (timeout, reset) drops the connection like any other command's.
+  plays without progress events, and one warning is logged per connection.
+  An I/O error (timeout, reset) drops the connection like any other
+  command's.
 - deckjay never sends `get_queue`, `get_now_playing_media`,
   `play_next`, `play_previous` or `heart_beat`.
 
