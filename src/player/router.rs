@@ -279,6 +279,22 @@ mod tests {
     }
 
     #[test]
+    fn commands_after_a_playlist_and_tracks_go_to_the_output() {
+        let (mut router, log) = router(true);
+        let mut events = Emitter::new(mpsc::channel().0);
+        for cmd in [playlist(), tracks(), PlayerCmd::Next] {
+            router
+                .handle(cmd.speaker_cmd().unwrap(), &mut events)
+                .unwrap();
+        }
+        let log = log.borrow();
+        assert_eq!(
+            log[log.len() - 3..],
+            ["spotify stop", "output play", "output next"]
+        );
+    }
+
+    #[test]
     fn power_off_stops_spotify_and_puts_the_speaker_box_in_standby() {
         let (mut router, log) = router(true);
         let (tx, events) = mpsc::channel();
