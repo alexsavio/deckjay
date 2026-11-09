@@ -7,6 +7,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+### 🐛 Bug Fixes
+
+- *(player)* Bound IO on every speaker socket ([#27](https://github.com/alexsavio/deckjay/issues/27))
+
 ### 🚜 Refactor
 
 - *(ui)* Compute key navigation in Layout only ([#26](https://github.com/alexsavio/deckjay/issues/26))
