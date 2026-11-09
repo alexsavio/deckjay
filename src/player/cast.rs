@@ -500,7 +500,6 @@ impl CastPlayer {
         Ok(s)
     }
 
-    /// The receiver's status over a fresh connection: what `deckjay check` shows.
     fn status(&self) -> Result<Status> {
         let session = self.dial()?;
         session.connection.connect(RECEIVER)?;
@@ -524,8 +523,7 @@ impl CastPlayer {
     }
 }
 
-/// Asks the speaker at `host:port` for its status, with the same bounds on
-/// connect, read and write as every other command.
+/// Bounded like every other command: connect, read and write all time out.
 pub fn probe(host: &str, port: u16) -> Result<Status> {
     CastPlayer::new(host.to_owned(), port).status()
 }
