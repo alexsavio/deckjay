@@ -64,8 +64,9 @@ before each refresh deckjay reads it again, because Spotify may send a new
 refresh token and another deckjay process (`just doctor`) may have saved
 it. If Spotify still refuses the token, deckjay reads the file once more and
 tries again only when the token in it changed. If the file cannot be read, or
-a new token could not be saved, deckjay uses the copy it holds in memory. If Spotify stops accepting the
-login, the log says to run `spotify-login` again.
+a new token could not be saved, deckjay uses the copy it holds in memory.
+If Spotify stops accepting the login, the log says to run `spotify-login`
+again.
 
 Scopes: `user-read-playback-state`, `user-modify-playback-state`,
 `playlist-read-private` and `playlist-read-collaborative`.
