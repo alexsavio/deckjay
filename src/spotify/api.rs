@@ -1,6 +1,7 @@
 //! A blocking client for the parts of the Spotify Web API that deckjay
 //! uses: Connect devices, playback control, the account name and playlist
-//! pictures. It keeps the access token fresh and saves a rotated refresh token.
+//! pictures. It keeps the access token fresh: it reads the refresh token from
+//! its file before each refresh and saves a rotated one.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -254,7 +255,8 @@ impl fmt::Debug for Client {
 }
 
 impl Client {
-    /// `state_dir` is where a rotated refresh token is saved.
+    /// `state_dir` holds the token file: read before each refresh, written
+    /// after a rotation. `token` is used when the file cannot be read.
     pub fn new(token: TokenFile, state_dir: &Path, endpoints: Endpoints) -> Client {
         Client {
             agent: crate::net::api_agent(TIMEOUT),

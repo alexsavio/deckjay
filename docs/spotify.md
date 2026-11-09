@@ -64,7 +64,10 @@ before each refresh deckjay reads it again, because Spotify may send a new
 refresh token and another deckjay process (`just doctor`) may have saved
 it. If Spotify still refuses the token, deckjay reads the file once more and
 tries again only when the token in it changed. If the file cannot be read, or
-a new token could not be saved, deckjay uses the copy it holds in memory.
+a new token could not be saved, deckjay uses the copy it holds in memory
+(until Spotify refuses that copy, or a later save works).
+If two deckjay processes refresh at the same moment, one can fail once with
+"login expired"; the next refresh works.
 If Spotify stops accepting the login, the log says to run `spotify-login`
 again.
 
