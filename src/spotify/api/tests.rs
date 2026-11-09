@@ -200,25 +200,48 @@ fn a_damaged_token_file_refreshes_with_the_copy_in_memory() {
     assert_eq!(rig.fake.token_requests().len(), 1);
 }
 
+/// A state dir that refuses new files until the guard drops. `None` (with a
+/// line on stderr) where the mode does not bind, e.g. when running as root.
+#[cfg(unix)]
+struct ReadOnly<'a>(&'a std::path::Path);
+
+#[cfg(unix)]
+impl<'a> ReadOnly<'a> {
+    fn new(dir: &'a std::path::Path) -> Option<ReadOnly<'a>> {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let guard = ReadOnly(dir);
+        if std::fs::File::create(dir.join("probe")).is_ok() {
+            eprintln!(
+                "skipped: {} stays writable (running as root?)",
+                dir.display()
+            );
+            return None;
+        }
+        Some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly<'_> {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(self.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_rotated_token_that_could_not_be_saved_stays_in_use() {
-    use std::os::unix::fs::PermissionsExt;
-
     let mut rig = Rig::new();
     rotating(&rig);
-    let dir = rig.dir.path();
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let writable = std::fs::File::create(dir.join("probe")).is_ok();
-    let result = if writable {
-        None
-    } else {
-        Some((rig.client.devices(), rig.client.devices()))
-    };
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let Some((first, second)) = result else {
+    let Some(read_only) = ReadOnly::new(rig.dir.path()) else {
         return;
     };
+    let (first, second) = (rig.client.devices(), rig.client.devices());
+    drop(read_only);
     first.unwrap();
     second.unwrap();
     let tokens = rig.fake.token_requests();
@@ -226,6 +249,24 @@ fn a_rotated_token_that_could_not_be_saved_stays_in_use() {
         tokens[1].param("refresh_token").as_deref(),
         Some("refresh-2")
     );
+}
+
+#[test]
+fn a_client_refreshes_with_the_token_another_client_saved_after_its_own_rotation() {
+    let mut rig = Rig::new();
+    rotating(&rig);
+    let mut other = second_client(&rig);
+    rig.client.devices().unwrap();
+    other.devices().unwrap();
+    rig.client.devices().unwrap();
+
+    let sent: Vec<_> = rig
+        .fake
+        .token_requests()
+        .iter()
+        .map(|request| request.param("refresh_token").unwrap())
+        .collect();
+    assert_eq!(sent, ["refresh-1", "refresh-2", "refresh-3"]);
 }
 
 #[test]
