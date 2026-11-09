@@ -127,4 +127,42 @@ mod tests {
         assert_eq!(fs::read(&dest).unwrap(), b"new");
         assert!(!part.exists());
     }
+
+    #[test]
+    fn only_the_temps_of_another_process_beside_the_target_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("x");
+        let own = temp_name(&target);
+        let own_name = own.file_name().unwrap().to_str().unwrap().to_owned();
+        let other_pid = std::process::id().wrapping_add(1);
+        let gone = format!(".x.{other_pid}.0.part");
+        let kept_files = [
+            "x".to_owned(),
+            own_name,
+            ".x.12.part".into(),
+            ".x.1.2.3.part".into(),
+            ".x..part".into(),
+            "..x.1.2.part".into(),
+            ".x.1.2.part.bak".into(),
+            ".x.bad.1.2.part".into(),
+            ".x.+5.1.part".into(),
+            ".y.1.2.part".into(),
+        ];
+        for name in kept_files.iter().chain([&gone]) {
+            fs::write(dir.path().join(name), b"data").unwrap();
+        }
+        fs::create_dir(dir.path().join(".x.5.6.part")).unwrap();
+
+        remove_stale_temps(&target);
+
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        let mut want: Vec<String> = kept_files.to_vec();
+        want.push(".x.5.6.part".into());
+        want.sort();
+        assert_eq!(left, want);
+    }
 }
