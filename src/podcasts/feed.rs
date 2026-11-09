@@ -377,6 +377,8 @@ mod tests {
             extension("audio/x-m4b", "https://x/download?id=7"),
             Some("m4b")
         );
+        // The type wins over the URL, as for every other audio/ arm.
+        assert_eq!(extension("audio/x-m4b", "https://x/book.mp3"), Some("m4b"));
     }
 
     #[test]
