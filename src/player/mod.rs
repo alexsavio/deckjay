@@ -115,6 +115,38 @@ impl Content {
     }
 }
 
+/// What a speaker was last told to play. `S` is the speaker's own form of a
+/// station.
+enum Loaded<S> {
+    Idle,
+    Album {
+        tracks: Vec<TrackInfo>,
+        /// Whether the album sends [`PlayerEvent::Progress`].
+        progress: bool,
+    },
+    Station(S),
+}
+
+impl<S> Loaded<S> {
+    fn tracks(&self) -> &[TrackInfo] {
+        match self {
+            Loaded::Album { tracks, .. } => tracks,
+            Loaded::Idle | Loaded::Station(_) => &[],
+        }
+    }
+
+    fn station(&self) -> Option<&S> {
+        match self {
+            Loaded::Station(station) => Some(station),
+            Loaded::Idle | Loaded::Album { .. } => None,
+        }
+    }
+
+    fn wants_progress(&self) -> bool {
+        matches!(self, Loaded::Album { progress: true, .. })
+    }
+}
+
 #[derive(Debug)]
 pub enum PlayerCmd {
     /// `item` is an id chosen by the caller; it is echoed back in events.
@@ -399,6 +431,15 @@ impl Emitter {
 
     fn trouble(&self, text: String) {
         self.send(Some(PlayerEvent::Trouble(text)));
+    }
+
+    /// `item` replaces the one playing; `outgoing` is that item's place as
+    /// the speaker reads it now, reported before `begin` reports its latest.
+    fn replace(&mut self, item: ItemId, progress: bool, outgoing: Option<Place>) {
+        if let Some(at) = outgoing {
+            self.place(at, false);
+        }
+        self.begin(item, progress);
     }
 
     /// `item` starts; the item it replaces reports its latest place first.

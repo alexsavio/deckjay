@@ -68,7 +68,7 @@ impl SpotifyPlayer {
         events: &mut Emitter,
     ) -> Result<()> {
         let Playlist { uri, name } = playlist;
-        events.begin(item, false);
+        events.replace(item, false, None);
         let wanted = self.connect.device.clone();
         let client = self.client()?;
         let devices = client.devices()?;

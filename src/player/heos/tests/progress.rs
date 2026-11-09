@@ -181,3 +181,24 @@ fn a_place_inside_the_track_starts_that_track_from_its_beginning() {
         "the CLI has no seek: {seeks:?}"
     );
 }
+
+#[test]
+fn a_station_reports_the_books_latest_place_first() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(book(3)).unwrap();
+    rig.poll_with("play");
+    rig.events();
+    rig.fake.script().progress = Some("pid=7&cur_pos=42000&duration=180000");
+    rig.send(PlayerCmd::SetVolume(0.3)).unwrap();
+    let base = crate::player::tests::web(|_, stream| {
+        crate::player::tests::head(stream, 200, "audio/mpeg");
+        let _ = stream.write_all(b"not really audio");
+    });
+    let station = PlayerCmd::Play {
+        item: ITEM,
+        content: crate::player::tests::station(format!("{base}/kids.mp3")),
+        volume: 0.2,
+    };
+    rig.send(station).unwrap();
+    assert_eq!(rig.events(), [at(0, 42, Some(180)), Playing(ITEM)]);
+}

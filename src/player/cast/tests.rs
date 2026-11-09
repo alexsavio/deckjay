@@ -614,7 +614,10 @@ fn a_poll_reads_our_track_playing_from_the_media_app() {
     let fake = FakeCast::start(false, media_receiver(), media);
     let mut player = fake.player();
     player.item = ITEM;
-    player.tracks = tracks();
+    player.loaded = Loaded::Album {
+        tracks: tracks(),
+        progress: false,
+    };
     player.active = true;
     let (tx, events) = mpsc::channel();
     player.poll(&mut Emitter::new(tx)).unwrap();
@@ -635,4 +638,140 @@ fn a_poll_reads_our_track_playing_from_the_media_app() {
         ["CONNECT", "GET_STATUS", "CONNECT", "GET_STATUS"],
         "the platform receiver first, then the media app"
     );
+}
+
+/// The receiver plays track 1 of `tracks()` at 12.5 s of 300.
+fn playing_track_one() -> Value {
+    json!([{
+        "mediaSessionId": 1,
+        "playbackRate": 1.0,
+        "playerState": "PLAYING",
+        "currentTime": 12.5,
+        "supportedMediaCommands": 15,
+        "media": {
+            "contentId": url(1),
+            "streamType": "BUFFERED",
+            "contentType": "audio/mpeg",
+            "duration": 300.0,
+        },
+    }])
+}
+
+const NEXT: ItemId = ItemId(6);
+
+fn album(item: ItemId, progress: bool) -> PlayerCmd {
+    PlayerCmd::Play {
+        item,
+        content: Content::Tracks {
+            tracks: tracks(),
+            start: Start::default(),
+            progress,
+        },
+        volume: 0.2,
+    }
+}
+
+fn old_place() -> PlayerEvent {
+    PlayerEvent::Progress {
+        item: ITEM,
+        track: 1,
+        position: Duration::from_millis(12_500),
+        duration: Some(Duration::from_secs(300)),
+    }
+}
+
+struct Played {
+    fake: FakeCast,
+    player: CastPlayer,
+    emitter: Emitter,
+    events: mpsc::Receiver<PlayerEvent>,
+}
+
+impl Played {
+    /// A receiver playing track 1 of an album that asked for `progress`, as
+    /// item `ITEM`; the events and requests so far are cleared.
+    fn start(progress: bool) -> Played {
+        let fake = FakeCast::start(false, media_receiver(), playing_track_one());
+        let player = fake.player();
+        let (tx, events) = mpsc::channel();
+        let mut played = Played {
+            fake,
+            player,
+            emitter: Emitter::new(tx),
+            events,
+        };
+        played.send(album(ITEM, progress)).unwrap();
+        played.events();
+        played.fake.requests.lock().unwrap().clear();
+        played
+    }
+
+    fn send(&mut self, cmd: PlayerCmd) -> Result<()> {
+        self.emitter.last = None;
+        self.player.handle(cmd, &mut self.emitter)
+    }
+
+    fn events(&self) -> Vec<PlayerEvent> {
+        self.events.try_iter().collect()
+    }
+}
+
+/// A web server that answers every path with an MP3 stream.
+fn live_url() -> String {
+    let base = crate::player::tests::web(|_, stream| {
+        crate::player::tests::head(stream, 200, "audio/mpeg");
+        let _ = stream.write_all(b"not really audio");
+    });
+    format!("{base}/kids.mp3")
+}
+
+#[test]
+fn the_next_album_reports_the_latest_place_of_the_one_that_played() {
+    let mut played = Played::start(true);
+    played.send(album(NEXT, false)).unwrap();
+    assert_eq!(played.events(), [old_place(), PlayerEvent::Playing(NEXT)]);
+}
+
+#[test]
+fn a_station_reports_the_latest_place_of_the_album_that_played() {
+    let mut played = Played::start(true);
+    played
+        .send(PlayerCmd::Play {
+            item: NEXT,
+            content: crate::player::tests::station(live_url()),
+            volume: 0.2,
+        })
+        .unwrap();
+    assert_eq!(played.events(), [old_place(), PlayerEvent::Playing(NEXT)]);
+}
+
+#[test]
+fn the_receiver_is_asked_for_the_old_place_only_while_our_progress_album_is_active() {
+    let media_asked = |played: &Played| {
+        played.fake.request_types()
+            == [
+                "CONNECT",
+                "GET_STATUS",
+                "CONNECT",
+                "GET_STATUS",
+                "SET_VOLUME",
+                "CONNECT",
+                "LOAD",
+            ]
+    };
+    let without_ask = ["CONNECT", "GET_STATUS", "SET_VOLUME", "CONNECT", "LOAD"];
+
+    let mut active = Played::start(true);
+    active.send(album(NEXT, false)).unwrap();
+    assert!(media_asked(&active), "{:?}", active.fake.request_types());
+
+    let mut forgotten = Played::start(true);
+    forgotten.player.reset();
+    forgotten.send(album(NEXT, false)).unwrap();
+    assert_eq!(forgotten.fake.request_types(), without_ask);
+    assert_eq!(forgotten.events(), [PlayerEvent::Playing(NEXT)]);
+
+    let mut unwanted = Played::start(false);
+    unwanted.send(album(NEXT, false)).unwrap();
+    assert_eq!(unwanted.fake.request_types(), without_ask);
 }
