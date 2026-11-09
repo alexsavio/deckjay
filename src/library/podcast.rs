@@ -1,5 +1,4 @@
-//! Podcast sources as shelves: the settings of their `podcasts` thread, and
-//! their cached episodes as items.
+//! Podcast sources as shelves: their cached episodes as items.
 
 use std::path::{Path, PathBuf};
 

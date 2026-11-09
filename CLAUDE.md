@@ -277,7 +277,7 @@ Rendering:
   more than one kind.
 
 Podcasts (`podcasts/`, `library/podcast.rs`, `ui/podcasts.rs`): each podcast
-source has a `podcasts` thread (`podcasts::spawn`) that refreshes its feeds,
+source has a `podcasts` thread (`podcasts::start`) that refreshes its feeds,
 downloads into the source's cache folder, adds and removes the files in the
 server's live allowlist (`server::Served` via `server::PodcastFiles`), and
 sends a `Snapshot` after every refresh. `Library::scan` starts podcast

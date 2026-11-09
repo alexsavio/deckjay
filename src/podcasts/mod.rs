@@ -1,6 +1,6 @@
 //! Podcasts: feeds, downloads and the episode cache.
 //!
-//! [`spawn`] starts the `podcasts` thread. It refreshes every feed at once and
+//! [`start`] starts the `podcasts` thread. It refreshes every feed at once and
 //! then every [`Timing::refresh`]: fetch, plan, download, write the manifest,
 //! [`Publisher::add`] the new files, send a [`Snapshot`]. Files that fall out
 //! of the plan are deleted [`Timing::sweep_grace`] later, never while their
