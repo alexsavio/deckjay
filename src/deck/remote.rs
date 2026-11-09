@@ -55,8 +55,27 @@ pub(super) fn fetch_info(agent: &Agent, url: &str) -> Result<Option<Info>> {
         }
     };
     let body = reply.body_mut().read_to_string()?;
-    let info = serde_json::from_str(&body).with_context(|| format!("bad reply from {base}"))?;
+    let info: Info =
+        serde_json::from_str(&body).with_context(|| format!("bad reply from {base}"))?;
+    check_grid(info.rows, info.cols, info.key_size)?;
     Ok(Some(info))
+}
+
+/// Refuses a grid the player cannot draw.
+fn check_grid(rows: usize, cols: usize, key_size: u32) -> Result<()> {
+    let too_many_keys = rows.checked_mul(cols).is_none_or(|n| n > MAX_KEYS);
+    // The layout needs two keys above the control row: an item and "more".
+    let too_few_keys = rows < 2 || (rows - 1).checked_mul(cols).is_none_or(|n| n < 2);
+    if too_few_keys || too_many_keys || !KEY_SIZES.contains(&key_size) {
+        bail!(
+            "the deck has {rows}x{cols} keys of {key_size} px; the player needs at least 2 \
+             rows with 2 keys above the bottom row, at most {MAX_KEYS} keys and keys of \
+             {} to {} px",
+            KEY_SIZES.start(),
+            KEY_SIZES.end()
+        );
+    }
+    Ok(())
 }
 
 impl RemoteDeck {
@@ -65,24 +84,6 @@ impl RemoteDeck {
         let Some(info) = fetch_info(&agent, url)? else {
             return Ok(None);
         };
-        let too_many_keys = info
-            .rows
-            .checked_mul(info.cols)
-            .is_none_or(|n| n > MAX_KEYS);
-        // The layout needs two keys above the control row: an item and "more".
-        let too_few_keys = info.rows < 2 || (info.rows - 1) * info.cols < 2;
-        if too_few_keys || too_many_keys || !KEY_SIZES.contains(&info.key_size) {
-            bail!(
-                "the simulator has {}x{} keys of {} px; the player needs at least 2 rows \
-                 with 2 keys above the bottom row, at most {MAX_KEYS} keys and keys of \
-                 {} to {} px",
-                info.rows,
-                info.cols,
-                info.key_size,
-                KEY_SIZES.start(),
-                KEY_SIZES.end()
-            );
-        }
         let base = url.trim_end_matches('/').to_string();
         agent.post(format!("{base}/api/reset")).send_empty()?;
         Ok(Some(RemoteDeck { agent, base, info }))
@@ -244,6 +245,22 @@ mod tests {
             });
             assert!(
                 Deck::open_simulator(&url).is_err(),
+                "{rows}x{cols} keys of {key_size} px"
+            );
+        }
+    }
+
+    #[test]
+    fn the_check_refuses_a_grid_that_open_refuses() {
+        for (rows, cols, key_size) in [(1, 3, 72), (3, 5, 0), (3, 5, 513), (2, 33, 72), (2, 1, 72)]
+        {
+            let url = start_simulator(Info {
+                rows,
+                cols,
+                key_size,
+            });
+            assert!(
+                Deck::simulator_info(&url).is_err(),
                 "{rows}x{cols} keys of {key_size} px"
             );
         }
