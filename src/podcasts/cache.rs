@@ -345,6 +345,13 @@ mod tests {
     }
 
     #[test]
+    fn an_m4b_episode_file_is_an_episode() {
+        let name = episode_name(Some(1_736_229_600), "Das Hörbuch", ID, "m4b");
+        assert_eq!(kind(&name), Some(Kind::Episode));
+        assert!(is_file_of(&name, ID));
+    }
+
+    #[test]
     fn titles_become_short_ascii_slugs() {
         assert_eq!(
             slug("Hören über Bäume, Straße"),

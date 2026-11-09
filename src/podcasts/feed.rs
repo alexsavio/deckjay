@@ -188,7 +188,7 @@ fn url_extension(url: &str) -> Option<&'static str> {
 }
 
 const KNOWN_EXTENSIONS: &[&str] = &[
-    "mp3", "m4a", "mp4", "aac", "flac", "ogg", "oga", "opus", "wav",
+    "mp3", "m4a", "m4b", "mp4", "aac", "flac", "ogg", "oga", "opus", "wav",
 ];
 
 /// The same table as the music library's: formats the Chromecast default
@@ -196,7 +196,7 @@ const KNOWN_EXTENSIONS: &[&str] = &[
 pub fn content_type(ext: &str) -> Option<&'static str> {
     Some(match ext.to_ascii_lowercase().as_str() {
         "mp3" => "audio/mpeg",
-        "m4a" | "mp4" => "audio/mp4",
+        "m4a" | "m4b" | "mp4" => "audio/mp4",
         "aac" => "audio/aac",
         "flac" => "audio/flac",
         "ogg" | "oga" | "opus" => "audio/ogg",
@@ -373,6 +373,17 @@ mod tests {
         ] {
             assert_eq!(extension(mime, url), ext, "{mime} {url}");
         }
+    }
+
+    #[test]
+    fn an_m4b_enclosure_with_an_m4b_url_is_an_episode() {
+        for (mime, url) in [
+            ("audio/x-m4b", "https://x/book.m4b"),
+            ("", "https://x/book.M4B?v=1"),
+        ] {
+            assert_eq!(extension(mime, url), Some("m4b"), "{mime} {url}");
+        }
+        assert_eq!(content_type("m4b"), Some("audio/mp4"));
     }
 
     #[test]
