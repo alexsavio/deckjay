@@ -699,6 +699,10 @@ mod tests {
         let mut report = Report::default();
         report_usb_decks(&[(Kind::Mk2, "A2".to_owned())], &mut report);
         assert_eq!(report.warnings, 0);
+        let mut report = Report::default();
+        let both = [(Kind::Pedal, "A1".to_owned()), (Kind::Mk2, "A2".to_owned())];
+        report_usb_decks(&both, &mut report);
+        assert_eq!(report.warnings, 0);
     }
 
     #[test]
