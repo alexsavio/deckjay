@@ -22,7 +22,7 @@ const MAX_KEYS: usize = 64;
 const KEY_SIZES: RangeInclusive<u32> = 16..=512;
 
 /// A key grid the player can draw: the one rule for every grid it opens (USB
-/// deck and simulator); `deckjay check` applies it to the simulator's.
+/// deck and simulator); `deckjay check` applies it to both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Grid {
     pub rows: usize,
@@ -61,6 +61,12 @@ impl Grid {
         }
         Ok(())
     }
+}
+
+/// Whether the player would open this USB model: what `deckjay check` and
+/// [`Deck::open_usb`] both ask.
+pub(crate) fn usb_usable(kind: elgato_streamdeck::info::Kind) -> bool {
+    hid::usable(kind)
 }
 
 trait Backend {

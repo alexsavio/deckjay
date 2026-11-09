@@ -623,10 +623,16 @@ fn print_usb_decks(report: &mut Report) {
             return;
         }
     };
-    let decks = elgato_streamdeck::list_devices(&hid);
+    report_usb_decks(&elgato_streamdeck::list_devices(&hid), report);
+}
+
+fn report_usb_decks(decks: &[(elgato_streamdeck::info::Kind, String)], report: &mut Report) {
     if decks.is_empty() {
         // The player waits for a deck, so a missing one is not a problem.
         report.warning("  none found (on macOS, quit the Elgato Stream Deck app first)");
+    } else if !decks.iter().any(|&(kind, _)| deck::usb_usable(kind)) {
+        report
+            .warning("  none the player can use (it skips a model without a key grid it can draw)");
     }
     for (kind, serial) in decks {
         println!(
@@ -682,6 +688,17 @@ mod tests {
         assert_eq!(report.code(), 2);
         report.problem("a speaker that does not answer");
         assert_eq!(report.code(), 1);
+    }
+
+    #[test]
+    fn a_usb_deck_the_player_would_skip_is_a_warning() {
+        use elgato_streamdeck::info::Kind;
+        let mut report = Report::default();
+        report_usb_decks(&[(Kind::Pedal, "A1".to_owned())], &mut report);
+        assert_eq!(report.warnings, 1);
+        let mut report = Report::default();
+        report_usb_decks(&[(Kind::Mk2, "A2".to_owned())], &mut report);
+        assert_eq!(report.warnings, 0);
     }
 
     #[test]

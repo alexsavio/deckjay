@@ -22,7 +22,7 @@ pub(super) struct HidDeck {
 }
 
 /// A deck with keys the player can draw on, in a grid it can lay out.
-fn usable(kind: Kind) -> bool {
+pub(super) fn usable(kind: Kind) -> bool {
     kind.is_visual()
         && Grid::new(
             kind.row_count().into(),

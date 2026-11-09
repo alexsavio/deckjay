@@ -228,7 +228,7 @@ blocking `ureq`, PNG encoding, `pressed_keys` is a long-poll
 such as "connection refused" or "host not found". An HTTP error status or a
 URL ureq cannot use (no `http://`, `https://`) is a real error. One rule,
 `deck::Grid::new`, checks every grid the player opens (USB deck and simulator;
-`deckjay check` applies it to the simulator's): at least 2 rows with 2 keys
+`deckjay check` applies it to both): at least 2 rows with 2 keys
 above the bottom row, at most 64 keys, keys of 16 to 512 px.
 
 Simulator (`simulator/`): `deckjay simulator` runs an axum server on its
