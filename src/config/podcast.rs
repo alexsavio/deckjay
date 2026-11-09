@@ -221,6 +221,12 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_feed_url_with_a_control_character() {
+        let err = check("[[feed]]\nname = \"A\"\nurl = \"https://a/\\u0001b\"\n").unwrap_err();
+        assert!(format!("{err:#}").contains("http"), "{err:#}");
+    }
+
+    #[test]
     fn a_feed_url_scheme_may_be_upper_case() {
         check("[[feed]]\nname = \"A\"\nurl = \"HTTPS://a/feed\"\n").unwrap();
     }

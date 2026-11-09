@@ -125,6 +125,13 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_station_url_with_a_control_character() {
+        let err =
+            stations("[[station]]\nname = \"A\"\nurl = \"https://a/\\u0001b\"\n").unwrap_err();
+        assert!(format!("{err:#}").contains("https://"), "{err:#}");
+    }
+
+    #[test]
     fn a_station_url_scheme_may_be_upper_case() {
         stations("[[station]]\nname = \"A\"\nurl = \"HTTPS://x\"\n").unwrap();
     }
