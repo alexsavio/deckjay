@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use super::feed::hash_hex;
 use super::testserver::{FakeServer, Item, closed_port, png, rss};
 use super::*;
+use crate::config::PodcastFeed;
 
 const WAIT: Duration = Duration::from_secs(10);
 const GRACE: Duration = Duration::from_millis(500);
@@ -105,7 +106,7 @@ impl World {
             refresh: Duration::from_hours(6),
             max_cache_bytes: 1_000_000,
             max_episode_bytes: 10_000,
-            feeds: vec![feed("maus", url, Some(keep), Order::NewestFirst)],
+            feeds: vec![feed("maus", url, Some(keep), FeedOrder::Newest)],
         }
     }
 
@@ -114,7 +115,7 @@ impl World {
     }
 }
 
-fn feed(slug: &str, url: &str, keep: Option<usize>, order: Order) -> FeedSettings {
+fn feed(slug: &str, url: &str, keep: Option<usize>, order: FeedOrder) -> FeedSettings {
     FeedSettings {
         slug: slug.into(),
         name: "Die Maus".into(),
@@ -254,7 +255,7 @@ fn an_offline_start_publishes_the_cache() {
     fs::write(&unlisted, b"abc").unwrap();
 
     let offline = world.settings(&format!("{}/feed.xml", closed_port()), 2);
-    let cached = load_cached(&offline);
+    let cached = cached(&offline);
     assert_eq!(cached, filled);
     let run = start(offline, timing());
 
@@ -324,7 +325,7 @@ fn a_broken_manifest_is_written_again_from_the_feed_and_the_files() {
     assert!(added.contains(&rel_of(&filled, "Episode 2")));
     let quiet = run.events.recv_timeout(GRACE * 2);
     assert!(quiet.is_err(), "a file was deleted: {quiet:?}");
-    assert_eq!(load_cached(&settings), filled);
+    assert_eq!(cached(&settings), filled);
     run.stop();
 }
 
@@ -509,7 +510,7 @@ fn the_budget_keeps_the_newest_of_every_feed() {
     let mut settings = world.settings(&url, 2);
     settings
         .feeds
-        .push(feed("serie", &url, None, Order::OldestFirst));
+        .push(feed("serie", &url, None, FeedOrder::Oldest));
     // 300 + 300 fit, the second newest of either feed (200) does not.
     settings.max_cache_bytes = 700;
     let run = start(settings, timing());
@@ -537,12 +538,12 @@ fn serial_feeds_list_the_oldest_first() {
     let world = World::new();
     world.set_feed(&[1, 2, 3]);
     let mut settings = world.settings(&world.feed_url(), 2);
-    settings.feeds[0].order = Order::OldestFirst;
+    settings.feeds[0].order = FeedOrder::Oldest;
     let run = start(settings.clone(), timing());
 
     let snapshot = run.snapshot_until(|s| titles(s) == [["Episode 2", "Episode 3"]]);
 
-    assert_eq!(load_cached(&settings), snapshot);
+    assert_eq!(cached(&settings), snapshot);
     run.stop();
 }
 
@@ -594,7 +595,7 @@ fn spawn_refuses_unsafe_settings() {
         let publisher = Box::new(Recorder(events));
         assert!(spawn(settings, timing(), publisher, snapshots).is_err());
     }
-    assert_eq!(load_cached(&bad_slug).feeds, []);
+    assert_eq!(cached(&bad_slug).feeds, []);
 }
 
 #[test]
@@ -602,12 +603,7 @@ fn a_feed_with_an_unusable_url_does_not_stop_the_other_feeds() {
     let world = World::new();
     world.set_feed(&[1]);
     let mut settings = world.settings(&world.feed_url(), 1);
-    let mut bad = feed(
-        "bad",
-        "ftp://example.org/feed.xml",
-        None,
-        Order::NewestFirst,
-    );
+    let mut bad = feed("bad", "ftp://example.org/feed.xml", None, FeedOrder::Newest);
     bad.name = "Broken".into();
     settings.feeds.insert(0, bad);
 
@@ -632,7 +628,7 @@ fn real_timing_follows_the_refresh_interval() {
 #[test]
 fn feed_title_falls_back_to_the_feed_then_the_slug() {
     let dir = Path::new("/cache/maus");
-    let mut settings = feed("maus", "https://x/feed.xml", None, Order::NewestFirst);
+    let mut settings = feed("maus", "https://x/feed.xml", None, FeedOrder::Newest);
     let manifest = Manifest {
         title: "Maus Podcast".into(),
         ..Manifest::default()
@@ -645,4 +641,82 @@ fn feed_title_falls_back_to_the_feed_then_the_slug() {
     );
     let empty = Manifest::default();
     assert_eq!(feed_state(dir, &settings, &empty, &[]).title, "maus");
+}
+
+fn podcast(feeds: &[(&str, FeedOrder)]) -> config::Podcast {
+    config::Podcast {
+        keep: 5,
+        refresh: Duration::from_hours(6),
+        max_cache_bytes: 1000,
+        max_episode_bytes: 100,
+        feeds: feeds
+            .iter()
+            .map(|&(name, order)| PodcastFeed {
+                name: name.into(),
+                url: "https://example.org/feed".into(),
+                order,
+                keep: Some(2),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn feed_folders_are_slugs_of_the_names_and_unique() {
+    let podcast = podcast(&[
+        ("Die Maus!", FeedOrder::Newest),
+        ("die maus", FeedOrder::Oldest),
+        ("Kinderhörspiel", FeedOrder::Newest),
+        ("???", FeedOrder::Newest),
+    ]);
+    let settings = settings(&podcast, Path::new("/cache/maus"));
+    let slugs: Vec<&str> = settings.feeds.iter().map(|f| f.slug.as_str()).collect();
+    assert_eq!(slugs, ["die-maus", "die-maus-2", "kinderh-rspiel", "feed"]);
+    assert_eq!(settings.feeds[1].order, FeedOrder::Oldest);
+    assert_eq!(settings.cache_dir, Path::new("/cache/maus"));
+    assert_eq!(settings.feeds[0].keep, Some(2));
+}
+
+#[test]
+fn a_long_name_gives_a_slug_the_cache_accepts() {
+    let long = "a".repeat(100);
+    let mut taken = HashSet::new();
+    let first = unique(&slug(&long), &mut taken);
+    let second = unique(&slug(&long), &mut taken);
+    assert_eq!(first.len(), MAX_SLUG);
+    assert_eq!(second.len(), MAX_SLUG);
+    assert!(second.ends_with("-2"));
+}
+
+#[test]
+fn only_podcast_sources_have_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config.toml");
+    fs::write(
+        &file,
+        "speaker_host = \"192.168.1.50\"\n\
+         [[source]]\ntype = \"music\"\npath = \"m\"\n\
+         [[source]]\ntype = \"podcast\"\n\
+         [[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n",
+    )
+    .unwrap();
+    let cfg = config::Config::load(&file).unwrap();
+    let has_settings: Vec<bool> = cfg.sources.iter().map(|s| s.podcast.is_some()).collect();
+    assert_eq!(has_settings, [false, true]);
+}
+
+#[test]
+fn load_cached_reads_the_cache_the_settings_describe() {
+    let world = World::new();
+    world.set_feed(&[1, 2]);
+    let run = start(world.settings(&world.feed_url(), 2), timing());
+    run.snapshot_until(titles_are(&["Episode 2", "Episode 1"]));
+    run.stop();
+    let podcast = podcast(&[("maus", FeedOrder::Newest)]);
+    let dir = world.cache.path();
+
+    let loaded = load_cached(&podcast, dir);
+
+    assert_eq!(loaded, cached(&settings(&podcast, dir)));
+    assert_eq!(loaded.feeds[0].episodes.len(), 2);
 }

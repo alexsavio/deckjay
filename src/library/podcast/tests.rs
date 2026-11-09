@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::config::{Podcast, PodcastFeed, SourceKind};
+use crate::config::{FeedOrder, Podcast, PodcastFeed, SourceKind};
 use crate::library::{ItemId, Library, Refilled};
 use crate::podcasts::{Episode, FeedState};
 
@@ -50,39 +50,6 @@ fn snapshot(episodes: &[(&str, &str)]) -> Snapshot {
                 .collect(),
         }],
     }
-}
-
-#[test]
-fn feed_folders_are_slugs_of_the_names_and_unique() {
-    let settings = settings(&source(&[
-        ("Die Maus!", FeedOrder::Newest),
-        ("die maus", FeedOrder::Oldest),
-        ("Kinderhörspiel", FeedOrder::Newest),
-        ("???", FeedOrder::Newest),
-    ]))
-    .unwrap();
-    let slugs: Vec<&str> = settings.feeds.iter().map(|f| f.slug.as_str()).collect();
-    assert_eq!(slugs, ["die-maus", "die-maus-2", "kinderh-rspiel", "feed"]);
-    assert_eq!(settings.feeds[1].order, Order::OldestFirst);
-    assert_eq!(settings.cache_dir, Path::new("/cache/maus"));
-    assert_eq!(settings.feeds[0].keep, Some(2));
-}
-
-#[test]
-fn a_long_name_gives_a_slug_the_cache_accepts() {
-    let long = "a".repeat(100);
-    let mut taken = HashSet::new();
-    let first = unique(&slug(&long), &mut taken);
-    let second = unique(&slug(&long), &mut taken);
-    assert_eq!(first.len(), MAX_SLUG);
-    assert_eq!(second.len(), MAX_SLUG);
-    assert!(second.ends_with("-2"));
-}
-
-#[test]
-fn only_podcast_sources_have_settings() {
-    let music = Source::plain("music", SourceKind::Music, Path::new("/m"));
-    assert!(settings(&music).is_none());
 }
 
 #[test]

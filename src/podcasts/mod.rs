@@ -1,6 +1,6 @@
 //! Podcasts: feeds, downloads and the episode cache.
 //!
-//! [`spawn`] starts the `podcasts` thread. It refreshes every feed at once and
+//! [`start`] starts the `podcasts` thread. It refreshes every feed at once and
 //! then every [`Timing::refresh`]: fetch, plan, download, write the manifest,
 //! [`Publisher::add`] the new files, send a [`Snapshot`]. Files that fall out
 //! of the plan are deleted [`Timing::sweep_grace`] later, never while their
@@ -25,6 +25,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
+use crate::config::{self, FeedOrder};
+
 use cache::Manifest;
 use plan::Stored;
 
@@ -36,7 +38,7 @@ const FIRST_RETRY: Duration = Duration::from_secs(60);
 const SWEEP_GRACE: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Settings {
+struct Settings {
     /// Must be writable; one folder per feed inside.
     pub cache_dir: PathBuf,
     /// Newest episodes kept per feed, unless the feed sets its own.
@@ -50,27 +52,18 @@ pub struct Settings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FeedSettings {
+struct FeedSettings {
     /// Folder name in the cache: 1 to 64 of `a-z`, `0-9`, `-`.
     pub slug: String,
     pub name: String,
     pub url: String,
     pub keep: Option<usize>,
-    pub order: Order,
+    pub order: FeedOrder,
 }
 
-/// Which way the episodes of a feed are listed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Order {
-    #[default]
-    NewestFirst,
-    /// For serial stories that are heard from the first part on.
-    OldestFirst,
-}
-
-impl Order {
+impl FeedOrder {
     fn arrange<T>(self, mut newest_first: Vec<T>) -> Vec<T> {
-        if self == Order::OldestFirst {
+        if self == FeedOrder::Oldest {
             newest_first.reverse();
         }
         newest_first
@@ -78,7 +71,7 @@ impl Order {
 }
 
 impl Settings {
-    pub fn timing(&self) -> Timing {
+    fn timing(&self) -> Timing {
         Timing {
             refresh: self.refresh,
             first_retry: FIRST_RETRY.min(self.refresh),
@@ -93,7 +86,7 @@ impl Settings {
 
 /// Delays of the podcasts thread; [`Settings::timing`] gives the real ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Timing {
+struct Timing {
     pub refresh: Duration,
     pub first_retry: Duration,
     pub sweep_grace: Duration,
@@ -112,7 +105,7 @@ pub struct FeedState {
     pub title: String,
     /// Absolute path of a JPEG of at most 512 px per side.
     pub picture: Option<PathBuf>,
-    /// In the feed's [`Order`].
+    /// In the feed's [`FeedOrder`].
     pub episodes: Vec<Episode>,
 }
 
@@ -155,8 +148,13 @@ pub fn check_feed(url: &str) -> Result<(String, usize)> {
     Ok((feed.title, feed.episodes.len()))
 }
 
-/// What the cache holds, from the manifests alone: no network.
-pub fn load_cached(settings: &Settings) -> Snapshot {
+/// What the cache in `cache_dir` holds for `podcast`, from the manifests
+/// alone: no network.
+pub fn load_cached(podcast: &config::Podcast, cache_dir: &Path) -> Snapshot {
+    cached(&settings(podcast, cache_dir))
+}
+
+fn cached(settings: &Settings) -> Snapshot {
     let feeds = settings
         .feeds
         .iter()
@@ -177,9 +175,21 @@ pub fn load_cached(settings: &Settings) -> Snapshot {
     Snapshot { feeds }
 }
 
-/// Starts the `podcasts` thread. It ends when the returned sender is dropped
-/// or `snapshots` has no receiver.
-pub fn spawn(
+/// Starts the `podcasts` thread of `podcast`, caching into `cache_dir`. It
+/// ends when the returned sender is dropped or `snapshots` has no receiver.
+pub fn start(
+    podcast: &config::Podcast,
+    cache_dir: &Path,
+    publisher: Box<dyn Publisher>,
+    snapshots: Sender<Snapshot>,
+) -> Result<Sender<NowPlaying>> {
+    let settings = settings(podcast, cache_dir);
+    let timing = settings.timing();
+    spawn(settings, timing, publisher, snapshots)
+}
+
+/// [`start`] with the delays given: the seam for tests.
+fn spawn(
     settings: Settings,
     timing: Timing,
     publisher: Box<dyn Publisher>,
@@ -193,6 +203,66 @@ pub fn spawn(
         .spawn(move || worker.run())
         .context("cannot start the podcasts thread")?;
     Ok(now_playing)
+}
+
+/// One cache folder per feed, named by [`slug`] and [`unique`].
+fn settings(podcast: &config::Podcast, cache_dir: &Path) -> Settings {
+    let mut slugs = HashSet::new();
+    let feeds = podcast
+        .feeds
+        .iter()
+        .map(|feed| FeedSettings {
+            slug: unique(&slug(&feed.name), &mut slugs),
+            name: feed.name.clone(),
+            url: feed.url.clone(),
+            keep: feed.keep,
+            order: feed.order,
+        })
+        .collect();
+    Settings {
+        cache_dir: cache_dir.to_path_buf(),
+        keep: podcast.keep,
+        refresh: podcast.refresh,
+        max_cache_bytes: podcast.max_cache_bytes,
+        max_episode_bytes: podcast.max_episode_bytes,
+        feeds,
+    }
+}
+
+/// The longest cache folder name [`validate`] accepts.
+const MAX_SLUG: usize = 64;
+
+/// A cache folder name: lower-case letters, digits and `-`.
+fn slug(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_matches('-');
+    let slug: String = slug.chars().take(MAX_SLUG).collect();
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "feed".into()
+    } else {
+        slug.into()
+    }
+}
+
+/// `slug`, or `slug-2`, `slug-3` ... when an earlier feed has it.
+fn unique(slug: &str, taken: &mut HashSet<String>) -> String {
+    let mut candidate = slug.to_string();
+    let mut n = 2;
+    while !taken.insert(candidate.clone()) {
+        let suffix = format!("-{n}");
+        let stem: String = slug.chars().take(MAX_SLUG - suffix.len()).collect();
+        candidate = format!("{stem}{suffix}");
+        n += 1;
+    }
+    candidate
 }
 
 fn validate(settings: &Settings) -> Result<()> {

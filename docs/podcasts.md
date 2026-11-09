@@ -8,12 +8,12 @@ code:
 
 - [`src/config/podcast.rs`](../src/config/podcast.rs): the source table and
   its checks.
-- [`src/podcasts/`](../src/podcasts/mod.rs): the `podcasts` thread: feed
-  reading (`feed.rs`), what to keep (`plan.rs`, no IO), the cache and its
-  manifest (`cache.rs`), downloads (`download.rs`) and the refresh loop
-  (`refresh.rs`).
-- [`src/library/podcast.rs`](../src/library/podcast.rs): the thread's
-  settings from the config, and episodes as deck items.
+- [`src/podcasts/`](../src/podcasts/mod.rs): the `podcasts` thread and its
+  settings, built from the config (`mod.rs`): feed reading (`feed.rs`), what
+  to keep (`plan.rs`, no IO), the cache and its manifest (`cache.rs`),
+  downloads (`download.rs`) and the refresh loop (`refresh.rs`).
+- [`src/library/podcast.rs`](../src/library/podcast.rs): episodes as deck
+  items.
 - [`src/ui/podcasts.rs`](../src/ui/podcasts.rs): new snapshots on the deck,
   and the pin on the playing episode.
 
