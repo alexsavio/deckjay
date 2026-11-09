@@ -12,6 +12,7 @@ use crate::simulator::{Brightness, Info, Notice};
 
 /// Time allowed for one request, on top of a long-poll's own wait.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub(super) struct RemoteDeck {
     agent: Agent,
     base: String,
