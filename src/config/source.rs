@@ -689,6 +689,10 @@ mod tests {
     #[test]
     fn a_source_written_as_a_list_names_the_folder_struct_in_the_error() {
         let err = sources("source = [[\"music\"]]\n").unwrap_err();
-        assert!(err.to_string().contains("struct Folder"), "{err:#}");
+        assert!(
+            err.to_string()
+                .contains("expected struct Folder with 6 elements"),
+            "{err:#}"
+        );
     }
 }
