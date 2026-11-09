@@ -73,6 +73,7 @@ fn fetch(client: &mut Client, folder: &Path, uri: &str) -> Result<()> {
         .to_rgb8();
     let target = path(folder, uri);
     std::fs::create_dir_all(folder)?;
+    crate::fsutil::remove_stale_temps(&target);
     let mut jpeg = Vec::new();
     picture.write_to(
         &mut std::io::Cursor::new(&mut jpeg),
@@ -231,6 +232,30 @@ mod tests {
             .map(|entry| entry.unwrap().file_name())
             .collect();
         assert_eq!(left, ["abc.jpg"], "a temp file was left behind");
+    }
+
+    #[test]
+    fn a_temp_file_of_a_dead_process_is_removed_before_a_cover_is_written() {
+        let fake = Fake::start();
+        let dir = tempfile::tempdir().unwrap();
+        signed_in(dir.path(), &fake);
+        let folder = dir.path().join("covers");
+        std::fs::create_dir(&folder).unwrap();
+        let stale = folder.join(".abc.jpg.99999999.0.part");
+        let ours = folder.join(format!(".abc.jpg.{}.7.part", std::process::id()));
+        std::fs::write(&stale, b"half").unwrap();
+        std::fs::write(&ours, b"in flight").unwrap();
+
+        fetch_missing(
+            dir.path(),
+            &folder,
+            &["spotify:playlist:abc".to_string()],
+            fake.endpoints(),
+        );
+
+        assert!(path(&folder, "spotify:playlist:abc").is_file());
+        assert!(!stale.exists(), "the temp of an earlier process is left");
+        assert!(ours.exists(), "the temp of this process must stay");
     }
 
     #[test]

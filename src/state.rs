@@ -111,6 +111,7 @@ impl Store {
             );
             return Store::memory(State::default());
         }
+        crate::fsutil::remove_stale_temps(&path);
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {

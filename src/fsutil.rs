@@ -32,6 +32,39 @@ pub fn publish(part: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Deletes the temp files that `write_atomic` of an earlier process left
+/// beside `path` (a crash or a kill between the write and the rename). A temp
+/// file with this process's id stays: another thread may be writing it.
+/// Best effort; call it once at start-up, before the first save.
+pub fn remove_stale_temps(path: &Path) {
+    let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
+        return;
+    };
+    let prefix = format!(
+        ".{}.",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    );
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(rest) = name.to_str().and_then(|name| name.strip_prefix(&prefix)) else {
+            continue;
+        };
+        let Some((pid, count)) = rest
+            .strip_suffix(".part")
+            .and_then(|ids| ids.split_once('.'))
+        else {
+            continue;
+        };
+        let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+        if digits(count) && digits(pid) && pid.parse() != Ok(std::process::id()) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 fn temp_name(path: &Path) -> PathBuf {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!(
