@@ -524,7 +524,7 @@ struct Doomed {
 
 impl Doomed {
     /// Files already waiting keep their time; files that are wanted again
-    /// are spared.
+    /// leave the list.
     fn schedule(&mut self, unwanted: Vec<PathBuf>, now: Instant, grace: Duration) {
         let due = later(now, grace);
         self.due = unwanted
