@@ -502,11 +502,11 @@ impl CastPlayer {
 
     fn status(&self) -> Result<Status> {
         let session = self.dial()?;
-        session.connection.connect(RECEIVER)?;
-        session
-            .receiver
-            .get_status()
-            .with_context(|| format!("{}:{} sent no Cast status", self.host, self.port))
+        let ask = || -> Result<Status> {
+            session.connection.connect(RECEIVER)?;
+            Ok(session.receiver.get_status()?)
+        };
+        ask().with_context(|| format!("{}:{} sent no Cast status", self.host, self.port))
     }
 
     fn dial(&self) -> Result<Session> {

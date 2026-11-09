@@ -556,12 +556,14 @@ fn a_status_check_against_a_speaker_that_never_answers_fails_within_the_timeout(
     let (tx, done) = mpsc::channel();
     let started = Instant::now();
     thread::spawn(move || {
-        let _ = tx.send((player.status().is_err(), started.elapsed()));
+        let failure = player.status().err().map(|err| format!("{err:#}"));
+        let _ = tx.send((failure, started.elapsed()));
     });
-    let (failed, took) = done
+    let (failure, took) = done
         .recv_timeout(Duration::from_secs(3))
         .expect("the check hung");
-    assert!(failed, "the check succeeded");
+    let failure = failure.expect("the check succeeded");
+    assert!(failure.contains("sent no Cast status"), "{failure}");
     assert!(took >= Duration::from_millis(200), "failed after {took:?}");
     assert_eq!(fake.request_types(), ["CONNECT", "GET_STATUS"]);
 }
