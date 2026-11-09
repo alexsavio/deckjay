@@ -64,6 +64,12 @@ impl World {
     }
 
     fn set_feed(&self, episodes: &[u8]) {
+        self.set_feed_with(episodes, false);
+    }
+
+    /// With `pictures`, episode `n` has the picture `pic<n>.png` and the feed
+    /// has none of its own.
+    fn set_feed_with(&self, episodes: &[u8], pictures: bool) {
         let titles: Vec<String> = episodes.iter().map(|n| format!("Episode {n}")).collect();
         let guids: Vec<String> = episodes.iter().map(|n| format!("ep-{n}")).collect();
         let dates: Vec<String> = episodes
@@ -74,17 +80,22 @@ impl World {
             .iter()
             .map(|n| self.server.url(&format!("/files/e{n}.mp3")))
             .collect();
+        let pics: Vec<String> = episodes
+            .iter()
+            .map(|n| self.server.url(&format!("/files/pic{n}.png")))
+            .collect();
         let items: Vec<Item> = (0..episodes.len())
             .map(|i| Item {
                 guid: &guids[i],
                 title: &titles[i],
                 date: &dates[i],
                 url: &urls[i],
-                picture: None,
+                picture: pictures.then(|| pics[i].as_str()),
             })
             .collect();
         let cover = self.server.url("/files/cover.png");
-        self.server.set_feed(&rss("Maus", Some(&cover), &items));
+        let cover = (!pictures).then_some(cover.as_str());
+        self.server.set_feed(&rss("Maus", cover, &items));
     }
 
     fn settings(&self, url: &str, keep: usize) -> Settings {
@@ -414,33 +425,7 @@ fn the_playing_episodes_picture_is_kept_until_it_stops() {
     for n in 1..=2 {
         fs::write(world.files.path().join(format!("pic{n}.png")), png(64, 64)).unwrap();
     }
-    let set_feed = |episodes: &[u8]| {
-        let titles: Vec<String> = episodes.iter().map(|n| format!("Episode {n}")).collect();
-        let guids: Vec<String> = episodes.iter().map(|n| format!("ep-{n}")).collect();
-        let dates: Vec<String> = episodes
-            .iter()
-            .map(|n| format!("{n:02} Jan 2025 10:00:00 +0000"))
-            .collect();
-        let urls: Vec<String> = episodes
-            .iter()
-            .map(|n| world.server.url(&format!("/files/e{n}.mp3")))
-            .collect();
-        let pics: Vec<String> = episodes
-            .iter()
-            .map(|n| world.server.url(&format!("/files/pic{n}.png")))
-            .collect();
-        let items: Vec<Item> = (0..episodes.len())
-            .map(|i| Item {
-                guid: &guids[i],
-                title: &titles[i],
-                date: &dates[i],
-                url: &urls[i],
-                picture: Some(&pics[i]),
-            })
-            .collect();
-        world.server.set_feed(&rss("Maus", None, &items));
-    };
-    set_feed(&[1]);
+    world.set_feed_with(&[1], true);
     let run = start(world.settings(&world.feed_url(), 1), timing());
     let before = run.snapshot_until(titles_are(&["Episode 1"]));
     let picture = before.feeds[0].episodes[0].picture.clone().unwrap();
@@ -450,7 +435,7 @@ fn the_playing_episodes_picture_is_kept_until_it_stops() {
         .send(NowPlaying(Some(hash_hex("ep-1"))))
         .unwrap();
 
-    set_feed(&[1, 2]);
+    world.set_feed_with(&[1, 2], true);
     run.snapshot_until(titles_are(&["Episode 2"]));
     thread::sleep(GRACE * 3);
     assert!(picture.is_file(), "the playing episode lost its picture");
