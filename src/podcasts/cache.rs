@@ -189,12 +189,22 @@ pub fn kind(name: &str) -> Option<Kind> {
         .strip_prefix('.')
         .and_then(|rest| rest.strip_suffix(".part"))
     {
+        let inner = without_counters(inner).unwrap_or(inner);
         return kind(inner).filter(|&k| k != Kind::Part).map(|_| Kind::Part);
     }
     if is_picture_name(name) {
         return Some(Kind::Picture);
     }
     is_episode_name(name).then_some(Kind::Episode)
+}
+
+/// `name.<digits>.<digits>` to `name`: the process id and the save counter
+/// that `fsutil::write_atomic` puts in its temp file names.
+fn without_counters(name: &str) -> Option<&str> {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    let (rest, count) = name.rsplit_once('.')?;
+    let (rest, pid) = rest.rsplit_once('.')?;
+    (digits(count) && digits(pid)).then_some(rest)
 }
 
 fn is_hash(text: &[u8]) -> bool {
@@ -413,6 +423,22 @@ mod tests {
 
         assert_eq!(load(&folder), Some(manifest));
         assert!(!folder.join(part_name(MANIFEST)).exists());
+    }
+
+    #[test]
+    fn a_temp_file_with_a_process_id_and_a_counter_is_a_part() {
+        for (name, expected) in [
+            (".feed.json.123.0.part", Some(Kind::Part)),
+            (".20250107-x-1a2b3c4d.opus.9.12.part", Some(Kind::Part)),
+            (".p-0011aabb.jpg.1.2.part", Some(Kind::Part)),
+            (".feed.json.123.part", None),
+            (".feed.json.a.0.part", None),
+            (".feed.json..0.part", None),
+            (".other.txt.1.2.part", None),
+            (".feed.json.1.2.part.1.2.part", None),
+        ] {
+            assert_eq!(kind(name), expected, "{name}");
+        }
     }
 
     #[test]
