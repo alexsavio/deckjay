@@ -13,6 +13,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(config)* One http(s) URL rule for config, radio and podcasts ([#28](https://github.com/alexsavio/deckjay/issues/28))
 - *(deck)* One grid rule for the USB deck, the simulator and the check ([#30](https://github.com/alexsavio/deckjay/issues/30))
 - Write every saved file atomically through one helper ([#29](https://github.com/alexsavio/deckjay/issues/29))
+- *(spotify)* Read the refresh token from its file before a refresh ([#33](https://github.com/alexsavio/deckjay/issues/33))
 
 ### 🚜 Refactor
 
