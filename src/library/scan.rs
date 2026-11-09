@@ -34,8 +34,8 @@ const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
 /// sent to the speaker as the cover.
 const KEY_PICTURE: &str = "key";
 
-/// The items of `source`, in name order; with `one_key`, the source folder
-/// itself is the only item.
+/// The items of the source named `source`, read from `folder`, in name
+/// order; with `one_key`, `folder` itself is the only item.
 pub(super) fn scan(source: &str, folder: &Folder) -> Result<Vec<Item>> {
     let entries = usable_entries(&folder.path).with_context(|| {
         format!(

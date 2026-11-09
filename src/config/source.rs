@@ -10,7 +10,7 @@ use super::playlist::{Playlist, RawSpotify};
 use super::podcast::{Podcast, RawPodcast};
 use super::radio::{RawRadio, Station};
 
-/// One `[[source]]` table, checked and with its path resolved.
+/// One `[[source]]` table, checked and with its paths resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source {
     /// Names the source in item keys and music URLs: letters, digits, `-`
@@ -242,25 +242,36 @@ impl SourceKind {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum RawSource {
-    Music(RawFolder),
-    Audiobook(RawFolder),
-    Story(RawFolder),
+    Music(raw::Folder),
+    Audiobook(raw::Folder),
+    Story(raw::Folder),
     Podcast(RawPodcast),
     Radio(RawRadio),
     Spotify(RawSpotify),
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawFolder {
-    name: Option<String>,
-    path: PathBuf,
-    picture: Option<PathBuf>,
-    color: Option<Color>,
-    #[serde(default)]
-    item: BTreeMap<String, Look>,
-    #[serde(default)]
-    one_key: bool,
+/// Named `Folder` so that serde's error text for a malformed source still
+/// says `struct Folder`.
+mod raw {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use serde::Deserialize;
+
+    use super::{Color, Look};
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(in crate::config) struct Folder {
+        pub(super) name: Option<String>,
+        pub(super) path: PathBuf,
+        pub(super) picture: Option<PathBuf>,
+        pub(super) color: Option<Color>,
+        #[serde(default)]
+        pub(super) item: BTreeMap<String, Look>,
+        #[serde(default)]
+        pub(super) one_key: bool,
+    }
 }
 
 /// Checks names and resolves relative paths against `base`; podcast caches
@@ -673,5 +684,11 @@ mod tests {
         let seeks: Vec<bool> = kinds.iter().map(|k| k.seeks()).collect();
         assert_eq!(resumes, [false, true, false, true, false, false]);
         assert_eq!(seeks, [false, true, true, true, false, false]);
+    }
+
+    #[test]
+    fn a_source_written_as_a_list_names_the_folder_struct_in_the_error() {
+        let err = sources("source = [[\"music\"]]\n").unwrap_err();
+        assert!(err.to_string().contains("struct Folder"), "{err:#}");
     }
 }
