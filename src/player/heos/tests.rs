@@ -635,10 +635,6 @@ fn command_lines_encode_values_but_put_the_url_last_and_raw() {
     );
 }
 
-mod power;
-mod progress;
-mod radio;
-
 #[test]
 fn an_io_error_prints_its_text_once_in_the_chain() {
     let os = io::Error::from_raw_os_error(54);
@@ -678,3 +674,7 @@ fn a_clear_queue_with_an_unknown_result_stops_the_track_change() {
     assert!(format!("{err:#}").contains("unexpected result"), "{err:#}");
     assert_eq!(rig.fake.streamed(), [track_url(0)]);
 }
+
+mod power;
+mod progress;
+mod radio;

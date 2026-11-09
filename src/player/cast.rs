@@ -658,8 +658,8 @@ fn finished(entry: &StatusEntry, tracks: &[TrackInfo]) -> bool {
         && track_index(entry, tracks).is_some_and(|t| t + 1 == tracks.len())
 }
 
-/// Whether `last`, the latest place seen, was on the last track within
-/// the [`played_out`] margin of its known length. At the end of the queue the receiver
+/// Whether `last`, the latest place seen, was on the last track and
+/// [`played_out`] by its known length. At the end of the queue the receiver
 /// may end the media session, and its status then tells nothing about how.
 fn near_end(last: Option<Place>, tracks: usize) -> bool {
     last.is_some_and(|at| at.track + 1 == tracks && played_out(at.position, at.duration, false))

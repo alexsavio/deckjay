@@ -524,7 +524,7 @@ impl HeosPlayer {
             .into_iter()
             .chain(args.iter().copied())
             .collect();
-        // On an I/O error `conn` is dropped here, so the next call reconnects.
+        // On an error `conn` is dropped here, so the next call reconnects.
         let reply = conn.cli.exchange(command, &args)?;
         self.conn = Some(conn);
         Ok(reply.checked(command)?.message())
@@ -565,9 +565,9 @@ impl Connection {
     }
 }
 
-/// Whether the last track, stopped after `seen`, played to its end; a stop
-/// earlier than the [`played_out`] margin before it was pressed in the HEOS app. With
-/// no length known, every stop counts as the end.
+/// Whether the last track, stopped after `seen`, played to its end
+/// ([`played_out`]); an earlier stop was pressed in the HEOS app. With no
+/// length known, every stop counts as the end.
 fn ended(seen: Option<NowPlaying>) -> bool {
     seen.is_none_or(|at| played_out(at.position, at.duration, true))
 }
@@ -575,7 +575,8 @@ fn ended(seen: Option<NowPlaying>) -> bool {
 /// The socket failed at once (reset, closed, broken pipe) rather than timing
 /// out; a read timeout is `WouldBlock` on Unix and `TimedOut` on Windows.
 fn connection_lost(err: &HeosError) -> bool {
-    matches!(err, HeosError::Io(e) if !matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut))
+    let HeosError::Io(e) = err else { return false };
+    !matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut)
 }
 
 #[cfg(test)]
