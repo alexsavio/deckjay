@@ -466,4 +466,36 @@ mod tests {
         );
         assert!(matches!(&item.media, Media::Spotify { uri } if uri == "spotify:playlist:abc"));
     }
+
+    #[test]
+    fn a_playlist_cover_is_read_from_the_covers_folder_of_its_source() {
+        let covers = tempfile::tempdir().unwrap();
+        touch(&covers.path().join("abc.jpg"));
+        let mut spotify = Source::plain("spotify", SourceKind::Spotify, covers.path());
+        spotify.body = SourceBody::Spotify {
+            covers: covers.path().to_path_buf(),
+            playlists: vec![
+                Playlist {
+                    name: "With".into(),
+                    uri: "spotify:playlist:abc".into(),
+                    picture: None,
+                    color: None,
+                },
+                Playlist {
+                    name: "Without".into(),
+                    uri: "spotify:playlist:def".into(),
+                    picture: None,
+                    color: None,
+                },
+            ],
+        };
+
+        let library = Library::scan(&[spotify]);
+
+        assert_eq!(
+            library.item(ItemId(0)).cover,
+            Some(covers.path().join("abc.jpg"))
+        );
+        assert_eq!(library.item(ItemId(1)).cover, None);
+    }
 }

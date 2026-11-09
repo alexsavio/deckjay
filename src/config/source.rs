@@ -664,4 +664,14 @@ mod tests {
         let serves: Vec<bool> = got.iter().map(|s| s.served_root().is_some()).collect();
         assert_eq!(serves, [true, false, false, true]);
     }
+
+    #[test]
+    fn only_audiobooks_and_podcasts_resume_and_the_spoken_kinds_seek() {
+        use SourceKind::*;
+        let kinds = [Music, Audiobook, Story, Podcast, Radio, Spotify];
+        let resumes: Vec<bool> = kinds.iter().map(|k| k.resumes()).collect();
+        let seeks: Vec<bool> = kinds.iter().map(|k| k.seeks()).collect();
+        assert_eq!(resumes, [false, true, false, true, false, false]);
+        assert_eq!(seeks, [false, true, true, true, false, false]);
+    }
 }
