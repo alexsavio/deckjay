@@ -725,6 +725,8 @@ fn load_cached_reads_the_cache_the_settings_describe() {
 fn settings_copy_every_field_of_the_config() {
     let mut podcast = podcast(&[("Die Maus", FeedOrder::Oldest)]);
     podcast.feeds[0].url = "https://example.org/maus.xml".into();
+    podcast.keep = 3;
+    podcast.refresh = Duration::from_hours(12);
 
     let got = settings(&podcast, Path::new("/cache/maus"));
 
@@ -732,8 +734,8 @@ fn settings_copy_every_field_of_the_config() {
         got,
         Settings {
             cache_dir: PathBuf::from("/cache/maus"),
-            keep: 5,
-            refresh: Duration::from_hours(6),
+            keep: 3,
+            refresh: Duration::from_hours(12),
             max_cache_bytes: 1000,
             max_episode_bytes: 100,
             feeds: vec![FeedSettings {
