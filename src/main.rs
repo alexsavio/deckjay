@@ -593,7 +593,7 @@ fn print_cast_speaker(cfg: &Config, report: &mut Report) {
                 println!("  running app: {} ({})", app.display_name, app.app_id);
             }
         }
-        Err(err) => report.problem(format!("  NOT reachable: {err:#}")),
+        Err(err) => report.problem(format!("  {err:#}")),
     }
 }
 

@@ -503,7 +503,10 @@ impl CastPlayer {
     fn status(&self) -> Result<Status> {
         let session = self.dial()?;
         session.connection.connect(RECEIVER)?;
-        Ok(session.receiver.get_status()?)
+        session
+            .receiver
+            .get_status()
+            .with_context(|| format!("{}:{} sent no Cast status", self.host, self.port))
     }
 
     fn dial(&self) -> Result<Session> {

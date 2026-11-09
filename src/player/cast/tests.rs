@@ -554,14 +554,26 @@ fn a_status_check_against_a_speaker_that_never_answers_fails_within_the_timeout(
     let fake = FakeCast::start(true, json!([]), json!([]));
     let player = fake.player();
     let (tx, done) = mpsc::channel();
+    let started = Instant::now();
     thread::spawn(move || {
-        let _ = tx.send(player.status().is_err());
+        let _ = tx.send((player.status().is_err(), started.elapsed()));
     });
-    assert_eq!(
-        done.recv_timeout(Duration::from_secs(3)),
-        Ok(true),
-        "the check hung or succeeded"
-    );
+    let (failed, took) = done
+        .recv_timeout(Duration::from_secs(3))
+        .expect("the check hung");
+    assert!(failed, "the check succeeded");
+    assert!(took >= Duration::from_millis(200), "failed after {took:?}");
+    assert_eq!(fake.request_types(), ["CONNECT", "GET_STATUS"]);
+}
+
+#[test]
+fn a_status_check_against_a_speaker_that_answers_reports_its_status() {
+    let fake = FakeCast::start(false, media_receiver(), json!([]));
+    let status = fake.player().status().unwrap();
+    assert_eq!(status.applications.len(), 1);
+    let level = status.volume.level.unwrap();
+    assert!((level - 0.3).abs() < f32::EPSILON, "{level}");
+    assert_eq!(fake.request_types(), ["CONNECT", "GET_STATUS"]);
 }
 
 #[test]
