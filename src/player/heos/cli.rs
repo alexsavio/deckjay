@@ -51,11 +51,14 @@ impl fmt::Display for HeosError {
     }
 }
 
+/// `Io` and `Other` print their inner error in `Display`, so their source is
+/// the inner error's source: a `{:#}` chain shows each cause once.
 impl std::error::Error for HeosError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            HeosError::Io(err) => Some(err),
-            HeosError::Fail { .. } | HeosError::Other(_) => None,
+            HeosError::Io(err) => err.source(),
+            HeosError::Other(err) => err.source(),
+            HeosError::Fail { .. } => None,
         }
     }
 }

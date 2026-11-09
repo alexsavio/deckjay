@@ -1,10 +1,10 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use super::cli::{PlayerInfo, Reply, command_line};
+use super::cli::{HeosError, PlayerInfo, Reply, command_line};
 use super::*;
 use crate::player::{Content, Start};
 
@@ -23,6 +23,8 @@ struct Script {
     /// Answer this command, or every command line that starts with it,
     /// with `result: fail`.
     fail: Option<&'static str>,
+    /// Like `fail`, but the reply's `result` is one the spec does not know.
+    odd: Option<&'static str>,
     /// Send a change event and a "command under process" note before each reply.
     noisy: bool,
     /// Close the connection instead of answering the next command.
@@ -134,6 +136,11 @@ fn answer(script: &mut Script, command: &str, players: &str) -> Vec<String> {
         ));
     }
     let reply = if script
+        .odd
+        .is_some_and(|odd| odd == name || command.starts_with(odd))
+    {
+        format!(r#"{{"heos": {{"command": "{name}", "result": "pending", "message": ""}}}}"#)
+    } else if script
         .fail
         .is_some_and(|fail| fail == name || command.starts_with(fail))
     {
@@ -631,3 +638,43 @@ fn command_lines_encode_values_but_put_the_url_last_and_raw() {
 mod power;
 mod progress;
 mod radio;
+
+#[test]
+fn an_io_error_prints_its_text_once_in_the_chain() {
+    let os = io::Error::from_raw_os_error(54);
+    let text = os.to_string();
+    let err = anyhow::Error::from(HeosError::Io(os));
+    let chain = format!("{err:#}");
+    assert_eq!(chain.matches(&text).count(), 1, "{chain}");
+}
+
+#[test]
+fn other_keeps_the_cause_of_its_context() {
+    let cause = io::Error::other("boom");
+    let other = HeosError::Other(anyhow::Error::from(cause).context("x"));
+    assert_eq!(format!("{:#}", anyhow::Error::from(other)), "x: boom");
+}
+
+#[test]
+fn an_unreachable_receiver_names_the_os_reason() {
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let reason = TcpStream::connect(("127.0.0.1", port))
+        .unwrap_err()
+        .to_string();
+    let mut player = HeosPlayer::new("127.0.0.1".into(), port);
+    let err = player.set_volume(0.5).unwrap_err();
+    assert!(format!("{err:#}").contains(&reason), "{err:#}");
+}
+
+#[test]
+fn a_clear_queue_with_an_unknown_result_stops_the_track_change() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.send(play_album(3)).unwrap();
+    rig.fake.script().odd = Some("player/clear_queue");
+    let err = rig.send(PlayerCmd::Next).unwrap_err();
+    assert!(format!("{err:#}").contains("unexpected result"), "{err:#}");
+    assert_eq!(rig.fake.streamed(), [track_url(0)]);
+}

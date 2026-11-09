@@ -175,6 +175,20 @@ fn a_station_the_receiver_cannot_pause_is_stopped_and_rejoined() {
 }
 
 #[test]
+fn a_pause_with_an_unknown_result_is_an_error_and_does_not_stop_the_station() {
+    let (mut rig, _live) = tuned();
+    rig.poll_with("play");
+    rig.fake.script().odd = Some("player/set_play_state?pid=7&state=pause");
+    let err = rig.send(PlayerCmd::TogglePause).unwrap_err();
+    assert!(format!("{err:#}").contains("unexpected result"), "{err:#}");
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_play_state?pid=7&state=pause",
+        "no stop follows"
+    );
+}
+
+#[test]
 fn a_station_after_an_album_does_not_walk_the_album() {
     let mut rig = Rig::new(ONE_PLAYER);
     rig.send(play_album(3)).unwrap();

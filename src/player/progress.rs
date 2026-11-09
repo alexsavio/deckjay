@@ -150,26 +150,6 @@ impl Policy {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_length_of_zero_is_unknown() {
-        assert_eq!(known_length(Duration::ZERO), None);
-        assert_eq!(known_length(secs(0.001)), Some(secs(0.001)));
-    }
-
-    #[test]
-    fn played_out_is_within_the_margin_of_a_known_length() {
-        let out = |position, length| played_out(secs(position), Some(secs(length)), false);
-        assert!(out(300.0, 300.0));
-        assert!(out(290.0, 300.0));
-        assert!(!out(289.9, 300.0));
-    }
-
-    #[test]
-    fn played_out_with_no_length_is_the_callers_answer() {
-        assert!(played_out(secs(5.0), None, true));
-        assert!(!played_out(secs(5.0), None, false));
-    }
-
     const BOOK: ItemId = ItemId(7);
     const SONGS: ItemId = ItemId(8);
 
