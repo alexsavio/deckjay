@@ -176,10 +176,12 @@ Playback flow:
    radio sources give one `Media::Stream` item per station and Spotify
    sources one `Media::Spotify` item per playlist (`Source::served_root`
    is `None` for both). A `Source` holds its payload as one `SourceBody`
-   (folder, podcast, radio or Spotify), and `Library::scan` is one `match` on it.
+   (folder, podcast, radio or Spotify), and `Library::scan` is one `match`
+   on it.
 2. `Ui::content` picks what a press plays: `Content::Stream` for a station,
    `Content::Spotify` for a playlist, else `Content::Tracks`, starting where
-   the item stopped when `Kind::resumes` (`Kind` is `config::SourceKind`; audiobooks, podcasts).
+   the item stopped when `Kind::resumes` (`Kind` is `config::SourceKind`;
+   audiobooks, podcasts).
    `Ui::tracks` turns tracks into `TrackInfo` URLs with `library::url_for`
    (per-segment percent-encoding) on `base_url`:
    `http://<host>:<http_port>/music` (`net::BaseUrl`), where `host` is
