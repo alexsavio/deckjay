@@ -244,18 +244,13 @@ fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThrea
         .iter()
         .enumerate()
         .filter_map(|(shelf, source)| {
-            let settings = library::podcast::settings(source)?;
+            let podcast = source.podcast.as_ref()?;
             let (snapshot_tx, snapshots) = mpsc::channel();
             let files = server::PodcastFiles {
                 source: source.name.clone(),
                 served: served.clone(),
             };
-            match podcasts::spawn(
-                settings.clone(),
-                settings.timing(),
-                Box::new(files),
-                snapshot_tx,
-            ) {
+            match podcasts::start(podcast, &source.path, Box::new(files), snapshot_tx) {
                 Ok(now_playing) => Some(ui::PodcastThread::new(
                     shelf,
                     source.clone(),

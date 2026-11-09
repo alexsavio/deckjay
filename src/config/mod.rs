@@ -12,9 +12,10 @@ use serde::Deserialize;
 
 #[cfg(test)]
 pub use self::playlist::Playlist;
-pub use self::podcast::Order as FeedOrder;
 #[cfg(test)]
-pub use self::podcast::{Feed as PodcastFeed, Podcast};
+pub use self::podcast::Feed as PodcastFeed;
+pub use self::podcast::Order as FeedOrder;
+pub use self::podcast::Podcast;
 #[cfg(test)]
 pub use self::radio::Station;
 #[cfg(test)]

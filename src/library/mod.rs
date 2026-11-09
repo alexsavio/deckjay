@@ -171,8 +171,8 @@ impl Library {
             shelves: Vec::new(),
         };
         for source in sources {
-            let items = if let Some(settings) = podcast::settings(source) {
-                podcast::items(source, &crate::podcasts::load_cached(&settings))
+            let items = if let Some(config) = &source.podcast {
+                podcast::items(source, &crate::podcasts::load_cached(config, &source.path))
             } else if source.kind == SourceKind::Radio {
                 stations(source)
             } else if source.kind == SourceKind::Spotify {
