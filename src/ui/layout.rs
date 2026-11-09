@@ -155,12 +155,23 @@ impl Layout {
             .map(Action::Item)
     }
 
+    /// The shelf the shelf key shows next; the last shelf wraps to the first.
+    pub(super) fn next_shelf(&self, shelf: usize) -> usize {
+        (shelf + 1) % self.shelf_count()
+    }
+
+    /// The page the "more" key shows next; the last page wraps to the first.
+    pub(super) fn next_page(&self, shelf: usize, page: usize) -> usize {
+        (page + 1) % self.pages(shelf)
+    }
+
     /// Where the flip key goes from `page` of `shelf`: `(shelf, page)`.
     pub(super) fn flip(&self, shelf: usize, page: usize) -> (usize, usize) {
-        if page + 1 < self.pages(shelf) {
-            (shelf, page + 1)
+        let next = self.next_page(shelf, page);
+        if next > page {
+            (shelf, next)
         } else {
-            ((shelf + 1) % self.shelf_count(), 0)
+            (self.next_shelf(shelf), 0)
         }
     }
 
