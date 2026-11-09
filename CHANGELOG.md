@@ -26,6 +26,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - Ask SpeakerType what a speaker can do ([#32](https://github.com/alexsavio/deckjay/issues/32))
 - *(podcasts)* Take the podcast settings from the config ([#38](https://github.com/alexsavio/deckjay/issues/38))
 - *(player)* Hand the speakers only the commands they can get ([#39](https://github.com/alexsavio/deckjay/issues/39))
+- *(config)* Hold a source's payload as one enum ([#41](https://github.com/alexsavio/deckjay/issues/41))
 
 ### 🧪 Testing
 
