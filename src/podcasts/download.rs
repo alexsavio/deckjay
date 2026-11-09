@@ -110,7 +110,10 @@ pub fn episode(
             Attempt::Done(bytes) => {
                 let dest = dir.join(name);
                 return match fs::rename(&part, &dest) {
-                    Ok(()) => Ok(bytes),
+                    Ok(()) => {
+                        sync_dir(dir);
+                        Ok(bytes)
+                    }
                     Err(err) => Err(discard(&part, disk(err, &dest))),
                 };
             }
@@ -205,6 +208,12 @@ fn range_start(reply: &Response<Body>) -> Option<u64> {
     range.split('-').next()?.trim().parse().ok()
 }
 
+/// Makes a rename survive a power cut. Best effort: the file is complete
+/// either way, and not every platform can open a folder.
+fn sync_dir(dir: &Path) {
+    let _ = File::open(dir).and_then(|dir| dir.sync_all());
+}
+
 fn too_big(max_bytes: u64) -> Failure {
     Failure::Rejected(anyhow!("the episode is larger than {} MB", max_bytes / MB))
 }
@@ -233,7 +242,9 @@ pub fn picture(agent: &Agent, url: &str, dir: &Path, name: &str) -> Result<()> {
         let mut file = File::create(&part)?;
         file.write_all(&jpeg)?;
         file.sync_all()?;
-        fs::rename(&part, &dest)
+        fs::rename(&part, &dest)?;
+        sync_dir(dir);
+        Ok(())
     };
     write().map_err(|err| {
         let _ = cache::delete(&part);
