@@ -11,7 +11,8 @@ use anyhow::{Result, bail};
 use chrono::DateTime;
 use rss::Channel;
 
-pub use crate::net::http_url;
+use crate::library::{AUDIO_TYPES, audio_type};
+use crate::net::http_url;
 
 /// Longer titles are cut: they are only for logs and the manifest.
 const MAX_TITLE_CHARS: usize = 200;
@@ -37,7 +38,7 @@ pub struct RemoteEpisode {
     pub length: Option<u64>,
     /// The content type the speaker gets, from the file extension.
     pub mime: &'static str,
-    /// File extension without the dot, one that [`content_type`] knows.
+    /// File extension without the dot, one that [`audio_type`] knows.
     pub ext: &'static str,
     /// The episode's `itunes:image`, else the feed's picture.
     pub picture_url: Option<String>,
@@ -85,7 +86,7 @@ fn episode(item: &rss::Item, feed_picture: Option<&str>) -> Option<RemoteEpisode
     let enclosure = item.enclosure()?;
     let audio_url = http_url(enclosure.url())?;
     let ext = extension(enclosure.mime_type(), &audio_url)?;
-    let mime = content_type(ext)?;
+    let mime = audio_type(ext)?;
     let title = clean_title(item.title().unwrap_or_default());
     Some(RemoteEpisode {
         id: episode_id(
@@ -167,6 +168,7 @@ fn extension(mime: &str, url: &str) -> Option<&'static str> {
     let ext = match mime.as_str() {
         "audio/mpeg" | "audio/mp3" => "mp3",
         "audio/mp4" | "audio/x-m4a" => "m4a",
+        "audio/x-m4b" => "m4b",
         "audio/aac" => "aac",
         "audio/ogg" => "ogg",
         "audio/opus" => "opus",
@@ -181,28 +183,10 @@ fn url_extension(url: &str) -> Option<&'static str> {
     let path = crate::net::without_query(url);
     let last = path.rsplit('/').next().unwrap_or_default();
     let (_, ext) = last.rsplit_once('.')?;
-    KNOWN_EXTENSIONS
+    AUDIO_TYPES
         .iter()
-        .copied()
+        .map(|&(known, _)| known)
         .find(|known| known.eq_ignore_ascii_case(ext))
-}
-
-const KNOWN_EXTENSIONS: &[&str] = &[
-    "mp3", "m4a", "mp4", "aac", "flac", "ogg", "oga", "opus", "wav",
-];
-
-/// The same table as the music library's: formats the Chromecast default
-/// receiver can play. The library's copy is private to its module.
-pub fn content_type(ext: &str) -> Option<&'static str> {
-    Some(match ext.to_ascii_lowercase().as_str() {
-        "mp3" => "audio/mpeg",
-        "m4a" | "mp4" => "audio/mp4",
-        "aac" => "audio/aac",
-        "flac" => "audio/flac",
-        "ogg" | "oga" | "opus" => "audio/ogg",
-        "wav" => "audio/wav",
-        _ => return None,
-    })
 }
 
 /// A captive portal or a moved feed often answers with a web page.
@@ -373,6 +357,28 @@ mod tests {
         ] {
             assert_eq!(extension(mime, url), ext, "{mime} {url}");
         }
+    }
+
+    #[test]
+    fn an_m4b_enclosure_with_an_m4b_url_is_an_episode() {
+        for (mime, url) in [
+            ("audio/x-m4b", "https://x/book.m4b"),
+            ("", "https://x/book.M4B?v=1"),
+        ] {
+            assert_eq!(extension(mime, url), Some("m4b"), "{mime} {url}");
+        }
+        assert_eq!(audio_type("m4b"), Some("audio/mp4"));
+        assert_eq!(audio_type("M4B"), Some("audio/mp4"));
+    }
+
+    #[test]
+    fn an_m4b_type_needs_no_extension_in_the_url() {
+        assert_eq!(
+            extension("audio/x-m4b", "https://x/download?id=7"),
+            Some("m4b")
+        );
+        // The type wins over the URL, as for every other audio/ arm.
+        assert_eq!(extension("audio/x-m4b", "https://x/book.mp3"), Some("m4b"));
     }
 
     #[test]

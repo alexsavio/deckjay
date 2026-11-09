@@ -20,8 +20,9 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike};
 use serde::{Deserialize, Serialize};
 
-use super::feed::{content_type, hash_hex};
+use super::feed::hash_hex;
 use super::plan::Stored;
+use crate::library::audio_type;
 
 pub const MANIFEST: &str = "feed.json";
 
@@ -213,7 +214,7 @@ fn is_episode_name(name: &str) -> bool {
     let ext_ok = ext
         .bytes()
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        && content_type(ext).is_some();
+        && audio_type(ext).is_some();
     let b = stem.as_bytes();
     let n = b.len();
     ext_ok
@@ -342,6 +343,13 @@ mod tests {
         assert!(is_file_of(&name, ID));
         assert!(!is_file_of(&name, "1a2b3c4e5e6f7a8b"));
         assert!(!is_file_of(&part_name(&name), ID));
+    }
+
+    #[test]
+    fn an_m4b_episode_file_is_an_episode() {
+        let name = episode_name(Some(1_736_229_600), "Das Hörbuch", ID, "m4b");
+        assert_eq!(kind(&name), Some(Kind::Episode));
+        assert!(is_file_of(&name, ID));
     }
 
     #[test]
