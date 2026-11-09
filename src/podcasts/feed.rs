@@ -368,6 +368,7 @@ mod tests {
             assert_eq!(extension(mime, url), Some("m4b"), "{mime} {url}");
         }
         assert_eq!(audio_type("m4b"), Some("audio/mp4"));
+        assert_eq!(audio_type("M4B"), Some("audio/mp4"));
     }
 
     #[test]
