@@ -203,12 +203,6 @@ fn validate(settings: &Settings) -> Result<()> {
         if !slugs.insert(feed.slug.as_str()) {
             bail!("two podcast feeds use the folder name {:?}", feed.slug);
         }
-        if feed::http_url(&feed.url).is_none() {
-            bail!(
-                "podcast {}: the feed URL must start with http(s)://",
-                feed.name
-            );
-        }
     }
     Ok(())
 }

@@ -494,16 +494,34 @@ fn spawn_refuses_unsafe_settings() {
     bad_slug.feeds[0].slug = "../maus".into();
     let mut twice = world.settings(&url, 1);
     twice.feeds.push(twice.feeds[0].clone());
-    let mut ftp = world.settings(&url, 1);
-    ftp.feeds[0].url = "ftp://example.org/feed.xml".into();
 
-    for settings in [bad_slug.clone(), twice, ftp] {
+    for settings in [bad_slug.clone(), twice] {
         let (events, _) = mpsc::channel();
         let (snapshots, _) = mpsc::channel();
         let publisher = Box::new(Recorder(events));
         assert!(spawn(settings, timing(), publisher, snapshots).is_err());
     }
     assert_eq!(load_cached(&bad_slug).feeds, []);
+}
+
+#[test]
+fn a_feed_with_an_unusable_url_does_not_stop_the_other_feeds() {
+    let world = World::new();
+    world.set_feed(&[1]);
+    let mut settings = world.settings(&world.feed_url(), 1);
+    let mut bad = feed(
+        "bad",
+        "ftp://example.org/feed.xml",
+        None,
+        Order::NewestFirst,
+    );
+    bad.name = "Broken".into();
+    settings.feeds.insert(0, bad);
+
+    let run = start(settings, timing());
+
+    run.snapshot_until(|snapshot| titles(snapshot).iter().any(|t| t == &["Episode 1"]));
+    run.stop();
 }
 
 #[test]
