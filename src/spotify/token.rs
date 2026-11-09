@@ -2,18 +2,14 @@
 //! client id and the refresh token. Access tokens live only in memory.
 
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::{self, ErrorKind, Write};
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 pub const FILE_NAME: &str = "spotify-token.json";
-
-/// Two saves in one process must not share a temp file.
-static SAVES: AtomicU32 = AtomicU32::new(0);
 
 /// A token. `Debug` prints `***` and there is no `Display`, so it cannot end
 /// up in a log line or an error message by accident.
@@ -70,41 +66,10 @@ impl TokenFile {
         fs::create_dir_all(state_dir)
             .with_context(|| format!("cannot create {}", state_dir.display()))?;
         let path = TokenFile::path(state_dir);
-        let temp = state_dir.join(format!(
-            ".{FILE_NAME}.{}.{}.tmp",
-            std::process::id(),
-            SAVES.fetch_add(1, Ordering::Relaxed)
-        ));
         let json = serde_json::to_string_pretty(self)?;
-        let written = write_new(&temp, json.as_bytes()).and_then(|()| fs::rename(&temp, &path));
-        if let Err(err) = written {
-            let _ = fs::remove_file(&temp);
-            return Err(err).with_context(|| format!("cannot save {}", path.display()));
-        }
-        sync_dir(state_dir);
-        Ok(())
+        crate::fsutil::write_atomic(&path, json.as_bytes(), Some(0o600))
+            .with_context(|| format!("cannot save {}", path.display()))
     }
-}
-
-fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
-}
-
-/// Makes the rename itself survive a power cut. Best effort: the file is
-/// already complete either way.
-fn sync_dir(dir: &Path) {
-    #[cfg(unix)]
-    if let Ok(dir) = fs::File::open(dir) {
-        let _ = dir.sync_all();
-    }
-    #[cfg(not(unix))]
-    let _ = dir;
 }
 
 #[cfg(test)]

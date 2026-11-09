@@ -5,14 +5,15 @@
 //!                    20250107-der-elefant-1a2b3c4d.mp3      date, title, episode id
 //!                    p-9f8e7d6c.jpg                         hash of the picture URL
 //!                    .20250107-der-elefant-1a2b3c4d.mp3.part   unfinished download
+//!                    .feed.json.<pid>.<n>.part                 unfinished manifest or picture save
 //! ```
 //!
 //! Names come from dates, ASCII slugs and hashes only, never from feed text
 //! as is, and the sweep deletes nothing that does not match these patterns.
 
 use std::collections::HashSet;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -111,20 +112,9 @@ fn sanitized(manifest: Manifest) -> Manifest {
 pub fn save(dir: &Path, manifest: &Manifest) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let path = dir.join(MANIFEST);
-    let temp = dir.join(part_name(MANIFEST));
     let json = serde_json::to_vec_pretty(manifest)?;
-    let write = || -> io::Result<()> {
-        let mut file = File::create(&temp)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
-        fs::rename(&temp, &path)?;
-        // Makes the rename itself durable; not every platform can open a folder.
-        if let Ok(folder) = File::open(dir) {
-            let _ = folder.sync_all();
-        }
-        Ok(())
-    };
-    write().with_context(|| format!("cannot write {}", path.display()))
+    crate::fsutil::write_atomic(&path, &json, None)
+        .with_context(|| format!("cannot write {}", path.display()))
 }
 
 /// The manifest's episodes whose file is there, with the size on disk.
@@ -185,12 +175,22 @@ pub fn kind(name: &str) -> Option<Kind> {
         .strip_prefix('.')
         .and_then(|rest| rest.strip_suffix(".part"))
     {
+        let inner = without_counters(inner).unwrap_or(inner);
         return kind(inner).filter(|&k| k != Kind::Part).map(|_| Kind::Part);
     }
     if is_picture_name(name) {
         return Some(Kind::Picture);
     }
     is_episode_name(name).then_some(Kind::Episode)
+}
+
+/// `name.<digits>.<digits>` to `name`: the process id and the save counter
+/// that `fsutil::write_atomic` puts in its temp file names.
+fn without_counters(name: &str) -> Option<&str> {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    let (rest, count) = name.rsplit_once('.')?;
+    let (rest, pid) = rest.rsplit_once('.')?;
+    (digits(count) && digits(pid)).then_some(rest)
 }
 
 fn is_hash(text: &[u8]) -> bool {
@@ -408,7 +408,52 @@ mod tests {
         save(&folder, &manifest).unwrap();
 
         assert_eq!(load(&folder), Some(manifest));
-        assert!(!folder.join(part_name(MANIFEST)).exists());
+        let names: Vec<_> = fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [MANIFEST], "a temp file was left behind");
+    }
+
+    #[test]
+    fn a_temp_file_with_a_process_id_and_a_counter_is_a_part() {
+        for (name, expected) in [
+            (".feed.json.123.0.part", Some(Kind::Part)),
+            (".20250107-x-1a2b3c4d.opus.9.12.part", Some(Kind::Part)),
+            (".p-0011aabb.jpg.1.2.part", Some(Kind::Part)),
+            (".feed.json.123.part", None),
+            (".feed.json.a.0.part", None),
+            (".feed.json..0.part", None),
+            (".other.txt.1.2.part", None),
+            (".feed.json.1.2.part.1.2.part", None),
+        ] {
+            assert_eq!(kind(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_real_temp_names_of_a_manifest_and_a_picture_are_parts() {
+        let dir = Path::new("/cache/maus");
+        for name in [MANIFEST.to_string(), picture_name("https://x/p.jpg")] {
+            let temp = crate::fsutil::temp_name(&dir.join(&name));
+            let temp = temp.file_name().unwrap().to_str().unwrap();
+            assert_eq!(kind(temp), Some(Kind::Part), "{temp}");
+        }
+    }
+
+    #[test]
+    fn a_failed_manifest_save_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(MANIFEST)).unwrap();
+
+        assert!(save(dir.path(), &Manifest::default()).is_err());
+
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, [MANIFEST], "a temp file was left behind");
     }
 
     #[test]

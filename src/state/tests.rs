@@ -43,7 +43,11 @@ fn a_missing_file_starts_empty_and_saves_to_the_folder() {
         ),
         (3, "books/Pippi/04.mp3", 61_500, Some(300_000))
     );
-    assert!(!state_dir.join("state.json.tmp").exists());
+    let names: Vec<_> = std::fs::read_dir(&state_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["state.json"], "a temp file was left behind");
 }
 
 #[test]
@@ -200,4 +204,35 @@ fn a_folder_that_becomes_writable_gets_the_state_that_waited() {
     store.save_now(Instant::now());
 
     assert_eq!(Store::open(dir.path()).shelf(), Some("books"));
+}
+
+#[test]
+fn a_failed_save_leaves_no_temp_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    std::fs::create_dir(&path).unwrap();
+
+    assert!(write_atomically(&path, &State::default()).is_err());
+
+    let left: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["state.json"], "a temp file was left behind");
+}
+
+#[test]
+fn a_temp_file_of_a_dead_process_is_removed_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let stale = dir.path().join(".state.json.99999999.0.part");
+    let ours = dir
+        .path()
+        .join(format!(".state.json.{}.7.part", std::process::id()));
+    std::fs::write(&stale, b"half").unwrap();
+    std::fs::write(&ours, b"in flight").unwrap();
+
+    let _store = Store::open(dir.path());
+
+    assert!(!stale.exists(), "the temp of an earlier process is left");
+    assert!(ours.exists(), "the temp of this process must stay");
 }

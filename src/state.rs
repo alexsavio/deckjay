@@ -3,8 +3,6 @@
 //! resumes (audiobooks) got.
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -113,6 +111,7 @@ impl Store {
             );
             return Store::memory(State::default());
         }
+        crate::fsutil::remove_stale_temps(&path);
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -288,17 +287,9 @@ impl Store {
 /// Writes a temporary file and renames it over `path`, so a power cut
 /// leaves the old state or the new one, never half of one.
 fn write_atomically(path: &Path, state: &State) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
     let text = serde_json::to_string_pretty(state)?;
-    let mut file =
-        File::create(&tmp).with_context(|| format!("cannot create {}", tmp.display()))?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()?;
-    std::fs::rename(&tmp, path)?;
-    if let Some(dir) = path.parent() {
-        // The rename itself is only on disk once the folder is synced.
-        let _ = File::open(dir).and_then(|dir| dir.sync_all());
-    }
+    crate::fsutil::write_atomic(path, text.as_bytes(), None)
+        .with_context(|| format!("cannot write {}", path.display()))?;
     Ok(())
 }
 

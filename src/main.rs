@@ -20,6 +20,7 @@
 mod cli;
 mod config;
 mod deck;
+mod fsutil;
 mod icons;
 mod library;
 mod net;
