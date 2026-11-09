@@ -59,9 +59,9 @@ impl RawRadio {
                         station.name
                     );
                 }
-                if !(station.url.starts_with("https://") || station.url.starts_with("http://")) {
+                if crate::podcasts::feed::http_url(&station.url).is_none() {
                     bail!(
-                        "station {}: the url must start with https:// or http://",
+                        "station {}: the url must be one address that starts with https:// or http://",
                         station.name
                     );
                 }
@@ -123,5 +123,19 @@ mod tests {
             let err = stations(text).unwrap_err();
             assert!(format!("{err:#}").contains(needle), "{text}: {err:#}");
         }
+    }
+
+    #[test]
+    fn refuses_a_station_url_the_program_cannot_fetch() {
+        for url in ["https://a b", "https://a/\tb", "a/x.mp3"] {
+            let text = format!("[[station]]\nname = \"A\"\nurl = {url:?}\n");
+            let err = stations(&text).unwrap_err();
+            assert!(format!("{err:#}").contains("https://"), "{url:?}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn a_station_url_scheme_may_be_upper_case() {
+        stations("[[station]]\nname = \"A\"\nurl = \"HTTPS://x\"\n").unwrap();
     }
 }
