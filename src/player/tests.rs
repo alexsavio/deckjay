@@ -127,22 +127,6 @@ pub(super) fn head(stream: &mut TcpStream, status: u16, content_type: &str) {
 }
 
 #[test]
-fn only_tracks_are_track_lists() {
-    let tracks = Content::Tracks {
-        tracks: vec![],
-        start: Start::default(),
-        progress: false,
-    };
-    assert!(tracks.into_tracks().is_ok());
-    let err = unsupported().into_tracks().unwrap_err();
-    assert!(err.to_string().contains("not supported yet"), "{err:#}");
-    let err = station("http://127.0.0.1:9/kids.mp3".into())
-        .into_tracks()
-        .unwrap_err();
-    assert!(err.to_string().contains("Kids Radio"), "{err:#}");
-}
-
-#[test]
 fn a_start_track_out_of_range_is_the_first_from_its_beginning() {
     let start = |track| {
         let content = Content::Tracks {
@@ -153,7 +137,10 @@ fn a_start_track_out_of_range_is_the_first_from_its_beginning() {
             },
             progress: true,
         };
-        content.into_tracks().unwrap().start
+        let Routed::Speaker(Playable::Tracks(list)) = content.route() else {
+            panic!("tracks go to the speaker");
+        };
+        list.start
     };
     assert_eq!(
         start(1),
@@ -255,8 +242,10 @@ fn an_item_without_progress_gets_no_place_and_no_end() {
 struct Bookmarked;
 
 impl Speaker for Bookmarked {
-    fn handle(&mut self, cmd: PlayerCmd, events: &mut Emitter) -> Result<()> {
-        let PlayerCmd::Play { item, .. } = cmd else {
+    type Play = Content;
+
+    fn handle(&mut self, cmd: SpeakerCmd<Content>, events: &mut Emitter) -> Result<()> {
+        let SpeakerCmd::Play { item, .. } = cmd else {
             anyhow::bail!("the speaker is off");
         };
         events.begin(item, true);
@@ -265,7 +254,9 @@ impl Speaker for Bookmarked {
         events.emit(PlayerEvent::Playing(item));
         Ok(())
     }
+}
 
+impl Device for Bookmarked {
     fn poll(&mut self, _: &mut Emitter) -> Result<()> {
         Ok(())
     }
@@ -433,13 +424,17 @@ impl Scripted {
 }
 
 impl Speaker for Scripted {
-    fn handle(&mut self, _: PlayerCmd, _: &mut Emitter) -> Result<()> {
+    type Play = Content;
+
+    fn handle(&mut self, _: SpeakerCmd<Content>, _: &mut Emitter) -> Result<()> {
         self.handled.fetch_add(1, Ordering::SeqCst);
         anyhow::ensure!(!self.fail_commands, "the speaker is off");
         self.active = true;
         Ok(())
     }
+}
 
+impl Device for Scripted {
     fn poll(&mut self, _: &mut Emitter) -> Result<()> {
         self.polled.fetch_add(1, Ordering::SeqCst);
         match self.polls.pop_front() {
@@ -563,6 +558,24 @@ fn a_failed_volume_or_skip_keeps_the_album() {
         events.try_iter().collect::<Vec<_>>(),
         [],
         "the UI guessed nothing, so nothing is undone"
+    );
+}
+
+#[test]
+fn the_power_key_is_not_a_speaker_command() {
+    let (mut speaker, _idle) = Scripted::new(vec![]);
+    speaker.active = false;
+    speaker.fail_commands = true;
+    let handled = Arc::clone(&speaker.handled);
+    let (cmds, rx) = mpsc::channel();
+    cmds.send(PlayerCmd::Off).unwrap();
+    drop(cmds);
+    let (tx, events) = mpsc::channel();
+    run(Box::new(speaker), &rx, Emitter::new(tx));
+    assert_eq!(handled.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        events.try_iter().collect::<Vec<_>>(),
+        [PlayerEvent::Stopped]
     );
 }
 
