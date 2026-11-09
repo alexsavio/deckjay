@@ -408,7 +408,11 @@ mod tests {
         save(&folder, &manifest).unwrap();
 
         assert_eq!(load(&folder), Some(manifest));
-        assert!(!folder.join(part_name(MANIFEST)).exists());
+        let names: Vec<_> = fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [MANIFEST], "a temp file was left behind");
     }
 
     #[test]
@@ -424,6 +428,16 @@ mod tests {
             (".feed.json.1.2.part.1.2.part", None),
         ] {
             assert_eq!(kind(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_real_temp_names_of_a_manifest_and_a_picture_are_parts() {
+        let dir = Path::new("/cache/maus");
+        for name in [MANIFEST.to_string(), picture_name("https://x/p.jpg")] {
+            let temp = crate::fsutil::temp_name(&dir.join(&name));
+            let temp = temp.file_name().unwrap().to_str().unwrap();
+            assert_eq!(kind(temp), Some(Kind::Part), "{temp}");
         }
     }
 

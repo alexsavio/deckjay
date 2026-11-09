@@ -227,6 +227,7 @@ mod tests {
             fake.endpoints(),
         );
 
+        assert_eq!(fake.requests_to("/v1/playlists/abc/images").len(), 1);
         let left: Vec<_> = std::fs::read_dir(&folder)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())

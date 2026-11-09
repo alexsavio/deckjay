@@ -527,7 +527,11 @@ mod tests {
             &name,
         )?;
         let stored = image::open(s.cache.path().join(&name)).unwrap();
-        assert!(!s.cache.path().join(cache::part_name(&name)).exists());
+        let names: Vec<_> = fs::read_dir(s.cache.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [name.as_str()], "a temp file was left behind");
         Ok((stored.width(), stored.height()))
     }
 

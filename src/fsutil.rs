@@ -65,7 +65,7 @@ pub fn remove_stale_temps(path: &Path) {
     }
 }
 
-fn temp_name(path: &Path) -> PathBuf {
+pub(crate) fn temp_name(path: &Path) -> PathBuf {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!(
         ".{name}.{}.{}.part",
