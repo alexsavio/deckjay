@@ -196,3 +196,24 @@ fn resolves_real_stations() {
         assert!(stream.content_type.is_some(), "{url}");
     }
 }
+
+#[test]
+fn a_playlist_entry_scheme_may_be_upper_case() {
+    assert_eq!(
+        first_pls_entry("[playlist]\nFile1=HTTP://a/x.mp3\n").as_deref(),
+        Some("HTTP://a/x.mp3")
+    );
+    assert_eq!(
+        first_m3u_entry("#EXTM3U\nHTTPS://a/x.mp3\n").as_deref(),
+        Some("HTTPS://a/x.mp3")
+    );
+}
+
+#[test]
+fn a_playlist_entry_with_a_space_is_not_a_stream() {
+    assert_eq!(
+        first_pls_entry("[playlist]\nFile1=http://a/x y.mp3\n"),
+        None
+    );
+    assert_eq!(first_m3u_entry("#EXTM3U\nhttp://a/x y.mp3\n"), None);
+}

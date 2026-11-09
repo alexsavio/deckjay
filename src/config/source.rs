@@ -56,6 +56,32 @@ impl Look {
     }
 }
 
+/// The `picture` and `color` keys of a `[[source]]` table, not yet resolved.
+pub(super) fn look(picture: Option<PathBuf>, color: Option<Color>) -> Look {
+    Look { picture, color }
+}
+
+/// Every `what` (e.g. `"station"`) of `source` (e.g. `"radio source radio"`)
+/// has a name, and no two share one.
+pub(super) fn check_named<T>(
+    what: &str,
+    source: &str,
+    items: &[T],
+    name: impl Fn(&T) -> &str,
+) -> Result<()> {
+    let mut names = HashSet::new();
+    for item in items {
+        let name = name(item);
+        if name.trim().is_empty() {
+            bail!("{source}: a {what} has an empty name");
+        }
+        if !names.insert(name) {
+            bail!("{source}: two {what}s are named {name:?}");
+        }
+    }
+    Ok(())
+}
+
 /// `#rrggbb` in the config file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
@@ -183,7 +209,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                     check_unique(&name, &mut names)?;
                     return Ok(Source {
                         stations: r.stations(&name, base)?,
-                        look: r.look().resolve(base),
+                        look: look(r.picture.clone(), r.color).resolve(base),
                         name,
                         kind: SourceKind::Radio,
                         path: PathBuf::new(),
@@ -202,7 +228,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                     return Ok(Source {
                         playlists: s.playlists(&name, base)?,
                         one_key: false,
-                        look: s.look().resolve(base),
+                        look: look(s.picture.clone(), s.color).resolve(base),
                         name,
                         kind: SourceKind::Spotify,
                         path: state_dir.join("spotify-covers"),
@@ -218,11 +244,7 @@ pub(super) fn resolve(raw: Vec<RawSource>, base: &Path, state_dir: &Path) -> Res
                 name,
                 kind,
                 path: base.join(folder.path),
-                look: Look {
-                    picture: folder.picture,
-                    color: folder.color,
-                }
-                .resolve(base),
+                look: look(folder.picture, folder.color).resolve(base),
                 items: folder
                     .item
                     .into_iter()
@@ -254,7 +276,7 @@ fn podcast_source(
     };
     Ok(Source {
         podcast: Some(raw.check(&name)?),
-        look: raw.look().resolve(base),
+        look: look(raw.picture.clone(), raw.color).resolve(base),
         name,
         kind: SourceKind::Podcast,
         path,

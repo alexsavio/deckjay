@@ -16,7 +16,7 @@ use super::download::{self, Failure};
 use super::feed::{self, Feed, RemoteEpisode};
 use super::plan::{self, Plan, Stored};
 use super::{FeedSettings, NowPlaying, Publisher, Settings, Snapshot, Timing, feed_state};
-use crate::net;
+use crate::net::{self, without_query};
 
 const MB: u64 = 1024 * 1024;
 
@@ -480,11 +480,6 @@ fn log_summary(runs: &[Run], snapshot: &Snapshot, dropped: usize) {
         runs.len(),
         bytes / MB
     );
-}
-
-/// Feed URLs may carry a private token in the query; logs leave it out.
-fn without_query(url: &str) -> &str {
-    url.split(['?', '#']).next().unwrap_or_default()
 }
 
 fn later(now: Instant, delay: Duration) -> Instant {

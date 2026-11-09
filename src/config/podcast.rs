@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::Look;
+use super::source::check_named;
 
 /// Checked podcast settings of one source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,13 +79,6 @@ fn default_max_episode_mb() -> u64 {
 }
 
 impl RawPodcast {
-    pub(super) fn look(&self) -> Look {
-        Look {
-            picture: self.picture.clone(),
-            color: self.color,
-        }
-    }
-
     /// `name` is the source's name, for the error messages.
     pub(super) fn check(&self, name: &str) -> Result<Podcast> {
         if self.feed.is_empty() {
@@ -106,34 +99,34 @@ impl RawPodcast {
                 "podcast source {name}: max_cache_mb must be at least 10 and max_episode_mb at least 1"
             );
         }
-        let mut names = std::collections::HashSet::new();
+        check_named("feed", &format!("podcast source {name}"), &self.feed, |f| {
+            &f.name
+        })?;
+        let mut feeds = Vec::with_capacity(self.feed.len());
         for feed in &self.feed {
-            if feed.name.trim().is_empty() {
-                bail!("podcast source {name}: a feed has an empty name");
-            }
-            if !names.insert(feed.name.as_str()) {
-                bail!("podcast source {name}: two feeds are named {:?}", feed.name);
-            }
-            let scheme_ok = feed.url.starts_with("https://") || feed.url.starts_with("http://");
-            if !scheme_ok {
+            let Some(url) = crate::net::http_url(&feed.url) else {
                 bail!(
-                    "podcast {}: the url must start with https:// or http://",
+                    "podcast {}: the url must be one address that starts with https:// or http://",
                     feed.name
                 );
-            }
+            };
             if feed.keep.is_some_and(|keep| !keep_ok(keep)) {
                 bail!(
                     "podcast {}: keep must be between 1 and {MAX_KEEP}",
                     feed.name
                 );
             }
+            feeds.push(Feed {
+                url,
+                ..feed.clone()
+            });
         }
         Ok(Podcast {
             keep: self.keep,
             refresh: Duration::from_hours(self.refresh_hours),
             max_cache_bytes: self.max_cache_mb * MB,
             max_episode_bytes: self.max_episode_mb * MB,
-            feeds: self.feed.clone(),
+            feeds,
         })
     }
 }
@@ -216,5 +209,44 @@ mod tests {
             let err = check(text).unwrap_err();
             assert!(format!("{err:#}").contains(needle), "{text}: {err:#}");
         }
+    }
+
+    #[test]
+    fn refuses_a_feed_url_the_program_cannot_fetch() {
+        for url in ["https://a b", "https://a/\tb", "feed.xml", "  "] {
+            let text = format!("[[feed]]\nname = \"A\"\nurl = {url:?}\n");
+            let err = check(&text).unwrap_err();
+            assert!(format!("{err:#}").contains("http"), "{url:?}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_feed_url_with_a_control_character() {
+        let err = check("[[feed]]\nname = \"A\"\nurl = \"https://a/\\u0001b\"\n").unwrap_err();
+        assert!(format!("{err:#}").contains("http"), "{err:#}");
+    }
+
+    #[test]
+    fn a_feed_url_scheme_may_be_upper_case() {
+        check("[[feed]]\nname = \"A\"\nurl = \"HTTPS://a/feed\"\n").unwrap();
+    }
+
+    #[test]
+    fn name_errors_keep_their_exact_text() {
+        let blank = "[[feed]]\nname = \" \"\nurl = \"https://a/feed\"\n";
+        assert_eq!(
+            check(blank).unwrap_err().to_string(),
+            "podcast source maus: a feed has an empty name"
+        );
+        assert_eq!(
+            check(&format!("{FEED}{FEED}")).unwrap_err().to_string(),
+            "podcast source maus: two feeds are named \"Die Maus\""
+        );
+    }
+
+    #[test]
+    fn the_feed_keeps_the_trimmed_url() {
+        let podcast = check("[[feed]]\nname = \"A\"\nurl = \"  https://a/feed \"\n").unwrap();
+        assert_eq!(podcast.feeds[0].url, "https://a/feed");
     }
 }

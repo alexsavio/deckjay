@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::{Color, Look};
+use super::source::{Color, check_named};
 
 /// One `[[source.station]]` table, checked and with its picture resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -23,20 +23,13 @@ pub struct Station {
 #[serde(deny_unknown_fields)]
 pub(super) struct RawRadio {
     pub(super) name: Option<String>,
-    picture: Option<PathBuf>,
-    color: Option<Color>,
+    pub(super) picture: Option<PathBuf>,
+    pub(super) color: Option<Color>,
     #[serde(default)]
     station: Vec<Station>,
 }
 
 impl RawRadio {
-    pub(super) fn look(&self) -> Look {
-        Look {
-            picture: self.picture.clone(),
-            color: self.color,
-        }
-    }
-
     /// The stations with pictures resolved against `base`; `name` is the
     /// source's name, for the error messages.
     pub(super) fn stations(&self, name: &str, base: &Path) -> Result<Vec<Station>> {
@@ -46,26 +39,23 @@ impl RawRadio {
                  [[source.station]]\nname = \"...\"\nurl = \"https://...\""
             );
         }
-        let mut names = std::collections::HashSet::new();
+        check_named(
+            "station",
+            &format!("radio source {name}"),
+            &self.station,
+            |s| &s.name,
+        )?;
         self.station
             .iter()
             .map(|station| {
-                if station.name.trim().is_empty() {
-                    bail!("radio source {name}: a station has an empty name");
-                }
-                if !names.insert(station.name.as_str()) {
+                let Some(url) = crate::net::http_url(&station.url) else {
                     bail!(
-                        "radio source {name}: two stations are named {:?}",
+                        "station {}: the url must be one address that starts with https:// or http://",
                         station.name
                     );
-                }
-                if !(station.url.starts_with("https://") || station.url.starts_with("http://")) {
-                    bail!(
-                        "station {}: the url must start with https:// or http://",
-                        station.name
-                    );
-                }
+                };
                 Ok(Station {
+                    url,
                     picture: station.picture.as_ref().map(|p| base.join(p)),
                     ..station.clone()
                 })
@@ -123,5 +113,46 @@ mod tests {
             let err = stations(text).unwrap_err();
             assert!(format!("{err:#}").contains(needle), "{text}: {err:#}");
         }
+    }
+
+    #[test]
+    fn refuses_a_station_url_the_program_cannot_fetch() {
+        for url in ["https://a b", "https://a/\tb", "a/x.mp3"] {
+            let text = format!("[[station]]\nname = \"A\"\nurl = {url:?}\n");
+            let err = stations(&text).unwrap_err();
+            assert!(format!("{err:#}").contains("https://"), "{url:?}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_station_url_with_a_control_character() {
+        let err =
+            stations("[[station]]\nname = \"A\"\nurl = \"https://a/\\u0001b\"\n").unwrap_err();
+        assert!(format!("{err:#}").contains("https://"), "{err:#}");
+    }
+
+    #[test]
+    fn a_station_url_scheme_may_be_upper_case() {
+        stations("[[station]]\nname = \"A\"\nurl = \"HTTPS://x\"\n").unwrap();
+    }
+
+    #[test]
+    fn name_errors_keep_their_exact_text() {
+        let one = "[[station]]\nname = \"A\"\nurl = \"https://a/x\"\n";
+        let blank = "[[station]]\nname = \" \"\nurl = \"https://a/x\"\n";
+        assert_eq!(
+            stations(blank).unwrap_err().to_string(),
+            "radio source radio: a station has an empty name"
+        );
+        assert_eq!(
+            stations(&format!("{one}{one}")).unwrap_err().to_string(),
+            "radio source radio: two stations are named \"A\""
+        );
+    }
+
+    #[test]
+    fn the_station_keeps_the_trimmed_url() {
+        let got = stations("[[station]]\nname = \"A\"\nurl = \"  https://a/x.mp3 \"\n").unwrap();
+        assert_eq!(got[0].url, "https://a/x.mp3");
     }
 }

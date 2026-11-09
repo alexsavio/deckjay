@@ -7,6 +7,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use ureq::Agent;
 
+use crate::net::{http_url, without_query};
+
 /// A playlist is a few lines; a bigger body is not one.
 const PLAYLIST_LIMIT: u64 = 64 * 1024;
 /// A playlist may name another playlist, but not endlessly.
@@ -131,28 +133,16 @@ fn first_pls_entry(body: &str) -> Option<String> {
                 .strip_prefix("file")?
                 .parse()
                 .ok()?;
-            Some((number, value.trim()))
+            Some((number, value))
         })
-        .filter(|(_, url)| is_http(url))
+        .filter_map(|(number, url)| Some((number, http_url(url)?)))
         .min_by_key(|(number, _)| *number)
-        .map(|(_, url)| url.to_string())
+        .map(|(_, url)| url)
 }
 
-/// The first line that is not a `#` comment.
+/// The first line that is a usable http(s) URL; other lines are skipped.
 fn first_m3u_entry(body: &str) -> Option<String> {
-    body.lines()
-        .map(str::trim)
-        .find(|line| is_http(line))
-        .map(str::to_string)
-}
-
-fn is_http(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
-}
-
-/// Station URLs can carry listener tokens in the query; logs leave it out.
-fn without_query(url: &str) -> &str {
-    url.split(['?', '#']).next().unwrap_or(url)
+    body.lines().find_map(http_url)
 }
 
 #[cfg(test)]
