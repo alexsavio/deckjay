@@ -32,6 +32,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(config)* Hold a source's payload as one enum ([#41](https://github.com/alexsavio/deckjay/issues/41))
 - *(podcasts)* One limit for the length of a feed folder name ([#43](https://github.com/alexsavio/deckjay/issues/43))
 - *(main)* Split out and test how main.rs reads each source body ([#44](https://github.com/alexsavio/deckjay/issues/44))
+- *(podcasts)* Tell the two slug limits apart ([#46](https://github.com/alexsavio/deckjay/issues/46))
 
 ### 🧪 Testing
 
