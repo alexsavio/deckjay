@@ -354,6 +354,15 @@ mod tests {
     }
 
     #[test]
+    fn the_longest_episode_name_is_still_an_episode() {
+        let name = episode_name(Some(1_736_229_600), &"a".repeat(50), ID, "mp3");
+        assert_eq!(name, format!("20250107-{}-1a2b3c4d.mp3", "a".repeat(40)));
+        assert_eq!(kind(&name), Some(Kind::Episode));
+        let one_more = format!("20250107-{}-1a2b3c4d.mp3", "a".repeat(41));
+        assert_eq!(kind(&one_more), None);
+    }
+
+    #[test]
     fn an_m4b_episode_file_is_an_episode() {
         let name = episode_name(Some(1_736_229_600), "Das Hörbuch", ID, "m4b");
         assert_eq!(kind(&name), Some(Kind::Episode));
