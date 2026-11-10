@@ -27,7 +27,7 @@ use crate::library::audio_type;
 
 pub const MANIFEST: &str = "feed.json";
 
-const MAX_SLUG_CHARS: usize = 40;
+const MAX_EPISODE_SLUG_CHARS: usize = 40;
 const HASH_CHARS: usize = 8;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,7 +219,8 @@ fn is_episode_name(name: &str) -> bool {
     let b = stem.as_bytes();
     let n = b.len();
     ext_ok
-        && (8 + 1 + 1 + 1 + HASH_CHARS..=8 + 1 + MAX_SLUG_CHARS + 1 + HASH_CHARS).contains(&n)
+        && (8 + 1 + 1 + 1 + HASH_CHARS..=8 + 1 + MAX_EPISODE_SLUG_CHARS + 1 + HASH_CHARS)
+            .contains(&n)
         && b[..8].iter().all(u8::is_ascii_digit)
         && b[8] == b'-'
         && b[n - HASH_CHARS - 1] == b'-'
@@ -239,7 +240,7 @@ fn slug(title: &str) -> String {
             out.push('-');
         }
     }
-    out.truncate(MAX_SLUG_CHARS);
+    out.truncate(MAX_EPISODE_SLUG_CHARS);
     let out = out.trim_end_matches('-');
     if out.is_empty() {
         "episode".to_string()
@@ -364,7 +365,7 @@ mod tests {
         assert_eq!(slug(""), "episode");
         let long = slug(&"abc ".repeat(30));
         assert!(
-            long.len() <= MAX_SLUG_CHARS && !long.ends_with('-'),
+            long.len() <= MAX_EPISODE_SLUG_CHARS && !long.ends_with('-'),
             "{long}"
         );
     }
