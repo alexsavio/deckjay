@@ -237,7 +237,7 @@ fn scan_sources(cfg: &Config) -> Library {
     library
 }
 
-/// A podcast source that gets a `podcasts` thread.
+/// A podcast source to start a `podcasts` thread for.
 struct PodcastStart<'a> {
     shelf: usize,
     source: &'a Source,
@@ -807,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn only_podcast_sources_start_a_thread_with_their_own_shelf_and_cache() {
+    fn podcast_starts_select_podcast_sources_with_shelf_and_cache() {
         let cfg = mixed();
         let got: Vec<_> = podcast_starts(&cfg.sources)
             .iter()
@@ -862,17 +862,49 @@ mod tests {
     }
 
     #[test]
-    fn a_spotify_source_with_no_playlist_fetches_no_covers() {
-        // The config refuses an empty source, so build one by hand.
-        let empty = Source {
+    fn a_spotify_source_with_no_playlist_is_skipped_between_two_that_fetch() {
+        // The config refuses an empty source, so build the sources by hand.
+        let spotify = |covers: &str, uris: &[&str]| Source {
             name: "spotify".into(),
             look: crate::config::Look::default(),
             body: SourceBody::Spotify {
-                covers: "/srv/covers".into(),
-                playlists: Vec::new(),
+                covers: covers.into(),
+                playlists: uris
+                    .iter()
+                    .map(|uri| crate::config::Playlist {
+                        name: "p".into(),
+                        uri: (*uri).into(),
+                        picture: None,
+                        color: None,
+                    })
+                    .collect(),
             },
         };
-        assert!(cover_fetches(&[empty]).is_empty());
+        let sources = [
+            spotify("/srv/a", &["spotify:playlist:a"]),
+            spotify("/srv/empty", &[]),
+            spotify("/srv/b", &["spotify:playlist:b1", "spotify:playlist:b2"]),
+        ];
+        let got: Vec<_> = cover_fetches(&sources)
+            .into_iter()
+            .map(|f| (f.folder.to_path_buf(), f.uris))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    PathBuf::from("/srv/a"),
+                    vec!["spotify:playlist:a".to_owned()]
+                ),
+                (
+                    PathBuf::from("/srv/b"),
+                    vec![
+                        "spotify:playlist:b1".to_owned(),
+                        "spotify:playlist:b2".to_owned()
+                    ]
+                ),
+            ]
+        );
     }
 
     #[test]
