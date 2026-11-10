@@ -29,10 +29,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(player)* Hand the speakers only the commands they can get ([#39](https://github.com/alexsavio/deckjay/issues/39))
 - *(config)* Hold a source's payload as one enum ([#41](https://github.com/alexsavio/deckjay/issues/41))
 - *(podcasts)* One limit for the length of a feed folder name ([#43](https://github.com/alexsavio/deckjay/issues/43))
+- *(main)* Split out and test how main.rs reads each source body ([#44](https://github.com/alexsavio/deckjay/issues/44))
 
 ### 🧪 Testing
 
 - *(podcasts)* Pin every field settings copies from the config ([#40](https://github.com/alexsavio/deckjay/issues/40))
+- *(config)* Check source bodies where the config resolves them ([#45](https://github.com/alexsavio/deckjay/issues/45))
 
 ### ⚙️ Miscellaneous Tasks
 
