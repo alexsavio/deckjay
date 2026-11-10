@@ -369,6 +369,11 @@ trait Device {
     fn poll_failure_grace(&self) -> Duration {
         POLL_FAILURE_GRACE
     }
+    /// What the deck shows when polls have failed for the whole grace.
+    /// `err` is the last failure.
+    fn poll_failure_text(&self, err: &anyhow::Error) -> String {
+        format!("the speaker stopped answering: {err:#}")
+    }
     /// Forgets the album after a failed command.
     fn reset(&mut self);
     /// Stops what plays and forgets it, before another speaker takes over.
@@ -435,10 +440,13 @@ fn run(
                     debug!("status poll failed: {err:#}");
                     let since = *failing_since.get_or_insert_with(Instant::now);
                     if since.elapsed() >= speaker.poll_failure_grace() {
-                        warn!("the speaker stopped answering: {err:#}");
+                        // Before `reset`: the text must not depend on what
+                        // the device forgets.
+                        let text = speaker.poll_failure_text(&err);
+                        warn!("{text}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
-                        events.trouble(format!("the speaker stopped answering: {err:#}"));
+                        events.trouble(text);
                         failing_since = None;
                     }
                 }

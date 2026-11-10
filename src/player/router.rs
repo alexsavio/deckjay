@@ -110,6 +110,10 @@ impl Device for Router {
         self.playing().poll_failure_grace()
     }
 
+    fn poll_failure_text(&self, err: &anyhow::Error) -> String {
+        self.playing().poll_failure_text(err)
+    }
+
     fn reset(&mut self) {
         self.active().reset();
     }
@@ -354,6 +358,53 @@ mod tests {
             .handle(tracks().speaker_cmd().unwrap(), &mut events)
             .unwrap();
         assert_eq!(router.poll_failure_grace(), Duration::from_millis(300));
+    }
+
+    /// Only its poll failure text is set; it does nothing else.
+    struct Worded<P>(&'static str, PhantomData<fn(P)>);
+
+    impl<P> Speaker for Worded<P> {
+        type Play = P;
+
+        fn handle(&mut self, _: SpeakerCmd<P>, _: &mut Emitter) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<P> Device for Worded<P> {
+        fn poll(&mut self, _: &mut Emitter) -> Result<()> {
+            Ok(())
+        }
+
+        fn poll_interval(&self) -> Option<Duration> {
+            None
+        }
+
+        fn poll_failure_text(&self, _: &anyhow::Error) -> String {
+            self.0.into()
+        }
+
+        fn reset(&mut self) {}
+    }
+
+    #[test]
+    fn the_poll_failure_text_is_the_one_of_the_speaker_that_plays() {
+        let output: Box<dyn Speaker<Play = Playable>> =
+            Box::new(Worded("output text", PhantomData));
+        let spotify: Box<dyn Speaker<Play = Playlist>> =
+            Box::new(Worded("spotify text", PhantomData));
+        let mut router = Router::new(output, Some(spotify));
+        let mut events = Emitter::new(mpsc::channel().0);
+        let err = anyhow::anyhow!("gone");
+        assert_eq!(router.poll_failure_text(&err), "output text");
+        router
+            .handle(playlist().speaker_cmd().unwrap(), &mut events)
+            .unwrap();
+        assert_eq!(router.poll_failure_text(&err), "spotify text");
+        router
+            .handle(tracks().speaker_cmd().unwrap(), &mut events)
+            .unwrap();
+        assert_eq!(router.poll_failure_text(&err), "output text");
     }
 
     #[test]
