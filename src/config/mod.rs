@@ -482,6 +482,8 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.sources[0].kind(), SourceKind::Spotify);
         assert!(cfg.sources[0].served_root().is_none());
+        let kinds: Vec<SourceKind> = cfg.sources.iter().map(Source::kind).collect();
+        assert_eq!(kinds, [SourceKind::Spotify, SourceKind::Music]);
     }
 
     #[test]
