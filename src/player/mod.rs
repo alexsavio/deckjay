@@ -443,7 +443,7 @@ fn run(
                         // Before `reset`: the text must not depend on what
                         // the device forgets.
                         let text = speaker.poll_failure_text(&err);
-                        warn!("{text}");
+                        warn!("the album stopped: {text}");
                         speaker.reset();
                         events.emit(PlayerEvent::Stopped);
                         events.trouble(text);
