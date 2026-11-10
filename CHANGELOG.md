@@ -18,6 +18,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(spotify)* Sweep a cover's stale temps before the fetch, and fix a flaky test ([#35](https://github.com/alexsavio/deckjay/issues/35))
 - *(podcasts)* Keep the playing episode's picture ([#36](https://github.com/alexsavio/deckjay/issues/36))
 - *(player)* HEOS errors as a type, and one played-out rule ([#37](https://github.com/alexsavio/deckjay/issues/37))
+- *(player)* Let the router pass on the speaker's poll failure grace ([#42](https://github.com/alexsavio/deckjay/issues/42))
 
 ### 🚜 Refactor
 
