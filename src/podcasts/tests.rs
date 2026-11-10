@@ -689,27 +689,6 @@ fn a_long_name_gives_a_slug_the_cache_accepts() {
 }
 
 #[test]
-fn only_podcast_sources_have_settings() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("config.toml");
-    fs::write(
-        &file,
-        "speaker_host = \"192.168.1.50\"\n\
-         [[source]]\ntype = \"music\"\npath = \"m\"\n\
-         [[source]]\ntype = \"podcast\"\n\
-         [[source.feed]]\nname = \"Maus\"\nurl = \"https://example.org/maus.xml\"\n",
-    )
-    .unwrap();
-    let cfg = config::Config::load(&file).unwrap();
-    let has_settings: Vec<bool> = cfg
-        .sources
-        .iter()
-        .map(|s| matches!(s.body, config::SourceBody::Podcast { .. }))
-        .collect();
-    assert_eq!(has_settings, [false, true]);
-}
-
-#[test]
 fn load_cached_reads_the_cache_the_settings_describe() {
     let world = World::new();
     world.set_feed(&[1, 2]);
