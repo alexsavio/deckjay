@@ -83,15 +83,18 @@ fn build<T: SizedSample + FromSample<f32>>(
     device.build_output_stream(
         config,
         move |out: &mut [T], _: &cpal::OutputCallbackInfo| sink.fill(out),
-        move |err: cpal::Error| {
-            if plays_on(err.kind()) {
-                debug!("sound output: {err} ({:?})", err.kind());
-            } else {
-                failures.report(failure_text(&err));
-            }
-        },
+        move |err: cpal::Error| on_error(&err, &failures),
         None,
     )
+}
+
+/// What the stream's error callback does: log it, and report it when final.
+fn on_error(err: &cpal::Error, failures: &Failures) {
+    if plays_on(err.kind()) {
+        debug!("sound output: {}", error_text(err));
+    } else {
+        failures.report(error_text(err));
+    }
 }
 
 /// Whether playback goes on after this error. Every other kind is final.
@@ -102,9 +105,9 @@ fn plays_on(kind: ErrorKind) -> bool {
     )
 }
 
-/// The final error as the log and the deck show it. cpal's text never names
-/// the kind, and the kinds are what tell a busy device from a gone one.
-fn failure_text(err: &cpal::Error) -> String {
+/// An error as the log and the deck show it. cpal's text never names the
+/// kind, and the kinds are what tell a busy device from a gone one.
+fn error_text(err: &cpal::Error) -> String {
     format!("{err} ({:?})", err.kind())
 }
 
@@ -200,13 +203,28 @@ mod tests {
     }
 
     #[test]
-    fn the_final_text_names_the_kind() {
+    fn the_text_names_the_kind() {
         let busy = cpal::Error::new(ErrorKind::DeviceBusy);
         assert_eq!(
-            failure_text(&busy),
+            error_text(&busy),
             "The requested device is temporarily busy. Another application or stream may be using it. (DeviceBusy)"
         );
         let with_message = cpal::Error::with_message(ErrorKind::BackendError, "snd_pcm_writei");
-        assert_eq!(failure_text(&with_message), "snd_pcm_writei (BackendError)");
+        assert_eq!(error_text(&with_message), "snd_pcm_writei (BackendError)");
+    }
+
+    #[test]
+    fn only_a_final_error_fails_the_engine_and_it_names_the_kind() {
+        let (engine, _sink) = Engine::new(Format {
+            rate: 48_000,
+            channels: 2,
+        })
+        .unwrap();
+        let failures = engine.failures();
+        on_error(&cpal::Error::new(ErrorKind::Xrun), &failures);
+        engine.check().unwrap();
+        on_error(&cpal::Error::new(ErrorKind::DeviceBusy), &failures);
+        let err = engine.check().unwrap_err();
+        assert!(format!("{err:#}").ends_with("(DeviceBusy)"), "{err:#}");
     }
 }
