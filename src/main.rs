@@ -239,7 +239,6 @@ fn scan_sources(cfg: &Config) -> Library {
 
 /// A podcast source that gets a `podcasts` thread.
 struct PodcastStart<'a> {
-    /// The library shelf of `source`.
     shelf: usize,
     source: &'a Source,
     settings: &'a Podcast,
