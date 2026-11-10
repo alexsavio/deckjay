@@ -20,6 +20,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(player)* HEOS errors as a type, and one played-out rule ([#37](https://github.com/alexsavio/deckjay/issues/37))
 - *(player)* Let the router pass on the speaker's poll failure grace ([#42](https://github.com/alexsavio/deckjay/issues/42))
 - *(player)* Let local audio name its own trouble text ([#47](https://github.com/alexsavio/deckjay/issues/47))
+- *(player)* Name the cpal error kind when the sound output fails ([#48](https://github.com/alexsavio/deckjay/issues/48))
 
 ### 🚜 Refactor
 
