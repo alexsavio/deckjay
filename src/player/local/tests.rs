@@ -603,5 +603,18 @@ fn a_file_with_no_samples_has_no_length() {
     assert!(Source::open(&path).unwrap().duration().is_some());
 }
 
+#[test]
+fn a_poll_failure_shows_the_error_alone() {
+    let mut rig = Rig::new();
+    let tracks = vec![rig.track("1.wav", 1.0, 1000)];
+    rig.play_album(tracks, 1.0).unwrap();
+    rig.engine().failures().report("unplugged".into());
+    let err = rig.poll().unwrap_err();
+    assert_eq!(
+        rig.player.poll_failure_text(&err),
+        "the sound output failed: unplugged"
+    );
+}
+
 mod resume;
 mod stream;

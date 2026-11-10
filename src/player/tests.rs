@@ -505,6 +505,57 @@ fn polls_failing_for_the_whole_grace_stop_the_album() {
     );
 }
 
+/// `Scripted` with its own trouble text.
+struct Worded(Scripted);
+
+impl Speaker for Worded {
+    type Play = Content;
+
+    fn handle(&mut self, cmd: SpeakerCmd<Content>, events: &mut Emitter) -> Result<()> {
+        self.0.handle(cmd, events)
+    }
+}
+
+impl Device for Worded {
+    fn poll(&mut self, events: &mut Emitter) -> Result<()> {
+        self.0.poll(events)
+    }
+
+    fn poll_interval(&self) -> Option<Duration> {
+        self.0.poll_interval()
+    }
+
+    fn poll_failure_grace(&self) -> Duration {
+        GRACE
+    }
+
+    fn poll_failure_text(&self, err: &anyhow::Error) -> String {
+        format!("own words: {err:#}")
+    }
+
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
+#[test]
+fn polls_failing_for_the_whole_grace_show_the_text_of_the_speaker() {
+    let (speaker, _idle) = Scripted::new(vec![Poll::Fail; 10_000]);
+    let (cmds, rx) = mpsc::channel();
+    let (tx, events) = mpsc::channel();
+    let thread = thread::spawn(move || run(Box::new(Worded(speaker)), &rx, Emitter::new(tx)));
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(5)),
+        Ok(PlayerEvent::Stopped)
+    );
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(5)),
+        Ok(PlayerEvent::Trouble("own words: no answer".into()))
+    );
+    drop(cmds);
+    thread.join().unwrap();
+}
+
 #[test]
 fn a_poll_that_works_restarts_the_failure_clock() {
     use Poll::{Answer, Fail};

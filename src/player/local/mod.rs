@@ -186,6 +186,12 @@ impl Device for LocalPlayer {
         POLL_INTERVAL * 3
     }
 
+    /// The error already names the part that failed, the sound output or
+    /// the decoder thread, so no "speaker" is added to it.
+    fn poll_failure_text(&self, err: &anyhow::Error) -> String {
+        format!("{err:#}")
+    }
+
     /// Also closes the output, so the next album opens it afresh.
     fn reset(&mut self) {
         self.current = None;
