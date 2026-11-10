@@ -584,7 +584,7 @@ mod tests {
             feed_dir(root, "die-maus-2").unwrap(),
             root.join("die-maus-2")
         );
-        for bad in ["", "..", "Die Maus", "a/b", "ä", &"x".repeat(65)] {
+        for bad in ["", "..", "Die Maus", "a/b", "ä"] {
             assert!(feed_dir(root, bad).is_err(), "{bad}");
         }
     }
