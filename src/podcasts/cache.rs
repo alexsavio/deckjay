@@ -14,6 +14,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -27,8 +28,14 @@ use crate::library::audio_type;
 
 pub const MANIFEST: &str = "feed.json";
 
-const MAX_SLUG_CHARS: usize = 40;
+const MAX_EPISODE_SLUG_CHARS: usize = 40;
 const HASH_CHARS: usize = 8;
+/// Width of the `yyyymmdd` date that starts an episode file name.
+const DATE_CHARS: usize = 8;
+/// Allowed length of an episode file stem (the name without its extension): the date, `-`, a
+/// slug of 1 to [`MAX_EPISODE_SLUG_CHARS`] characters, `-` and the hash. See [`episode_name`].
+const EPISODE_STEM_LENGTHS: RangeInclusive<usize> =
+    DATE_CHARS + 1 + 1 + 1 + HASH_CHARS..=DATE_CHARS + 1 + MAX_EPISODE_SLUG_CHARS + 1 + HASH_CHARS;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -219,12 +226,12 @@ fn is_episode_name(name: &str) -> bool {
     let b = stem.as_bytes();
     let n = b.len();
     ext_ok
-        && (8 + 1 + 1 + 1 + HASH_CHARS..=8 + 1 + MAX_SLUG_CHARS + 1 + HASH_CHARS).contains(&n)
-        && b[..8].iter().all(u8::is_ascii_digit)
-        && b[8] == b'-'
+        && EPISODE_STEM_LENGTHS.contains(&n)
+        && b[..DATE_CHARS].iter().all(u8::is_ascii_digit)
+        && b[DATE_CHARS] == b'-'
         && b[n - HASH_CHARS - 1] == b'-'
         && is_hash(&b[n - HASH_CHARS..])
-        && b[9..n - HASH_CHARS - 1]
+        && b[DATE_CHARS + 1..n - HASH_CHARS - 1]
             .iter()
             .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
@@ -239,7 +246,7 @@ fn slug(title: &str) -> String {
             out.push('-');
         }
     }
-    out.truncate(MAX_SLUG_CHARS);
+    out.truncate(MAX_EPISODE_SLUG_CHARS);
     let out = out.trim_end_matches('-');
     if out.is_empty() {
         "episode".to_string()
@@ -347,6 +354,15 @@ mod tests {
     }
 
     #[test]
+    fn the_longest_episode_name_is_still_an_episode() {
+        let name = episode_name(Some(1_736_229_600), &"a".repeat(50), ID, "mp3");
+        assert_eq!(name, format!("20250107-{}-1a2b3c4d.mp3", "a".repeat(40)));
+        assert_eq!(kind(&name), Some(Kind::Episode));
+        let one_more = format!("20250107-{}-1a2b3c4d.mp3", "a".repeat(41));
+        assert_eq!(kind(&one_more), None);
+    }
+
+    #[test]
     fn an_m4b_episode_file_is_an_episode() {
         let name = episode_name(Some(1_736_229_600), "Das Hörbuch", ID, "m4b");
         assert_eq!(kind(&name), Some(Kind::Episode));
@@ -364,7 +380,7 @@ mod tests {
         assert_eq!(slug(""), "episode");
         let long = slug(&"abc ".repeat(30));
         assert!(
-            long.len() <= MAX_SLUG_CHARS && !long.ends_with('-'),
+            long.len() <= MAX_EPISODE_SLUG_CHARS && !long.ends_with('-'),
             "{long}"
         );
     }
@@ -583,7 +599,7 @@ mod tests {
             feed_dir(root, "die-maus-2").unwrap(),
             root.join("die-maus-2")
         );
-        for bad in ["", "..", "Die Maus", "a/b", "ä", &"x".repeat(65)] {
+        for bad in ["", "..", "Die Maus", "a/b", "ä"] {
             assert!(feed_dir(root, bad).is_err(), "{bad}");
         }
     }

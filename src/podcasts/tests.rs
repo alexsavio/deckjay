@@ -686,6 +686,8 @@ fn a_long_name_gives_a_slug_the_cache_accepts() {
     assert_eq!(first.len(), MAX_SLUG);
     assert_eq!(second.len(), MAX_SLUG);
     assert!(second.ends_with("-2"));
+    cache::feed_dir(Path::new("/cache"), &first).unwrap();
+    cache::feed_dir(Path::new("/cache"), &second).unwrap();
 }
 
 #[test]
