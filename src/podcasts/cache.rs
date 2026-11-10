@@ -20,6 +20,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike};
 use serde::{Deserialize, Serialize};
 
+use super::MAX_SLUG;
 use super::feed::hash_hex;
 use super::plan::Stored;
 use crate::library::audio_type;
@@ -54,12 +55,12 @@ pub enum Kind {
 /// `slug` becomes a folder name, so only `[a-z0-9-]` gets through.
 pub fn feed_dir(cache_dir: &Path, slug: &str) -> Result<PathBuf> {
     let valid = !slug.is_empty()
-        && slug.len() <= 64
+        && slug.len() <= MAX_SLUG
         && slug
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
     if !valid {
-        bail!("invalid podcast folder name {slug:?}: use 1 to 64 of a-z, 0-9 and -");
+        bail!("invalid podcast folder name {slug:?}: use 1 to {MAX_SLUG} of a-z, 0-9 and -");
     }
     Ok(cache_dir.join(slug))
 }
@@ -585,6 +586,18 @@ mod tests {
         for bad in ["", "..", "Die Maus", "a/b", "ä", &"x".repeat(65)] {
             assert!(feed_dir(root, bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn feed_folder_names_stop_at_64_characters() {
+        let root = Path::new("/cache");
+        let longest = "x".repeat(64);
+        assert_eq!(feed_dir(root, &longest).unwrap(), root.join(&longest));
+        let too_long = "x".repeat(65);
+        assert_eq!(
+            feed_dir(root, &too_long).unwrap_err().to_string(),
+            format!("invalid podcast folder name {too_long:?}: use 1 to 64 of a-z, 0-9 and -")
+        );
     }
 
     #[test]

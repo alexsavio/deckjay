@@ -53,7 +53,7 @@ struct Settings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FeedSettings {
-    /// Folder name in the cache: 1 to 64 of `a-z`, `0-9`, `-`.
+    /// Folder name in the cache: 1 to [`MAX_SLUG`] of `a-z`, `0-9`, `-`.
     pub slug: String,
     pub name: String,
     pub url: String,
@@ -229,7 +229,7 @@ fn settings(podcast: &config::Podcast, cache_dir: &Path) -> Settings {
     }
 }
 
-/// The longest cache folder name [`validate`] accepts.
+/// The longest cache folder name [`cache::feed_dir`] accepts.
 const MAX_SLUG: usize = 64;
 
 /// A cache folder name: lower-case letters, digits and `-`.
