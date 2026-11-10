@@ -35,6 +35,14 @@ impl Router {
             _ => self.output.as_mut(),
         }
     }
+
+    /// The device that plays, as `active` finds it, for the read-only methods.
+    fn playing(&self) -> &dyn Device {
+        match (&self.spotify, self.on_spotify) {
+            (Some(spotify), true) => spotify.as_ref(),
+            _ => self.output.as_ref(),
+        }
+    }
 }
 
 impl Speaker for Router {
@@ -95,10 +103,11 @@ impl Device for Router {
     }
 
     fn poll_interval(&self) -> Option<Duration> {
-        match (&self.spotify, self.on_spotify) {
-            (Some(spotify), true) => spotify.poll_interval(),
-            _ => self.output.poll_interval(),
-        }
+        self.playing().poll_interval()
+    }
+
+    fn poll_failure_grace(&self) -> Duration {
+        self.playing().poll_failure_grace()
     }
 
     fn reset(&mut self) {
@@ -292,6 +301,59 @@ mod tests {
             log[log.len() - 3..],
             ["spotify stop", "output play", "output next"]
         );
+    }
+
+    /// Only its poll failure grace is set; it does nothing else.
+    struct Graced<P> {
+        grace: Duration,
+        plays: PhantomData<fn(P)>,
+    }
+
+    impl<P> Speaker for Graced<P> {
+        type Play = P;
+
+        fn handle(&mut self, _: SpeakerCmd<P>, _: &mut Emitter) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<P> Device for Graced<P> {
+        fn poll(&mut self, _: &mut Emitter) -> Result<()> {
+            Ok(())
+        }
+
+        fn poll_interval(&self) -> Option<Duration> {
+            None
+        }
+
+        fn poll_failure_grace(&self) -> Duration {
+            self.grace
+        }
+
+        fn reset(&mut self) {}
+    }
+
+    #[test]
+    fn the_poll_failure_grace_is_the_one_of_the_speaker_that_plays() {
+        let output: Box<dyn Speaker<Play = Playable>> = Box::new(Graced {
+            grace: Duration::from_millis(300),
+            plays: PhantomData,
+        });
+        let spotify: Box<dyn Speaker<Play = Playlist>> = Box::new(Graced {
+            grace: Duration::from_secs(7),
+            plays: PhantomData,
+        });
+        let mut router = Router::new(output, Some(spotify));
+        let mut events = Emitter::new(mpsc::channel().0);
+        assert_eq!(router.poll_failure_grace(), Duration::from_millis(300));
+        router
+            .handle(playlist().speaker_cmd().unwrap(), &mut events)
+            .unwrap();
+        assert_eq!(router.poll_failure_grace(), Duration::from_secs(7));
+        router
+            .handle(tracks().speaker_cmd().unwrap(), &mut events)
+            .unwrap();
+        assert_eq!(router.poll_failure_grace(), Duration::from_millis(300));
     }
 
     #[test]
