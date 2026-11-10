@@ -36,7 +36,7 @@ mod ui;
 
 use std::fmt::Display;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -48,7 +48,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Command, RunArgs};
-use crate::config::{Config, SourceBody, SpeakerType};
+use crate::config::{Config, Podcast, Source, SourceBody, SpeakerType};
 use crate::deck::Deck;
 use crate::library::Library;
 use crate::net::BaseUrl;
@@ -237,16 +237,45 @@ fn scan_sources(cfg: &Config) -> Library {
     library
 }
 
-/// One `podcasts` thread per podcast source; a source that cannot start
-/// keeps the episodes already in its cache.
-fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThread> {
-    cfg.sources
+/// A podcast source to start a `podcasts` thread for.
+struct PodcastStart<'a> {
+    shelf: usize,
+    source: &'a Source,
+    settings: &'a Podcast,
+    cache: &'a Path,
+}
+
+/// The podcast sources, each with its shelf index (its place in `sources`).
+fn podcast_starts(sources: &[Source]) -> Vec<PodcastStart<'_>> {
+    sources
         .iter()
         .enumerate()
         .filter_map(|(shelf, source)| {
             let SourceBody::Podcast { settings, cache } = &source.body else {
                 return None;
             };
+            Some(PodcastStart {
+                shelf,
+                source,
+                settings,
+                cache,
+            })
+        })
+        .collect()
+}
+
+/// One `podcasts` thread per podcast source; a source that cannot start
+/// keeps the episodes already in its cache.
+fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThread> {
+    podcast_starts(&cfg.sources)
+        .into_iter()
+        .filter_map(|start| {
+            let PodcastStart {
+                shelf,
+                source,
+                settings,
+                cache,
+            } = start;
             let (snapshot_tx, snapshots) = mpsc::channel();
             let files = server::PodcastFiles {
                 source: source.name.clone(),
@@ -268,13 +297,16 @@ fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThrea
         .collect()
 }
 
-fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
-    let roots = cfg
-        .sources
+/// The folder each source serves, by source name.
+fn served_roots(sources: &[Source]) -> Vec<(String, PathBuf)> {
+    sources
         .iter()
         .filter_map(|s| Some((s.name.clone(), s.served_root()?.to_path_buf())))
-        .collect();
-    server::spawn(roots, cfg.http_port, served)
+        .collect()
+}
+
+fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
+    server::spawn(served_roots(&cfg.sources), cfg.http_port, served)
 }
 
 enum DeckSource {
@@ -338,17 +370,35 @@ fn output(cfg: &Config) -> player::Output {
     }
 }
 
+/// The playlist covers of one Spotify source to fetch.
+struct CoverFetch<'a> {
+    folder: &'a Path,
+    uris: Vec<String>,
+}
+
+/// The Spotify sources with at least one playlist.
+fn cover_fetches(sources: &[Source]) -> Vec<CoverFetch<'_>> {
+    sources
+        .iter()
+        .filter_map(|source| {
+            let SourceBody::Spotify { covers, playlists } = &source.body else {
+                return None;
+            };
+            if playlists.is_empty() {
+                return None;
+            }
+            Some(CoverFetch {
+                folder: covers,
+                uris: playlists.iter().map(|p| p.uri.clone()).collect(),
+            })
+        })
+        .collect()
+}
+
 /// In the background: new covers show from the next start.
 fn fetch_playlist_covers(cfg: &Config) {
-    for source in &cfg.sources {
-        let SourceBody::Spotify { covers, playlists } = &source.body else {
-            continue;
-        };
-        if playlists.is_empty() {
-            continue;
-        }
-        let uris: Vec<String> = playlists.iter().map(|p| p.uri.clone()).collect();
-        let (state_dir, folder) = (cfg.state_dir.clone(), covers.clone());
+    for CoverFetch { folder, uris } in cover_fetches(&cfg.sources) {
+        let (state_dir, folder) = (cfg.state_dir.clone(), folder.to_path_buf());
         let fetch = move || {
             spotify::covers::fetch_missing(
                 &state_dir,
@@ -438,6 +488,14 @@ fn count(n: usize, noun: &str) -> String {
     }
 }
 
+/// The settings of a podcast source: only those have feeds to check.
+fn podcast_settings(source: &Source) -> Option<&Podcast> {
+    match &source.body {
+        SourceBody::Podcast { settings, .. } => Some(settings),
+        _ => None,
+    }
+}
+
 fn run_check(args: &RunArgs) -> Result<ExitCode> {
     let cfg = load_config(args)?;
     let library = scan_sources(&cfg);
@@ -450,10 +508,7 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
         } else {
             println!("Source {} ({:?}):", source.name, source.kind());
         }
-        let podcast = match &source.body {
-            SourceBody::Podcast { settings, .. } => Some(settings),
-            _ => None,
-        };
+        let podcast = podcast_settings(source);
         if let Some(podcast) = podcast {
             for feed in &podcast.feeds {
                 match podcasts::check_feed(&feed.url) {
@@ -722,5 +777,144 @@ mod tests {
         assert_eq!(count(1, "problem"), "1 problem");
         assert_eq!(count(0, "warning"), "0 warnings");
         assert_eq!(count(3, "warning"), "3 warnings");
+    }
+
+    /// Music, podcast, radio, a second podcast and Spotify, in this order.
+    fn mixed() -> Config {
+        let feed = |name: &str| {
+            format!(
+                "[[source.feed]]\nname = \"{name}\"\nurl = \"https://example.org/{name}.xml\"\n"
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = format!(
+            "state_dir = \"/srv/state\"\nspeaker_type = \"local\"\n\
+             [spotify]\nclient_id = \"id\"\ndevice = \"Kitchen\"\n\
+             [[source]]\ntype = \"music\"\npath = \"/srv/music\"\n\
+             [[source]]\ntype = \"podcast\"\nname = \"maus\"\ncache_dir = \"/srv/maus\"\n{}\
+             [[source]]\ntype = \"radio\"\n\
+             [[source.station]]\nname = \"Kinder\"\nurl = \"https://example.org/k.mp3\"\n\
+             [[source]]\ntype = \"podcast\"\nname = \"news\"\ncache_dir = \"/srv/news\"\n{}\
+             [[source]]\ntype = \"spotify\"\n\
+             [[source.playlist]]\nname = \"A\"\nuri = \"spotify:playlist:aaa\"\n\
+             [[source.playlist]]\nname = \"B\"\nuri = \"spotify:playlist:bbb\"\n",
+            feed("maus"),
+            feed("news")
+        );
+        std::fs::write(&path, text).unwrap();
+        Config::load(&path).unwrap()
+    }
+
+    #[test]
+    fn podcast_starts_select_podcast_sources_with_shelf_and_cache() {
+        let cfg = mixed();
+        let got: Vec<_> = podcast_starts(&cfg.sources)
+            .iter()
+            .map(|s| {
+                (
+                    s.shelf,
+                    s.source.name.as_str(),
+                    s.cache,
+                    s.settings.feeds[0].name.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (1, "maus", Path::new("/srv/maus"), "maus"),
+                (3, "news", Path::new("/srv/news"), "news"),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_sources_with_files_are_served_under_their_name() {
+        let got = served_roots(&mixed().sources);
+        assert_eq!(
+            got,
+            [
+                ("music".to_owned(), PathBuf::from("/srv/music")),
+                ("maus".to_owned(), PathBuf::from("/srv/maus")),
+                ("news".to_owned(), PathBuf::from("/srv/news")),
+            ]
+        );
+    }
+
+    #[test]
+    fn covers_are_fetched_for_spotify_sources_with_playlists() {
+        let cfg = mixed();
+        let got: Vec<_> = cover_fetches(&cfg.sources)
+            .into_iter()
+            .map(|f| (f.folder.to_path_buf(), f.uris))
+            .collect();
+        assert_eq!(
+            got,
+            [(
+                PathBuf::from("/srv/state/spotify-covers"),
+                vec![
+                    "spotify:playlist:aaa".to_owned(),
+                    "spotify:playlist:bbb".to_owned()
+                ]
+            )]
+        );
+    }
+
+    #[test]
+    fn a_spotify_source_with_no_playlist_is_skipped_between_two_that_fetch() {
+        // The config refuses an empty source, so build the sources by hand.
+        let spotify = |covers: &str, uris: &[&str]| Source {
+            name: "spotify".into(),
+            look: crate::config::Look::default(),
+            body: SourceBody::Spotify {
+                covers: covers.into(),
+                playlists: uris
+                    .iter()
+                    .map(|uri| crate::config::Playlist {
+                        name: "p".into(),
+                        uri: (*uri).into(),
+                        picture: None,
+                        color: None,
+                    })
+                    .collect(),
+            },
+        };
+        let sources = [
+            spotify("/srv/a", &["spotify:playlist:a"]),
+            spotify("/srv/empty", &[]),
+            spotify("/srv/b", &["spotify:playlist:b1", "spotify:playlist:b2"]),
+        ];
+        let got: Vec<_> = cover_fetches(&sources)
+            .into_iter()
+            .map(|f| (f.folder.to_path_buf(), f.uris))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    PathBuf::from("/srv/a"),
+                    vec!["spotify:playlist:a".to_owned()]
+                ),
+                (
+                    PathBuf::from("/srv/b"),
+                    vec![
+                        "spotify:playlist:b1".to_owned(),
+                        "spotify:playlist:b2".to_owned()
+                    ]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_podcast_sources_have_feeds_to_check() {
+        let cfg = mixed();
+        let got: Vec<bool> = cfg
+            .sources
+            .iter()
+            .map(|s| podcast_settings(s).is_some())
+            .collect();
+        assert_eq!(got, [false, true, false, true, false]);
     }
 }
