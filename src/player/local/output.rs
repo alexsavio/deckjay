@@ -83,15 +83,29 @@ fn build<T: SizedSample + FromSample<f32>>(
     device.build_output_stream(
         config,
         move |out: &mut [T], _: &cpal::OutputCallbackInfo| sink.fill(out),
-        move |err: cpal::Error| match err.kind() {
-            // Playback goes on after these.
-            ErrorKind::Xrun | ErrorKind::DeviceChanged | ErrorKind::RealtimeDenied => {
-                debug!("sound output: {err}");
+        move |err: cpal::Error| {
+            if plays_on(err.kind()) {
+                debug!("sound output: {err} ({:?})", err.kind());
+            } else {
+                failures.report(failure_text(&err));
             }
-            _ => failures.report(err.to_string()),
         },
         None,
     )
+}
+
+/// Whether playback goes on after this error. Every other kind is final.
+fn plays_on(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::Xrun | ErrorKind::DeviceChanged | ErrorKind::RealtimeDenied
+    )
+}
+
+/// The final error as the log and the deck show it. cpal's text never names
+/// the kind, and the kinds are what tell a busy device from a gone one.
+fn failure_text(err: &cpal::Error) -> String {
+    format!("{err} ({:?})", err.kind())
 }
 
 fn find(host: &Host, wanted: Option<&str>) -> Result<(String, Device)> {
@@ -160,4 +174,39 @@ pub(super) fn pick(names: &[String], wanted: &str) -> Result<usize> {
                 )
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_three_kinds_let_playback_go_on() {
+        for kind in [
+            ErrorKind::Xrun,
+            ErrorKind::DeviceChanged,
+            ErrorKind::RealtimeDenied,
+        ] {
+            assert!(plays_on(kind), "{kind:?}");
+        }
+        for kind in [
+            ErrorKind::DeviceNotAvailable,
+            ErrorKind::StreamInvalidated,
+            ErrorKind::DeviceBusy,
+            ErrorKind::BackendError,
+        ] {
+            assert!(!plays_on(kind), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn the_final_text_names_the_kind() {
+        let busy = cpal::Error::new(ErrorKind::DeviceBusy);
+        assert_eq!(
+            failure_text(&busy),
+            "The requested device is temporarily busy. Another application or stream may be using it. (DeviceBusy)"
+        );
+        let with_message = cpal::Error::with_message(ErrorKind::BackendError, "snd_pcm_writei");
+        assert_eq!(failure_text(&with_message), "snd_pcm_writei (BackendError)");
+    }
 }
