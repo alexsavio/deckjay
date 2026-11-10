@@ -34,7 +34,7 @@ const HASH_CHARS: usize = 8;
 const DATE_CHARS: usize = 8;
 /// Allowed length of an episode file stem (the name without its extension): the date, `-`, a
 /// slug of 1 to [`MAX_EPISODE_SLUG_CHARS`] characters, `-` and the hash. See [`episode_name`].
-const EPISODE_STEM_CHARS: RangeInclusive<usize> =
+const EPISODE_STEM_LENGTHS: RangeInclusive<usize> =
     DATE_CHARS + 1 + 1 + 1 + HASH_CHARS..=DATE_CHARS + 1 + MAX_EPISODE_SLUG_CHARS + 1 + HASH_CHARS;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,7 +226,7 @@ fn is_episode_name(name: &str) -> bool {
     let b = stem.as_bytes();
     let n = b.len();
     ext_ok
-        && EPISODE_STEM_CHARS.contains(&n)
+        && EPISODE_STEM_LENGTHS.contains(&n)
         && b[..DATE_CHARS].iter().all(u8::is_ascii_digit)
         && b[DATE_CHARS] == b'-'
         && b[n - HASH_CHARS - 1] == b'-'
