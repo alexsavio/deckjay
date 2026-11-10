@@ -14,6 +14,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -29,6 +30,12 @@ pub const MANIFEST: &str = "feed.json";
 
 const MAX_EPISODE_SLUG_CHARS: usize = 40;
 const HASH_CHARS: usize = 8;
+/// Width of the `yyyymmdd` date that starts an episode file name.
+const DATE_CHARS: usize = 8;
+/// Allowed length of an episode file stem (the name without its extension): the date, `-`, a
+/// slug of 1 to [`MAX_EPISODE_SLUG_CHARS`] characters, `-` and the hash. See [`episode_name`].
+const EPISODE_STEM_CHARS: RangeInclusive<usize> =
+    DATE_CHARS + 1 + 1 + 1 + HASH_CHARS..=DATE_CHARS + 1 + MAX_EPISODE_SLUG_CHARS + 1 + HASH_CHARS;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -219,13 +226,12 @@ fn is_episode_name(name: &str) -> bool {
     let b = stem.as_bytes();
     let n = b.len();
     ext_ok
-        && (8 + 1 + 1 + 1 + HASH_CHARS..=8 + 1 + MAX_EPISODE_SLUG_CHARS + 1 + HASH_CHARS)
-            .contains(&n)
-        && b[..8].iter().all(u8::is_ascii_digit)
-        && b[8] == b'-'
+        && EPISODE_STEM_CHARS.contains(&n)
+        && b[..DATE_CHARS].iter().all(u8::is_ascii_digit)
+        && b[DATE_CHARS] == b'-'
         && b[n - HASH_CHARS - 1] == b'-'
         && is_hash(&b[n - HASH_CHARS..])
-        && b[9..n - HASH_CHARS - 1]
+        && b[DATE_CHARS + 1..n - HASH_CHARS - 1]
             .iter()
             .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
