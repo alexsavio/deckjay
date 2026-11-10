@@ -588,6 +588,18 @@ mod tests {
     }
 
     #[test]
+    fn feed_folder_names_stop_at_64_characters() {
+        let root = Path::new("/cache");
+        let longest = "x".repeat(64);
+        assert_eq!(feed_dir(root, &longest).unwrap(), root.join(&longest));
+        let too_long = "x".repeat(65);
+        assert_eq!(
+            feed_dir(root, &too_long).unwrap_err().to_string(),
+            format!("invalid podcast folder name {too_long:?}: use 1 to 64 of a-z, 0-9 and -")
+        );
+    }
+
+    #[test]
     fn finds_folders_of_feeds_that_are_gone() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("maus")).unwrap();
