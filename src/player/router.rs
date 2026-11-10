@@ -35,6 +35,14 @@ impl Router {
             _ => self.output.as_mut(),
         }
     }
+
+    /// The device that plays, as `active` finds it, for the read-only methods.
+    fn playing(&self) -> &dyn Device {
+        match (&self.spotify, self.on_spotify) {
+            (Some(spotify), true) => spotify.as_ref(),
+            _ => self.output.as_ref(),
+        }
+    }
 }
 
 impl Speaker for Router {
@@ -95,17 +103,11 @@ impl Device for Router {
     }
 
     fn poll_interval(&self) -> Option<Duration> {
-        match (&self.spotify, self.on_spotify) {
-            (Some(spotify), true) => spotify.poll_interval(),
-            _ => self.output.poll_interval(),
-        }
+        self.playing().poll_interval()
     }
 
     fn poll_failure_grace(&self) -> Duration {
-        match (&self.spotify, self.on_spotify) {
-            (Some(spotify), true) => spotify.poll_failure_grace(),
-            _ => self.output.poll_failure_grace(),
-        }
+        self.playing().poll_failure_grace()
     }
 
     fn reset(&mut self) {

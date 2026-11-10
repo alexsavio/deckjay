@@ -180,8 +180,8 @@ impl Device for LocalPlayer {
         self.current.map(|_| POLL_INTERVAL)
     }
 
-    /// A poll fails only once the sound output itself failed, and waiting
-    /// mends none of that.
+    /// A poll fails only once the sound output or the decoder thread is gone,
+    /// and waiting mends neither.
     fn poll_failure_grace(&self) -> Duration {
         POLL_INTERVAL * 3
     }
