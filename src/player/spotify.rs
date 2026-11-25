@@ -10,7 +10,8 @@ use tracing::{info, warn};
 
 use super::{Device, Emitter, PlayerEvent, Playlist, Speaker, SpeakerCmd, clamp_volume};
 use crate::library::ItemId;
-use crate::spotify::api::{ApiError, Client, Endpoints};
+use crate::spotify::api::{Client, Endpoints};
+use crate::spotify::http::ApiError;
 use crate::spotify::pick_device;
 
 /// Spotify limits requests per app, so polls are slow.

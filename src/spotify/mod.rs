@@ -10,6 +10,7 @@ pub mod auth;
 pub mod covers;
 #[cfg(test)]
 pub(crate) mod fake;
+pub mod http;
 pub mod login;
 pub mod token;
 
