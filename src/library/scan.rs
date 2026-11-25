@@ -240,7 +240,7 @@ fn extension(p: &Path) -> String {
 
 /// Formats the Chromecast default receiver can play.
 pub(super) fn content_type(p: &Path) -> Option<&'static str> {
-    super::audio_type(&extension(p))
+    crate::audio::audio_type(&extension(p))
 }
 
 fn is_image(p: &Path) -> bool {

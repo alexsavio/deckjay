@@ -17,6 +17,7 @@
 //! stands in for the Stream Deck, so the player can run without the hardware.
 //! The other commands ([`cli`]) check the setup or the deck and exit.
 
+mod audio;
 mod cli;
 mod config;
 mod deck;

@@ -11,7 +11,7 @@ use anyhow::{Result, bail};
 use chrono::DateTime;
 use rss::Channel;
 
-use crate::library::{AUDIO_TYPES, audio_type};
+use crate::audio::{AUDIO_TYPES, audio_type};
 use crate::net::http_url;
 
 /// Longer titles are cut: they are only for logs and the manifest.

@@ -6,26 +6,8 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
-
-use super::cache::Manifest;
+use super::cache::{Manifest, Stored};
 use super::feed::RemoteEpisode;
-
-/// An episode file in the cache, as the manifest records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Stored {
-    pub id: String,
-    pub title: String,
-    /// Unix seconds.
-    pub published: Option<i64>,
-    /// File name inside the feed's folder.
-    pub file: String,
-    pub content_type: String,
-    pub bytes: u64,
-    /// Picture file name inside the feed's folder.
-    #[serde(default)]
-    pub picture: Option<String>,
-}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Plan {
