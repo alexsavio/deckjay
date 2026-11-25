@@ -406,7 +406,9 @@ impl HeosPlayer {
         }
         self.call("browse/play_stream", &[("url", url)])?;
         // Anything read up to this reply was about the stream before.
-        self.take_progress();
+        if let Some(conn) = self.conn.as_mut() {
+            conn.cli.discard_progress();
+        }
         Ok(())
     }
 
@@ -419,18 +421,17 @@ impl HeosPlayer {
 
     /// Consumes the latest progress event and returns it as a place.
     fn current_place(&mut self) -> Option<Place> {
-        let seen = self.take_progress()?;
-        let current = self.current.as_mut()?;
-        current.seen = Some(seen);
-        Some(Place {
-            track: current.track,
-            position: seen.position,
-            duration: seen.duration,
-        })
-    }
-
-    fn take_progress(&mut self) -> Option<NowPlaying> {
-        self.conn.as_mut()?.cli.take_progress()
+        let cli = &mut self.conn.as_mut()?.cli;
+        let Some(current) = self.current.as_mut() else {
+            cli.discard_progress();
+            return None;
+        };
+        let place = cli.take_place(current.track)?;
+        current.seen = Some(NowPlaying {
+            position: place.position,
+            duration: place.duration,
+        });
+        Some(place)
     }
 
     /// Change events carry the place, so they are on only while an album
@@ -544,20 +545,7 @@ struct Connection {
 
 impl Connection {
     fn open(host: &str, port: u16, io_timeout: Duration) -> Result<Connection, HeosError> {
-        let mut cli = Cli::connect(host, port, io_timeout)?;
-        let peer = cli.peer_ip();
-        let players = cli.players()?;
-        let player = players
-            .iter()
-            .find(|p| {
-                p.ip.as_deref()
-                    .is_some_and(|ip| ip == host || Some(ip) == peer.as_deref())
-            })
-            .or_else(|| players.first())
-            .with_context(|| format!("the HEOS system at {host} has no players"))?;
-        info!(pid = player.pid, name = %player.name, model = %player.model, "using HEOS player");
-        let pid = player.pid;
-        cli.follow(pid);
+        let (cli, pid) = Cli::attach(host, port, io_timeout)?;
         Ok(Connection {
             cli,
             pid,

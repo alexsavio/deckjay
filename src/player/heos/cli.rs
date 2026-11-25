@@ -7,11 +7,12 @@ use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use serde_json::Value;
+use tracing::info;
 
-use crate::player::progress::known_length;
+use crate::player::progress::{Place, known_length};
 
 /// For each read and write, and for the whole wait for one reply.
 pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -113,17 +114,45 @@ impl Cli {
         Ok(())
     }
 
-    /// Keep the progress events of player `pid` from now on.
-    pub(super) fn follow(&mut self, pid: i64) {
-        self.follow = Some(pid);
+    /// Connects and picks the player this host is: the one whose address is
+    /// `host` or the peer address, else the first. Returns its id; its
+    /// progress events are kept from now on.
+    pub(super) fn attach(host: &str, port: u16, io_timeout: Duration) -> Result<(Cli, i64)> {
+        let mut cli = Cli::connect(host, port, io_timeout)?;
+        let peer = cli.peer_ip();
+        let mut players = cli.players()?;
+        let at = players
+            .iter()
+            .position(|p| {
+                p.ip.as_deref()
+                    .is_some_and(|ip| ip == host || Some(ip) == peer.as_deref())
+            })
+            .unwrap_or(0);
+        if at >= players.len() {
+            bail!("the HEOS system at {host} has no players");
+        }
+        let player = players.swap_remove(at);
+        info!(pid = player.pid, name = %player.name, model = %player.model, "using HEOS player");
+        cli.follow = Some(player.pid);
+        Ok((cli, player.pid))
     }
 
-    /// The latest progress event of the followed player since the last call.
-    pub(super) fn take_progress(&mut self) -> Option<NowPlaying> {
-        self.progress.take()
+    /// The place the latest progress event gives for `track`, once.
+    pub(super) fn take_place(&mut self, track: usize) -> Option<Place> {
+        let seen = self.progress.take()?;
+        Some(Place {
+            track,
+            position: seen.position,
+            duration: seen.duration,
+        })
     }
 
-    pub(super) fn peer_ip(&self) -> Option<String> {
+    /// Forgets a progress event that came before now.
+    pub(super) fn discard_progress(&mut self) {
+        self.progress = None;
+    }
+
+    fn peer_ip(&self) -> Option<String> {
         let addr = self.reader.get_ref().peer_addr().ok()?;
         Some(addr.ip().to_string())
     }
