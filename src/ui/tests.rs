@@ -854,8 +854,8 @@ fn events_are_handled_until_the_player_hangs_up() {
 fn a_player_thread_that_ended_turns_the_deck_dark_and_ends_run() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let info = crate::simulator::Model::Mk2.info();
-    std::thread::spawn(move || crate::simulator::serve(listener, info));
+    let info = crate::deck::simulator::Model::Mk2.info();
+    std::thread::spawn(move || crate::deck::simulator::serve(listener, info));
     let mut deck = crate::deck::Source::new(Some(&url))
         .unwrap()
         .open()
@@ -872,7 +872,7 @@ fn a_player_thread_that_ended_turns_the_deck_dark_and_ends_run() {
         .body_mut()
         .read_to_string()
         .unwrap();
-    let state: crate::simulator::State = serde_json::from_str(&body).unwrap();
+    let state: crate::deck::simulator::State = serde_json::from_str(&body).unwrap();
     assert_eq!(state.brightness, 0);
 }
 
@@ -880,8 +880,8 @@ fn a_player_thread_that_ended_turns_the_deck_dark_and_ends_run() {
 fn stop_turns_the_deck_dark_and_ends_run() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let info = crate::simulator::Model::Mk2.info();
-    std::thread::spawn(move || crate::simulator::serve(listener, info));
+    let info = crate::deck::simulator::Model::Mk2.info();
+    std::thread::spawn(move || crate::deck::simulator::serve(listener, info));
     let mut deck = crate::deck::Source::new(Some(&url))
         .unwrap()
         .open()
@@ -896,7 +896,7 @@ fn stop_turns_the_deck_dark_and_ends_run() {
         .body_mut()
         .read_to_string()
         .unwrap();
-    let state: crate::simulator::State = serde_json::from_str(&body).unwrap();
+    let state: crate::deck::simulator::State = serde_json::from_str(&body).unwrap();
     assert_eq!(state.brightness, 0);
     for key in 0..state.versions.len() {
         assert!(

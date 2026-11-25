@@ -244,14 +244,15 @@ URL ureq cannot use (no `http://`, `https://`) is a real error. One rule,
 `deckjay check` applies it to both): at least 2 rows with 2 keys
 above the bottom row, at most 64 keys, keys of 16 to 512 px.
 
-Simulator (`simulator/`): `deckjay simulator` runs an axum server on its
-own single-thread tokio runtime with the page (`page.html`) and the
-`/api/*` routes; the route table is the module doc of `simulator/mod.rs`, and
-`Info` / `Brightness` / `Notice` / `State` are shared with the client. The
-page polls `/api/state` and reloads a key image when its version changes;
-versions come from one counter that never repeats, so a reset cannot hide a
-change. It also shows the player's notice (`PUT /api/notice`, the reason of
-the last failed command) under the deck; a reset clears it.
+Simulator (`deck/simulator/`): `deckjay simulator` runs an axum server on
+its own single-thread tokio runtime with the page (`page.html`) and the
+`/api/*` routes; the route table is the module doc of
+`deck/simulator/mod.rs`, and `Info` / `Brightness` / `Notice` / `State` are
+shared with the client. The page polls `/api/state` and reloads a key image
+when its version changes; versions come from one counter that never repeats,
+so a reset cannot hide a change. It also shows the player's notice
+(`PUT /api/notice`, the reason of the last failed command) under the deck; a
+reset clears it.
 
 Rendering:
 
@@ -279,7 +280,7 @@ Rendering:
   `Device::standby`: HEOS sends `PWSTANDBY` to the receiver's control port
   23) and dims the deck; `Ui::wake` swallows the next press. Decks
   whose grid `deck::Grid::new` refuses are ignored.
-- `icons/` draws every icon procedurally (4x supersampling); there are no
+- `ui/icons/` draws every icon procedurally (4x supersampling); there are no
   image or font assets. `glyphs.rs` has the kind glyphs (note, book, star,
   waves, mic, Spotify); `decorate` adds the "playing" frame, the kind badge,
   the progress bar, the "new" dot and the trouble mark (a red disc with an
@@ -304,7 +305,7 @@ it off the shelf) so the thread keeps its file until it stops. Episode
 keys are `<source>/<feed folder>/<episode id>`; a podcast item without
 saved progress shows the "new" dot.
 
-State (`state.rs`): `Store` keeps `<state_dir>/state.json`: the shelf on the
+State (`ui/state.rs`): `Store` keeps `<state_dir>/state.json`: the shelf on the
 deck, the page of each shelf (by shelf name) and the progress of each item
 that resumes (by `ItemKey`). It writes a temp file and renames it, at most
 every 10 s (`save_if_due`) and at once on pause and stop. A broken file is
@@ -342,7 +343,8 @@ what every source table shares (`Look`, `Color`, `check_named`).
   them, and verify with `just doctor`, `just sim` or real hardware.
 - The UI guesses the result of a key press before the speaker answers, so
   the player must deliver the next event after every command, even when it
-  repeats the last one (`player::run` resets `Emitter::last`).
+  repeats the last one (`player::run` calls `Emitter::begin_batch` for each
+  batch).
 - Keep `Cargo.lock` in git: the Docker build, the release builds and
   `cargo publish` use `--locked`.
 - `CHANGELOG.md` is generated from the Conventional Commit messages by

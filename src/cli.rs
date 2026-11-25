@@ -13,7 +13,7 @@ use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand};
 
 use crate::config;
-use crate::simulator::Model;
+use crate::deck::simulator::Model;
 
 const DEFAULT_CONFIG: &str = "config.toml";
 

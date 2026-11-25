@@ -16,7 +16,7 @@ deckjay drives Denon / Marantz HEOS devices through the HEOS CLI, set by
   Cast, the `Speaker` trait and the `Emitter`;
   [`progress.rs`](../src/player/progress.rs): when an item reports its
   place.
-- [`src/config.rs`](../src/config/mod.rs): `speaker_type`, and port 1255 as the
+- [`src/config/mod.rs`](../src/config/mod.rs): `speaker_type`, and port 1255 as the
   default `speaker_port` for HEOS.
 
 Tested on a Denon AVR-X1600H.

@@ -20,8 +20,10 @@
 //! the deck; the next press only lights it again.
 //! ```
 
+mod icons;
 mod layout;
 mod podcasts;
+pub mod state;
 mod tiles;
 
 pub use self::podcasts::PodcastThread;
@@ -36,14 +38,14 @@ use anyhow::Result;
 use image::{Rgb, RgbImage};
 use tracing::{debug, info, warn};
 
+use self::icons::Decor;
 use self::layout::{Action, Control, Layout};
+use self::state::Store;
 use crate::config::Config;
 use crate::deck::Deck;
-use crate::icons::{self, Decor};
 use crate::library::{self, ItemId, Kind, Library, Media, ShelfId};
 use crate::net::BaseUrl;
 use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
-use crate::state::Store;
 use crate::systemd;
 
 /// The player thread ended, which only a panic does: nothing can play until

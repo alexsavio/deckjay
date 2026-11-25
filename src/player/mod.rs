@@ -9,6 +9,7 @@ pub mod cast;
 pub mod heos;
 pub mod local;
 mod progress;
+mod radio;
 mod router;
 pub mod spotify;
 

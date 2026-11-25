@@ -8,8 +8,8 @@ use image::{Rgb, RgbImage};
 use tracing::{debug, warn};
 
 use super::Ui;
+use super::icons::{self, Decor};
 use crate::config::Color;
-use crate::icons::{self, Decor};
 use crate::library::{Item, ItemId, Kind, ShelfId};
 
 impl Ui {

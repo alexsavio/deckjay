@@ -336,7 +336,7 @@ fn decodes_real_stations() {
         "http://streamtdy.ir-media-tec.com/kinderlieder/mp3-128/web/play.mp3",
         "https://stream.rpr1.de/kidshits/mp3-128/radiobrowser",
     ] {
-        let stream = crate::radio::resolve(&crate::net::stream_agent(), url).unwrap();
+        let stream = crate::player::radio::resolve(&crate::net::stream_agent(), url).unwrap();
         let reader = NetRead::open(&stream.url, Limits::default()).unwrap();
         let mut source = Source::open_stream(reader, stream.content_type.as_deref()).unwrap();
         let (mut samples, mut packet, mut format) = (Vec::new(), Vec::new(), (0, 0));
