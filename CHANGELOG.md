@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.PATCH).
 
+## [Unreleased]
+
+### ⚙️ Miscellaneous Tasks
+
+- Bump taiki-e/install-action from 2.89.1 to 2.90.3 in the actions-minor-patch group ([#49](https://github.com/alexsavio/deckjay/issues/49))
+
 ## [2026.11.1] - 2026-11-10
 
 ### 🐛 Bug Fixes
