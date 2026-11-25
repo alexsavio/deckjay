@@ -232,7 +232,7 @@ impl Rig {
     }
 
     fn send(&mut self, cmd: PlayerCmd) -> Result<()> {
-        self.emitter.last = None;
+        self.emitter.begin_batch();
         self.player.handle(cmd.for_output(), &mut self.emitter)
     }
 
