@@ -7,6 +7,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+### 🚜 Refactor
+
+- *(player)* Let Emitter and the HEOS Cli own their own rules ([#52](https://github.com/alexsavio/deckjay/issues/52))
+
 ### ⚙️ Miscellaneous Tasks
 
 - Bump taiki-e/install-action from 2.89.1 to 2.90.3 in the actions-minor-patch group ([#49](https://github.com/alexsavio/deckjay/issues/49))
