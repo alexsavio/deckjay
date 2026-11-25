@@ -146,7 +146,7 @@ crates.io. `just publish-dry` checks the package first.
 | `ui/` | What each key shows and does (`mod.rs`), key layout with shelves (`layout.rs`) |
 | `icons/` | Draws control icons, kind glyphs and key decorations (no image files needed) |
 | `state.rs` | What the deck remembers in `state.json`: shelf, pages, audiobook progress |
-| `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
+| `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`); `source.rs` finds a deck and waits for one |
 | `simulator/` | The web Stream Deck simulator (`deckjay simulator`) |
 | `player/` | The player thread: shared command loop (`mod.rs`), when to report progress (`progress.rs`), speaker or Spotify (`router.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`, radio streams in `local/netread.rs`), Spotify Connect (`spotify.rs`) |
 | `server.rs` | HTTP server the speaker downloads the music from; its allowlist changes as podcasts refresh |

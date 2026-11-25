@@ -277,16 +277,17 @@ impl Ui {
     /// then), until the player thread ended (the deck goes dark and it
     /// returns [`PlayerGone`]), or until `stop` is set: the deck goes dark
     /// and it returns `Ok`.
-    pub fn run(&mut self, deck: &mut Deck, brightness: u8, stop: &AtomicBool) -> Result<()> {
+    pub fn run(&mut self, deck: &mut Deck<Face>, brightness: u8, stop: &AtomicBool) -> Result<()> {
         // The first draw sends every key; on the simulator each is an HTTP
         // request with its own timeout.
         self.watchdog.beat_now();
         let mut dimmed = self.asleep;
         deck.set_brightness(if dimmed { 0 } else { brightness })?;
-        let (rows, cols) = deck.layout();
+        let grid = deck.grid();
+        let (rows, cols) = (grid.rows, grid.cols);
         let mut layout = self.layout(rows, cols);
         self.fit(&layout);
-        self.prepare_tiles(deck.key_size());
+        self.prepare_tiles(grid.key_size);
         self.draw(deck, &layout)?;
 
         loop {
@@ -306,7 +307,7 @@ impl Ui {
                 self.watchdog.beat_now();
                 layout = self.layout(rows, cols);
                 self.fit(&layout);
-                let remade = self.prepare_tiles(deck.key_size());
+                let remade = self.prepare_tiles(grid.key_size);
                 let shown: HashSet<ItemId> = self
                     .deck_shelves
                     .iter()
@@ -794,16 +795,10 @@ impl Ui {
         }
     }
 
-    fn draw(&self, deck: &mut Deck, layout: &Layout) -> Result<()> {
+    fn draw(&self, deck: &mut Deck<Face>, layout: &Layout) -> Result<()> {
         let started = Instant::now();
-        let size = deck.key_size();
-        let mut sent = 0;
-        for (key, face) in self.faces(layout).iter().enumerate() {
-            if deck.show(key, face, || self.render(face, size))? {
-                sent += 1;
-            }
-        }
-        deck.flush()?;
+        let size = deck.grid().key_size;
+        let sent = deck.draw(&self.faces(layout), |face| self.render(face, size))?;
         if sent > 0 {
             debug!(sent, elapsed = ?started.elapsed(), "deck drawn");
         }

@@ -44,13 +44,11 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use hidapi::HidApi;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Command, RunArgs};
 use crate::config::{Config, Podcast, Source, SourceBody, SpeakerType};
-use crate::deck::Deck;
 use crate::library::{Library, ShelfId};
 use crate::net::BaseUrl;
 use crate::ui::Ui;
@@ -75,7 +73,7 @@ fn main() -> Result<ExitCode> {
             let library = scan_sources(&cfg);
             write_preview(&cfg, library, base_url(&cfg), &file)?;
         }
-        Command::Blank => blank_usb_deck()?,
+        Command::Blank => deck::blank_usb()?,
         Command::Simulator { model, port } => simulator::run(port, model)?,
         Command::SpotifyLogin { config, listen } => run_spotify_login(&config, listen)?,
     }
@@ -128,10 +126,7 @@ fn run_player(args: &RunArgs) -> Result<()> {
     fetch_playlist_covers(&cfg);
 
     let stop = stop_on_signals()?;
-    let source = match &args.simulator {
-        Some(url) => DeckSource::Simulator(url.clone()),
-        None => DeckSource::Usb(elgato_streamdeck::new_hidapi()?),
-    };
+    let source = deck::Source::new(args.simulator.as_deref())?;
     // Ready without a deck: the program waits for one.
     systemd::ready();
     let outcome = drive_decks(&mut ui, source, cfg.brightness, &stop);
@@ -176,28 +171,17 @@ fn stop_on_signals() -> Result<Arc<AtomicBool>> {
 /// thread ended: the program exits with it, so the service restarts.
 fn drive_decks(
     ui: &mut Ui,
-    mut source: DeckSource,
+    mut source: deck::Source,
     brightness: u8,
     stop: &AtomicBool,
 ) -> Result<()> {
-    let mut waiting_logged = false;
     while !stop.load(Ordering::SeqCst) {
-        match source.open() {
-            Ok(Some(mut deck)) => {
-                info!("deck connected: {}", deck.name());
-                waiting_logged = false;
-                match ui.run(&mut deck, brightness, stop) {
-                    Ok(()) => {}
-                    Err(err) if err.is::<ui::PlayerGone>() => return Err(err),
-                    Err(err) => warn!("deck disconnected: {err:#}"),
-                }
+        if let Some(mut deck) = source.open() {
+            match ui.run(&mut deck, brightness, stop) {
+                Ok(()) => {}
+                Err(err) if err.is::<ui::PlayerGone>() => return Err(err),
+                Err(err) => warn!("deck disconnected: {err:#}"),
             }
-            Ok(None) if !waiting_logged => {
-                info!("{}", source.waiting_message());
-                waiting_logged = true;
-            }
-            Ok(None) => {}
-            Err(err) => warn!("cannot open the deck: {err:#}"),
         }
         ui.handle_events();
         ui.take_snapshots();
@@ -217,17 +201,6 @@ fn drive_decks(
 
 /// For systemd's `ExecStopPost`, which runs however deckjay ended, a crash
 /// included.
-fn blank_usb_deck() -> Result<()> {
-    let mut hid = elgato_streamdeck::new_hidapi()?;
-    if let Some(mut deck) = Deck::open_usb_as_is(&mut hid)? {
-        deck.blank()?;
-        info!("{} is dark", deck.name());
-    } else {
-        info!("no Stream Deck to turn off");
-    }
-    Ok(())
-}
-
 fn scan_sources(cfg: &Config) -> Library {
     let library = Library::scan(&cfg.sources);
     for (id, source) in library.shelf_ids().zip(&cfg.sources) {
@@ -319,27 +292,6 @@ fn served_roots(sources: &[Source]) -> Vec<(String, PathBuf)> {
 
 fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
     server::spawn(served_roots(&cfg.sources), cfg.http_port, served)
-}
-
-enum DeckSource {
-    Usb(HidApi),
-    Simulator(String),
-}
-
-impl DeckSource {
-    fn open(&mut self) -> Result<Option<Deck>> {
-        match self {
-            DeckSource::Usb(hid) => Deck::open_usb(hid),
-            DeckSource::Simulator(url) => Deck::open_simulator(url),
-        }
-    }
-
-    fn waiting_message(&self) -> String {
-        match self {
-            DeckSource::Usb(_) => "waiting for a Stream Deck to be plugged in…".into(),
-            DeckSource::Simulator(url) => format!("waiting for the deck simulator at {url}…"),
-        }
-    }
 }
 
 fn run_spotify_login(config_path: &Path, listen: SocketAddr) -> Result<()> {
@@ -580,7 +532,7 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
 
     if let Some(url) = &args.simulator {
         println!("\nDeck simulator {url}:");
-        match Deck::simulator_info(url) {
+        match deck::simulator_info(url) {
             Ok(Some(info)) => println!(
                 "  reachable ✓  {}x{} keys of {} px",
                 info.rows, info.cols, info.key_size

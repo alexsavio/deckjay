@@ -1,11 +1,16 @@
 //! The key grid the kids press: a USB Stream Deck or the web simulator.
-//! [`Deck`] caches encoded key images, only re-sends keys that changed, and
-//! reports key presses; a `Backend` talks to the device itself.
+//! [`Deck`] caches encoded key images by whatever key names a face, only
+//! re-sends keys that changed, and reports key presses; a `Backend` talks to
+//! the device itself. [`Source`] finds a deck and waits for one.
 
 mod hid;
 mod remote;
+mod source;
+
+pub use self::source::{Source, blank_usb};
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::RangeInclusive;
 use std::time::Duration;
 
@@ -14,7 +19,6 @@ use hidapi::HidApi;
 use image::RgbImage;
 
 use crate::simulator::Info;
-use crate::ui::Face;
 
 // Bounds on a deck's grid: the largest real deck has 36 keys, and key
 // images are drawn at 4x, so a bogus grid could exhaust a Pi's memory.
@@ -69,6 +73,12 @@ pub(crate) fn usb_usable(kind: elgato_streamdeck::info::Kind) -> bool {
     hid::usable(kind)
 }
 
+/// Asks the simulator at `url` for its grid without changing it; `None`
+/// while nothing answers there.
+pub fn simulator_info(url: &str) -> Result<Option<Info>> {
+    remote::fetch_info(&remote::agent(), url)
+}
+
 trait Backend {
     fn name(&self) -> String;
     /// (rows, columns)
@@ -92,40 +102,34 @@ trait Backend {
     }
 }
 
-pub struct Deck {
+pub struct Deck<F> {
     backend: Box<dyn Backend>,
     /// Encoded image bytes per face, so each image is only converted once.
-    encoded: HashMap<Face, Vec<u8>>,
+    encoded: HashMap<F, Vec<u8>>,
     /// What each key currently shows.
-    shown: Vec<Option<Face>>,
+    shown: Vec<Option<F>>,
     noticed: Option<String>,
 }
 
-impl Deck {
+impl<F: Copy + Eq + Hash> Deck<F> {
     /// Opens the first Stream Deck with a key grid, if one is plugged in.
-    pub fn open_usb(hid: &mut HidApi) -> Result<Option<Deck>> {
+    fn open_usb(hid: &mut HidApi) -> Result<Option<Deck<F>>> {
         Ok(hid::HidDeck::open(hid, true)?.map(Deck::new))
     }
 
     /// As [`Deck::open_usb`], but leaves what the keys show: a reset would
     /// light the Elgato logo on a deck about to go dark.
-    pub fn open_usb_as_is(hid: &mut HidApi) -> Result<Option<Deck>> {
+    fn open_usb_as_is(hid: &mut HidApi) -> Result<Option<Deck<F>>> {
         Ok(hid::HidDeck::open(hid, false)?.map(Deck::new))
     }
 
     /// Connects to the simulator at `url` and clears its keys; `None` while
     /// nothing answers there.
-    pub fn open_simulator(url: &str) -> Result<Option<Deck>> {
+    fn open_simulator(url: &str) -> Result<Option<Deck<F>>> {
         Ok(remote::RemoteDeck::open(url)?.map(Deck::new))
     }
 
-    /// Asks the simulator at `url` for its grid without changing it; `None`
-    /// while nothing answers there.
-    pub fn simulator_info(url: &str) -> Result<Option<Info>> {
-        remote::fetch_info(&remote::agent(), url)
-    }
-
-    fn new(backend: impl Backend + 'static) -> Deck {
+    fn new(backend: impl Backend + 'static) -> Deck<F> {
         let (rows, cols) = backend.layout();
         Deck {
             backend: Box::new(backend),
@@ -135,17 +139,27 @@ impl Deck {
         }
     }
 
-    pub fn name(&self) -> String {
+    fn name(&self) -> String {
         self.backend.name()
     }
 
     /// (rows, columns)
-    pub fn layout(&self) -> (usize, usize) {
+    fn layout(&self) -> (usize, usize) {
         self.backend.layout()
     }
 
-    pub fn key_size(&self) -> u32 {
+    fn key_size(&self) -> u32 {
         self.backend.key_size()
+    }
+
+    /// The key grid the deck has.
+    pub fn grid(&self) -> Grid {
+        let (rows, cols) = self.layout();
+        Grid {
+            rows,
+            cols,
+            key_size: self.key_size(),
+        }
     }
 
     pub fn set_brightness(&self, percent: u8) -> Result<()> {
@@ -154,14 +168,24 @@ impl Deck {
             .with_context(|| format!("cannot set the brightness to {percent}%"))
     }
 
+    /// Shows `faces` on the keys, key `n` showing `faces[n]`, and sends them
+    /// to the device. A key that already shows its face is not sent again;
+    /// `render` is only called for a face whose image is not cached yet.
+    /// Returns how many keys were sent.
+    pub fn draw(&mut self, faces: &[F], render: impl Fn(&F) -> RgbImage) -> Result<usize> {
+        let mut sent = 0;
+        for (key, face) in faces.iter().enumerate() {
+            if self.show(key, face, || render(face))? {
+                sent += 1;
+            }
+        }
+        self.flush()?;
+        Ok(sent)
+    }
+
     /// Queues `face` for `key`; `render` is only called if the image isn't
     /// cached yet. Returns false when the key already showed `face`.
-    pub fn show(
-        &mut self,
-        key: usize,
-        face: &Face,
-        render: impl FnOnce() -> RgbImage,
-    ) -> Result<bool> {
+    fn show(&mut self, key: usize, face: &F, render: impl FnOnce() -> RgbImage) -> Result<bool> {
         if self.shown[key].as_ref() == Some(face) {
             return Ok(false);
         }
@@ -181,8 +205,8 @@ impl Deck {
 
     /// Forgets the cached images of every face that fails `keep`, e.g. of
     /// items no longer in the library. Keys that show such a face are sent
-    /// again on their next [`Deck::show`].
-    pub fn retain(&mut self, keep: impl Fn(&Face) -> bool) {
+    /// again on their next [`Deck::draw`].
+    pub fn retain(&mut self, keep: impl Fn(&F) -> bool) {
         self.encoded.retain(|face, _| keep(face));
         for shown in &mut self.shown {
             if shown.as_ref().is_some_and(|face| !keep(face)) {
@@ -192,12 +216,12 @@ impl Deck {
     }
 
     /// Sends all queued images to the device.
-    pub fn flush(&self) -> Result<()> {
+    fn flush(&self) -> Result<()> {
         self.backend.flush().context("cannot flush the deck")
     }
 
     /// Turns the deck dark: no key images, no notice, brightness 0. The next
-    /// [`Deck::show`] sends every key again.
+    /// [`Deck::draw`] sends every key again.
     pub fn blank(&mut self) -> Result<()> {
         self.backend.clear().context("cannot clear the deck")?;
         self.shown.fill(None);
@@ -223,6 +247,16 @@ impl Deck {
     }
 }
 
+/// What the tests draw on a deck.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Face {
+    Blank,
+    Play,
+    Pause,
+    Item(u32),
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -231,7 +265,6 @@ mod tests {
     use anyhow::bail;
 
     use super::*;
-    use crate::library::ItemId;
 
     #[derive(Default)]
     struct Log {
@@ -296,7 +329,7 @@ mod tests {
         }
     }
 
-    fn fake_deck() -> (Deck, Rc<RefCell<Log>>) {
+    fn fake_deck() -> (Deck<Face>, Rc<RefCell<Log>>) {
         let log = Rc::new(RefCell::new(Log::default()));
         (Deck::new(FakeBackend(Rc::clone(&log))), log)
     }
@@ -377,13 +410,7 @@ mod tests {
     #[test]
     fn retain_forgets_dropped_faces_and_sends_their_keys_again() {
         let (mut deck, log) = fake_deck();
-        let gone = Face::Item {
-            id: ItemId(7),
-            current: false,
-            progress: None,
-            new: false,
-            trouble: false,
-        };
+        let gone = Face::Item(7);
         deck.show(0, &gone, tile).unwrap();
         deck.show(1, &Face::Play, tile).unwrap();
 

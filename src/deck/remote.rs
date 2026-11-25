@@ -150,10 +150,10 @@ mod tests {
     use std::net::TcpListener;
 
     use super::*;
-    use crate::deck::Deck;
+    use crate::deck::Face;
+    type Deck = crate::deck::Deck<Face>;
     use crate::icons;
     use crate::simulator::{self, Model};
-    use crate::ui::Face;
 
     fn start_simulator(info: Info) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -171,7 +171,7 @@ mod tests {
             .port();
         let url = format!("http://127.0.0.1:{port}");
         assert!(Deck::open_simulator(&url).unwrap().is_none());
-        assert!(Deck::simulator_info(&url).unwrap().is_none());
+        assert!(crate::deck::simulator_info(&url).unwrap().is_none());
     }
 
     #[test]
@@ -238,7 +238,7 @@ mod tests {
                 key_size,
             });
             assert!(
-                Deck::simulator_info(&url).is_err(),
+                crate::deck::simulator_info(&url).is_err(),
                 "{rows}x{cols} keys of {key_size} px"
             );
         }
@@ -257,7 +257,7 @@ mod tests {
         let https = url.replacen("http://", "https://", 1);
         for bad in [without_scheme, &https] {
             assert!(Deck::open_simulator(bad).is_err(), "open {bad}");
-            assert!(Deck::simulator_info(bad).is_err(), "info {bad}");
+            assert!(crate::deck::simulator_info(bad).is_err(), "info {bad}");
         }
     }
 

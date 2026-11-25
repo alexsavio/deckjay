@@ -85,11 +85,12 @@ all three together.
 Three threads joined by `std::sync::mpsc`; async exists only inside the HTTP
 servers:
 
-- **main** (`main.rs` → `ui/`, `deck/`): `DeckSource::open` retries every
+- **main** (`main.rs` → `ui/`, `deck/`): `deck::Source::open` retries every
   2 s, so the deck can be unplugged. `Ui::new` takes every part at once (the
   library, the store, a `SpeakerLink`, and the `Background` of podcast threads
-  and watchdog); `Ui::for_preview` builds one with null parts. `Ui::run` polls keys every 100 ms, drains
-  `PlayerEvent`s, redraws, and returns `Err` when the deck goes away. When
+  and watchdog); `Ui::for_preview` builds one with null parts. `Ui::run` polls
+  keys every 100 ms, drains `PlayerEvent`s, redraws, and returns `Err` when
+  the deck goes away. When
   the player thread ended (its events channel hung up, which only a panic
   does), `Ui::run` blanks the deck and returns `ui::PlayerGone`, and `main`
   exits with it, so systemd restarts the service instead of leaving a deck
@@ -226,10 +227,14 @@ State:
   seek. A seek stops at 0; past a track's end it acts as the track's end
   (local audio starts the next track, Cast lets the receiver go on).
 
-Deck backends (`deck/`): `Deck` owns the per-`Face` image cache and what each
-key shows; the private `Backend` trait does device IO. `hid.rs` is the USB
-deck (`convert_image` encoding). `remote.rs` is the simulator client:
-blocking `ureq`, PNG encoding, `pressed_keys` is a long-poll
+Deck backends (`deck/`): `Deck<F>` owns the image cache, keyed by whatever
+the caller names a face (`Deck<Face>` in the UI), and what each key shows. The
+UI uses seven calls: `grid`, `set_brightness`, `draw` (shows every key, then
+flushes), `retain`, `blank`, `notice` and `pressed_keys`. `deck::Source` opens
+a USB deck or the simulator again and again and logs that it waits;
+`deck::blank_usb` is `deckjay blank`; the private `Backend` trait does
+device IO. `hid.rs` is the USB deck (`convert_image` encoding). `remote.rs` is
+the simulator client: blocking `ureq`, PNG encoding, `pressed_keys` is a long-poll
 (`GET /api/presses?wait_ms=`). A backend returning `Ok(None)` from open means
 "not there yet, keep waiting"; for the simulator that is a transport error
 such as "connection refused" or "host not found". An HTTP error status or a
@@ -249,7 +254,7 @@ the last failed command) under the deck; a reset clears it.
 
 Rendering:
 
-- `Face` is both "what a key shows" and the image-cache key. `Deck::show`
+- `Face` is both "what a key shows" and the image-cache key. `Deck::draw`
   re-sends only keys whose `Face` changed and caches encoded images per
   `Face` until `Deck::retain` drops them (after a podcast refresh: items
   that left the deck, items whose picture changed, or all items when the

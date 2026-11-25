@@ -856,7 +856,10 @@ fn a_player_thread_that_ended_turns_the_deck_dark_and_ends_run() {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let info = crate::simulator::Model::Mk2.info();
     std::thread::spawn(move || crate::simulator::serve(listener, info));
-    let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
+    let mut deck = crate::deck::Source::new(Some(&url))
+        .unwrap()
+        .open()
+        .unwrap();
     let (mut ui, _cmds, events) = test_ui(3, "");
     drop(events);
 
@@ -879,7 +882,10 @@ fn stop_turns_the_deck_dark_and_ends_run() {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let info = crate::simulator::Model::Mk2.info();
     std::thread::spawn(move || crate::simulator::serve(listener, info));
-    let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
+    let mut deck = crate::deck::Source::new(Some(&url))
+        .unwrap()
+        .open()
+        .unwrap();
     let (mut ui, _cmds, _events) = test_ui(3, "");
 
     ui.run(&mut deck, 60, &AtomicBool::new(true)).unwrap();
