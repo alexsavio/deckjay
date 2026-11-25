@@ -308,10 +308,10 @@ impl Client {
                     self.access = None;
                 }
                 429 => {
-                    let wait = reply.retry_wait();
+                    let (wait, error) = reply.limited();
                     if waited || wait > MAX_INLINE_WAIT {
                         self.retry_at = Some(Instant::now() + wait);
-                        return Err(reply.error().waiting(wait).into());
+                        return Err(error.into());
                     }
                     waited = true;
                     thread::sleep(wait);

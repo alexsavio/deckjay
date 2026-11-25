@@ -72,12 +72,6 @@ impl ApiError {
             retry_after: Some(wait),
         }
     }
-
-    /// The same error, told to wait `wait` before the next try.
-    pub(super) fn waiting(mut self, wait: Duration) -> ApiError {
-        self.retry_after = Some(wait);
-        self
-    }
 }
 
 impl fmt::Display for ApiError {
@@ -126,9 +120,15 @@ impl Reply {
         })
     }
 
-    /// How long Spotify wants no requests after this answer.
-    pub fn retry_wait(&self) -> Duration {
-        self.retry_after.unwrap_or(DEFAULT_RETRY_AFTER)
+    /// For a 429: how long Spotify wants no requests (`Retry-After`, else a
+    /// default) and the error that carries that wait.
+    pub fn limited(&self) -> (Duration, ApiError) {
+        let wait = self.retry_after.unwrap_or(DEFAULT_RETRY_AFTER);
+        let error = ApiError {
+            retry_after: Some(wait),
+            ..self.error()
+        };
+        (wait, error)
     }
 
     pub fn is_success(&self) -> bool {
