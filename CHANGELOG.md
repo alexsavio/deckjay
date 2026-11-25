@@ -10,6 +10,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### 🚜 Refactor
 
 - *(player)* Let Emitter and the HEOS Cli own their own rules ([#52](https://github.com/alexsavio/deckjay/issues/52))
+- *(spotify)* Split reply handling into http, give Sim the press queue rules ([#53](https://github.com/alexsavio/deckjay/issues/53))
 
 ### ⚙️ Miscellaneous Tasks
 
