@@ -120,8 +120,7 @@ impl Reply {
         })
     }
 
-    /// For a 429: how long Spotify wants no requests (`Retry-After`, else a
-    /// default) and the error that carries that wait.
+    /// For a 429: the wait and the error that carries it.
     pub fn limited(&self) -> (Duration, ApiError) {
         let wait = self.retry_after.unwrap_or(DEFAULT_RETRY_AFTER);
         let error = ApiError {
@@ -139,7 +138,6 @@ impl Reply {
         ApiError::parse(self.status, &self.body, self.retry_after)
     }
 
-    /// A 204, or any answer without a body: nothing to read.
     pub fn is_empty(&self) -> bool {
         self.status == 204 || self.body.trim().is_empty()
     }
