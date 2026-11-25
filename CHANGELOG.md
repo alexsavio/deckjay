@@ -11,6 +11,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 - *(player)* Let Emitter and the HEOS Cli own their own rules ([#52](https://github.com/alexsavio/deckjay/issues/52))
 - *(spotify)* Split reply handling into http, give Sim the press queue rules ([#53](https://github.com/alexsavio/deckjay/issues/53))
+- *(arch)* Break the config, podcasts, library and deck cycles ([#54](https://github.com/alexsavio/deckjay/issues/54))
 
 ### ⚙️ Miscellaneous Tasks
 
