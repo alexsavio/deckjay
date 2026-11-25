@@ -5,6 +5,7 @@
 
 mod hid;
 mod remote;
+pub mod simulator;
 mod source;
 
 pub use self::source::{Source, blank_usb};
@@ -18,7 +19,7 @@ use anyhow::{Context, Result, bail};
 use hidapi::HidApi;
 use image::RgbImage;
 
-use crate::simulator::Info;
+use self::simulator::Info;
 
 // Bounds on a deck's grid: the largest real deck has 36 keys, and key
 // images are drawn at 4x, so a bogus grid could exhaust a Pi's memory.

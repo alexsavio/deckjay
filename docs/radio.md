@@ -4,8 +4,8 @@ A `type = "radio"` source is a shelf of stations, one key each. Pressing a
 station plays it live on the configured speaker: Chromecast, HEOS or the
 local sound output. The code:
 
-- [`src/radio.rs`](../src/radio.rs): `resolve`, from the station's URL to
-  its stream.
+- [`src/player/radio.rs`](../src/player/radio.rs): `resolve`, from the
+  station's URL to its stream.
 - [`src/player/cast.rs`](../src/player/cast.rs),
   [`src/player/heos.rs`](../src/player/heos.rs),
   [`src/player/local/`](../src/player/local/mod.rs): one way to play it per
@@ -151,7 +151,7 @@ them.
 
 ## Tests and what is unverified
 
-- `radio/tests.rs`: playlists, HLS and errors against a local web server,
+- `player/radio/tests.rs`: playlists, HLS and errors against a local web server,
   a playlist whose body never comes; `resolves_real_stations` (ignored)
   against real stations.
 - `heos/tests/radio.rs`: the fake receiver gets `clear_queue` and

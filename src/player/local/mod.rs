@@ -32,9 +32,9 @@ pub use self::output::output_devices;
 #[cfg(test)]
 use super::TrackInfo;
 use super::progress::Place;
+use super::radio;
 use super::{Device, Emitter, Loaded, Playable, PlayerEvent, Speaker, SpeakerCmd, Start, Station};
 use crate::library::ItemId;
-use crate::radio;
 
 /// How often the player looks for the end of a track, which is also the
 /// longest gap between two tracks.

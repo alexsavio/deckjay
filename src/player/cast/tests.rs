@@ -288,8 +288,8 @@ fn station(content_type: Option<&str>, cover_url: Option<&str>) -> Station {
     }
 }
 
-fn resolved(content_type: Option<&str>) -> crate::radio::Stream {
-    crate::radio::Stream {
+fn resolved(content_type: Option<&str>) -> crate::player::radio::Stream {
+    crate::player::radio::Stream {
         url: LIVE.into(),
         content_type: content_type.map(Into::into),
     }
@@ -317,7 +317,7 @@ fn a_station_type_comes_from_the_stream_then_the_station_then_mp3() {
             .to_media()
             .content_type
     };
-    let hls = crate::radio::HLS;
+    let hls = crate::player::radio::HLS;
     assert_eq!(content_type(Some("audio/ogg"), Some(hls)), hls);
     assert_eq!(content_type(Some("audio/ogg"), None), "audio/ogg");
     assert_eq!(content_type(None, None), "audio/mpeg");

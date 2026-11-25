@@ -22,16 +22,12 @@ mod cli;
 mod config;
 mod deck;
 mod fsutil;
-mod icons;
 mod library;
 mod net;
 mod player;
 mod podcasts;
-mod radio;
 mod server;
-mod simulator;
 mod spotify;
-mod state;
 mod systemd;
 mod ui;
 
@@ -49,6 +45,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Command, RunArgs};
 use crate::config::{Config, Podcast, Source, SourceBody, SpeakerType};
+use crate::deck::simulator;
 use crate::library::{Library, ShelfId};
 use crate::net::BaseUrl;
 use crate::ui::Ui;
@@ -112,7 +109,7 @@ fn run_player(args: &RunArgs) -> Result<()> {
 
     let (event_tx, event_rx) = mpsc::channel();
     let player = player::spawn_with(output(&cfg), spotify_output(&cfg), event_tx);
-    let store = state::Store::open(&cfg.state_dir);
+    let store = ui::state::Store::open(&cfg.state_dir);
     let background = ui::Background {
         podcasts: start_podcasts(&cfg, &library, &served),
         watchdog: systemd::Watchdog::from_env(),

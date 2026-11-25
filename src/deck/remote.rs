@@ -7,8 +7,8 @@ use anyhow::{Context, Result, bail};
 use image::{ImageFormat, RgbImage};
 use ureq::Agent;
 
+use super::simulator::{Brightness, Info, Notice};
 use super::{Backend, Grid};
-use crate::simulator::{Brightness, Info, Notice};
 
 /// Time allowed for one request, on top of a long-poll's own wait.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -151,10 +151,13 @@ mod tests {
 
     use super::*;
     use crate::deck::Face;
-    use crate::icons;
-    use crate::simulator::{self, Model};
+    use crate::deck::simulator::{self, Model};
 
     type Deck = crate::deck::Deck<Face>;
+
+    fn key_image() -> RgbImage {
+        RgbImage::new(72, 72)
+    }
 
     fn start_simulator(info: Info) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -267,7 +270,7 @@ mod tests {
         let url = start_simulator(Model::Mk2.info());
         let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
 
-        deck.show(4, &Face::Play, || icons::play(72)).unwrap();
+        deck.show(4, &Face::Play, key_image).unwrap();
         deck.flush().unwrap();
 
         let png = ureq::get(format!("{url}/api/keys/4"))
@@ -301,7 +304,7 @@ mod tests {
         let url = start_simulator(Model::Mk2.info());
         let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
         deck.set_brightness(60).unwrap();
-        deck.show(0, &Face::Play, || icons::play(72)).unwrap();
+        deck.show(0, &Face::Play, key_image).unwrap();
 
         deck.blank().unwrap();
 
@@ -323,7 +326,7 @@ mod tests {
     fn opening_clears_keys_left_from_an_earlier_run() {
         let url = start_simulator(Model::Mk2.info());
         let mut deck = Deck::open_simulator(&url).unwrap().unwrap();
-        deck.show(0, &Face::Play, || icons::play(72)).unwrap();
+        deck.show(0, &Face::Play, key_image).unwrap();
 
         Deck::open_simulator(&url).unwrap().unwrap();
 

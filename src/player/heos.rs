@@ -316,7 +316,7 @@ impl HeosPlayer {
         volume: f32,
         events: &mut Emitter,
     ) -> Result<()> {
-        let stream = crate::radio::resolve(&crate::net::stream_agent(), &station.url)?;
+        let stream = super::radio::resolve(&crate::net::stream_agent(), &station.url)?;
         events.replace(item, false, self.current_place());
         self.item = item;
         self.loaded = Loaded::Station(stream.url);
