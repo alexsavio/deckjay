@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::{Color, check_named};
+use super::look::{Color, check_named};
 
 /// One `[[source.station]]` table, checked and with its picture resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

@@ -301,10 +301,14 @@ every 10 s (`save_if_due`) and at once on pause and stop. A broken file is
 moved to `state.json.bad`; a folder that cannot be created or read keeps
 the state in memory, and failed saves warn once and are tried again.
 
-Config: `Config` uses `#[serde(deny_unknown_fields)]`. A new key needs a field
-and default fn in `config/mod.rs` (or `config/source.rs` for `[[source]]`
-keys) and an entry in `config.example.toml`. `deny_unknown_fields` does not
-work together with `#[serde(flatten)]`, so source tables list their keys.
+Config: a private `File` struct carries the serde shape
+(`#[serde(deny_unknown_fields)]`); `Config` is the checked value: every field
+public, the speaker port resolved to a `u16`, no `self` methods. A new key
+needs a field and default fn in `config/mod.rs` on both (or
+`config/source.rs` for `[[source]]` keys) and an entry in
+`config.example.toml`. `deny_unknown_fields` does not work together with
+`#[serde(flatten)]`, so source tables list their keys. `config/look.rs` holds
+what every source table shares (`Look`, `Color`, `check_named`).
 `Config::parse` is the testable core; `load` adds file IO and error context.
 
 ## Conventions

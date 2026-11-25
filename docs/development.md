@@ -140,7 +140,7 @@ crates.io. `just publish-dry` checks the package first.
 | `main.rs` | Startup, the commands (`check`, `check-config`, `preview`, `blank`), reconnecting to the deck |
 | `cli.rs` | The command line (clap): commands, options, exit codes |
 | `systemd.rs` | Tells systemd the service is ready and alive (`sd_notify`) |
-| `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`) |
+| `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`); `look.rs` has what every table shares (`Look`, `Color`, name checks) |
 | `library/` | Items and shelves, one shelf per source (`mod.rs`); scans source folders and finds covers (`scan.rs`); builds URLs |
 | `ui/` | What each key shows and does (`mod.rs`), key layout with shelves (`layout.rs`) |
 | `icons/` | Draws control icons, kind glyphs and key decorations (no image files needed) |

@@ -360,7 +360,7 @@ fn write_preview(cfg: &Config, library: Library, base_url: BaseUrl, path: &Path)
 }
 
 fn output(cfg: &Config) -> player::Output {
-    let (host, port) = (cfg.speaker_host.clone(), cfg.speaker_port());
+    let (host, port) = (cfg.speaker_host.clone(), cfg.speaker_port);
     match cfg.speaker_type {
         SpeakerType::Cast => player::Output::Cast { host, port },
         SpeakerType::Heos => player::Output::Heos { host, port },
@@ -432,7 +432,7 @@ fn base_url(cfg: &Config) -> BaseUrl {
     }
     match &cfg.advertise_host {
         Some(host) => BaseUrl::fixed(format!("http://{host}:{}/music", cfg.http_port)),
-        None => BaseUrl::towards(&cfg.speaker_host, cfg.speaker_port(), cfg.http_port),
+        None => BaseUrl::towards(&cfg.speaker_host, cfg.speaker_port, cfg.http_port),
     }
 }
 
@@ -602,9 +602,7 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
 fn print_speaker_header(cfg: &Config) {
     println!(
         "\nSpeaker {}:{} ({:?}):",
-        cfg.speaker_host,
-        cfg.speaker_port(),
-        cfg.speaker_type
+        cfg.speaker_host, cfg.speaker_port, cfg.speaker_type
     );
 }
 
@@ -649,7 +647,7 @@ fn print_audio_outputs(cfg: &Config, report: &mut Report) {
 }
 
 fn print_cast_speaker(cfg: &Config, report: &mut Report) {
-    match player::cast::probe(&cfg.speaker_host, cfg.speaker_port()) {
+    match player::cast::probe(&cfg.speaker_host, cfg.speaker_port) {
         Ok(status) => {
             let volume = status
                 .volume
@@ -665,7 +663,7 @@ fn print_cast_speaker(cfg: &Config, report: &mut Report) {
 }
 
 fn print_heos_players(cfg: &Config, report: &mut Report) {
-    match player::heos::players(&cfg.speaker_host, cfg.speaker_port()) {
+    match player::heos::players(&cfg.speaker_host, cfg.speaker_port) {
         Ok(players) if players.is_empty() => {
             report.problem("  reachable ✓  but it knows no players");
         }
