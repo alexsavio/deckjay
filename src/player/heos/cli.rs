@@ -7,11 +7,11 @@ use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::player::progress::known_length;
+use crate::player::progress::{Place, known_length};
 
 /// For each read and write, and for the whole wait for one reply.
 pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -92,6 +92,15 @@ pub(super) struct NowPlaying {
     pub(super) duration: Option<Duration>,
 }
 
+impl From<Place> for NowPlaying {
+    fn from(place: Place) -> NowPlaying {
+        NowPlaying {
+            position: place.position,
+            duration: place.duration,
+        }
+    }
+}
+
 impl Cli {
     pub(super) fn connect(host: &str, port: u16, io_timeout: Duration) -> Result<Cli> {
         let stream = super::super::connect(host, port, io_timeout)?;
@@ -113,17 +122,40 @@ impl Cli {
         Ok(())
     }
 
-    /// Keep the progress events of player `pid` from now on.
-    pub(super) fn follow(&mut self, pid: i64) {
-        self.follow = Some(pid);
+    /// Connects and picks the player this host is: the one whose address is
+    /// `host` or the peer address, else the first. Its progress events are kept
+    /// from now on.
+    pub(super) fn attach(host: &str, port: u16, io_timeout: Duration) -> Result<(Cli, PlayerInfo)> {
+        let mut cli = Cli::connect(host, port, io_timeout)?;
+        let peer = cli.peer_ip();
+        let mut players = cli.players()?;
+        let at = players
+            .iter()
+            .position(|p| {
+                p.ip.as_deref()
+                    .is_some_and(|ip| ip == host || Some(ip) == peer.as_deref())
+            })
+            .unwrap_or(0);
+        if at >= players.len() {
+            bail!("the HEOS system at {host} has no players");
+        }
+        let player = players.swap_remove(at);
+        cli.follow = Some(player.pid);
+        Ok((cli, player))
     }
 
-    /// The latest progress event of the followed player since the last call.
-    pub(super) fn take_progress(&mut self) -> Option<NowPlaying> {
-        self.progress.take()
+    /// Consumes the latest progress event. It is a place in `track`; with no
+    /// track to put it in, it is dropped.
+    pub(super) fn take_place(&mut self, track: Option<usize>) -> Option<Place> {
+        let seen = self.progress.take()?;
+        Some(Place {
+            track: track?,
+            position: seen.position,
+            duration: seen.duration,
+        })
     }
 
-    pub(super) fn peer_ip(&self) -> Option<String> {
+    fn peer_ip(&self) -> Option<String> {
         let addr = self.reader.get_ref().peer_addr().ok()?;
         Some(addr.ip().to_string())
     }
@@ -165,6 +197,11 @@ impl Cli {
                 let reply: Reply = serde_json::from_str(buf.trim())
                     .with_context(|| format!("unexpected HEOS reply {:?}", buf.trim()))?;
                 if reply.answers(command) {
+                    // Anything read up to this reply was about the stream before.
+                    if command == "browse/play_stream" && unspaced(&reply.heos.result) == "success"
+                    {
+                        self.progress = None;
+                    }
                     return Ok(reply);
                 }
                 self.note(&reply);

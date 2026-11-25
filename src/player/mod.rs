@@ -406,9 +406,7 @@ fn run(
         match next {
             Ok(first) => {
                 let pending: Vec<PlayerCmd> = std::iter::once(first).chain(rx.try_iter()).collect();
-                // The UI already guessed the outcome of these commands, so
-                // the next event must reach it even if it repeats the last.
-                events.last = None;
+                events.begin_batch();
                 for cmd in coalesce(pending) {
                     debug!(?cmd, "speaker command");
                     let guessed = guessed(&cmd);
@@ -519,6 +517,12 @@ impl Emitter {
             last: None,
             progress: progress::Policy::new(),
         }
+    }
+
+    /// The UI already guessed the outcome of the commands of a batch, so the
+    /// first event after it must reach the UI even if it repeats the last.
+    fn begin_batch(&mut self) {
+        self.last = None;
     }
 
     /// A pause or a stop first reports the item's latest place.
