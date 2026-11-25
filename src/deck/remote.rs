@@ -1,4 +1,4 @@
-//! The web Stream Deck simulator ([`crate::simulator`]) over HTTP.
+//! The web Stream Deck simulator ([`super::simulator`]) over HTTP.
 
 use std::io::Cursor;
 use std::time::Duration;
