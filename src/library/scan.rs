@@ -335,6 +335,21 @@ mod tests {
     }
 
     #[test]
+    fn an_upper_case_extension_is_a_track_served_under_its_own_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Album/01 Song.MP3"));
+
+        let albums = music(root);
+
+        assert_eq!(
+            rel_paths(&albums[0]),
+            [Path::new("music/Album/01 Song.MP3")]
+        );
+        assert_eq!(albums[0].tracks()[0].content_type, "audio/mpeg");
+    }
+
+    #[test]
     fn skips_hidden_entries_and_folders_without_audio() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

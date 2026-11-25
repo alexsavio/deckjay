@@ -146,3 +146,19 @@ impl Reply {
         serde_json::from_str(&self.body).context("Spotify sent an answer deckjay cannot read")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tested here: an HTTP server and client drop the body of a 204.
+    #[test]
+    fn a_204_is_empty_even_with_a_body() {
+        let reply = Reply {
+            status: 204,
+            retry_after: None,
+            body: "{}".into(),
+        };
+        assert!(reply.is_empty());
+    }
+}
