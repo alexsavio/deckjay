@@ -17,6 +17,7 @@
 //! stands in for the Stream Deck, so the player can run without the hardware.
 //! The other commands ([`cli`]) check the setup or the deck and exit.
 
+mod audio;
 mod cli;
 mod config;
 mod deck;
@@ -43,14 +44,12 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use hidapi::HidApi;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Command, RunArgs};
 use crate::config::{Config, Podcast, Source, SourceBody, SpeakerType};
-use crate::deck::Deck;
-use crate::library::Library;
+use crate::library::{Library, ShelfId};
 use crate::net::BaseUrl;
 use crate::ui::Ui;
 
@@ -74,7 +73,7 @@ fn main() -> Result<ExitCode> {
             let library = scan_sources(&cfg);
             write_preview(&cfg, library, base_url(&cfg), &file)?;
         }
-        Command::Blank => blank_usb_deck()?,
+        Command::Blank => deck::blank_usb()?,
         Command::Simulator { model, port } => simulator::run(port, model)?,
         Command::SpotifyLogin { config, listen } => run_spotify_login(&config, listen)?,
     }
@@ -114,16 +113,20 @@ fn run_player(args: &RunArgs) -> Result<()> {
     let (event_tx, event_rx) = mpsc::channel();
     let player = player::spawn_with(output(&cfg), spotify_output(&cfg), event_tx);
     let store = state::Store::open(&cfg.state_dir);
-    let mut ui = Ui::new(&cfg, library, base_url, player, event_rx, store);
-    ui.set_podcasts(start_podcasts(&cfg, &served));
-    ui.set_watchdog(systemd::Watchdog::from_env());
+    let background = ui::Background {
+        podcasts: start_podcasts(&cfg, &library, &served),
+        watchdog: systemd::Watchdog::from_env(),
+    };
+    let speaker = ui::SpeakerLink {
+        base_url,
+        commands: player,
+        events: event_rx,
+    };
+    let mut ui = Ui::new(&cfg, library, store, speaker, background);
     fetch_playlist_covers(&cfg);
 
     let stop = stop_on_signals()?;
-    let source = match &args.simulator {
-        Some(url) => DeckSource::Simulator(url.clone()),
-        None => DeckSource::Usb(elgato_streamdeck::new_hidapi()?),
-    };
+    let source = deck::Source::new(args.simulator.as_deref())?;
     // Ready without a deck: the program waits for one.
     systemd::ready();
     let outcome = drive_decks(&mut ui, source, cfg.brightness, &stop);
@@ -168,28 +171,17 @@ fn stop_on_signals() -> Result<Arc<AtomicBool>> {
 /// thread ended: the program exits with it, so the service restarts.
 fn drive_decks(
     ui: &mut Ui,
-    mut source: DeckSource,
+    mut source: deck::Source,
     brightness: u8,
     stop: &AtomicBool,
 ) -> Result<()> {
-    let mut waiting_logged = false;
     while !stop.load(Ordering::SeqCst) {
-        match source.open() {
-            Ok(Some(mut deck)) => {
-                info!("deck connected: {}", deck.name());
-                waiting_logged = false;
-                match ui.run(&mut deck, brightness, stop) {
-                    Ok(()) => {}
-                    Err(err) if err.is::<ui::PlayerGone>() => return Err(err),
-                    Err(err) => warn!("deck disconnected: {err:#}"),
-                }
+        if let Some(mut deck) = source.open() {
+            match ui.run(&mut deck, brightness, stop) {
+                Ok(()) => {}
+                Err(err) if err.is::<ui::PlayerGone>() => return Err(err),
+                Err(err) => warn!("deck disconnected: {err:#}"),
             }
-            Ok(None) if !waiting_logged => {
-                info!("{}", source.waiting_message());
-                waiting_logged = true;
-            }
-            Ok(None) => {}
-            Err(err) => warn!("cannot open the deck: {err:#}"),
         }
         ui.handle_events();
         ui.take_snapshots();
@@ -207,23 +199,10 @@ fn drive_decks(
     Ok(())
 }
 
-/// For systemd's `ExecStopPost`, which runs however deckjay ended, a crash
-/// included.
-fn blank_usb_deck() -> Result<()> {
-    let mut hid = elgato_streamdeck::new_hidapi()?;
-    if let Some(mut deck) = Deck::open_usb_as_is(&mut hid)? {
-        deck.blank()?;
-        info!("{} is dark", deck.name());
-    } else {
-        info!("no Stream Deck to turn off");
-    }
-    Ok(())
-}
-
 fn scan_sources(cfg: &Config) -> Library {
     let library = Library::scan(&cfg.sources);
-    for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
-        let count = shelf.items.len();
+    for (id, source) in library.shelf_ids().zip(&cfg.sources) {
+        let count = library.shelf(id).items.len();
         if let Some(root) = source.served_root() {
             info!(
                 "found {count} items in {} ({})",
@@ -239,17 +218,17 @@ fn scan_sources(cfg: &Config) -> Library {
 
 /// A podcast source to start a `podcasts` thread for.
 struct PodcastStart<'a> {
-    shelf: usize,
+    shelf: ShelfId,
     source: &'a Source,
     settings: &'a Podcast,
     cache: &'a Path,
 }
 
-/// The podcast sources, each with its shelf index (its place in `sources`).
-fn podcast_starts(sources: &[Source]) -> Vec<PodcastStart<'_>> {
-    sources
-        .iter()
-        .enumerate()
+/// The podcast sources, each with its shelf.
+fn podcast_starts<'a>(library: &Library, sources: &'a [Source]) -> Vec<PodcastStart<'a>> {
+    library
+        .shelf_ids()
+        .zip(sources)
         .filter_map(|(shelf, source)| {
             let SourceBody::Podcast { settings, cache } = &source.body else {
                 return None;
@@ -266,8 +245,12 @@ fn podcast_starts(sources: &[Source]) -> Vec<PodcastStart<'_>> {
 
 /// One `podcasts` thread per podcast source; a source that cannot start
 /// keeps the episodes already in its cache.
-fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThread> {
-    podcast_starts(&cfg.sources)
+fn start_podcasts(
+    cfg: &Config,
+    library: &Library,
+    served: &server::Served,
+) -> Vec<ui::PodcastThread> {
+    podcast_starts(library, &cfg.sources)
         .into_iter()
         .filter_map(|start| {
             let PodcastStart {
@@ -309,27 +292,6 @@ fn serve_music(cfg: &Config, served: server::Served) -> Result<()> {
     server::spawn(served_roots(&cfg.sources), cfg.http_port, served)
 }
 
-enum DeckSource {
-    Usb(HidApi),
-    Simulator(String),
-}
-
-impl DeckSource {
-    fn open(&mut self) -> Result<Option<Deck>> {
-        match self {
-            DeckSource::Usb(hid) => Deck::open_usb(hid),
-            DeckSource::Simulator(url) => Deck::open_simulator(url),
-        }
-    }
-
-    fn waiting_message(&self) -> String {
-        match self {
-            DeckSource::Usb(_) => "waiting for a Stream Deck to be plugged in…".into(),
-            DeckSource::Simulator(url) => format!("waiting for the deck simulator at {url}…"),
-        }
-    }
-}
-
 fn run_spotify_login(config_path: &Path, listen: SocketAddr) -> Result<()> {
     let cfg = Config::load(config_path)?;
     let spotify = cfg.spotify.as_ref().with_context(|| {
@@ -349,9 +311,7 @@ fn run_spotify_login(config_path: &Path, listen: SocketAddr) -> Result<()> {
 }
 
 fn write_preview(cfg: &Config, library: Library, base_url: BaseUrl, path: &Path) -> Result<()> {
-    let (tx, _) = mpsc::channel();
-    let (_, rx) = mpsc::channel();
-    let mut ui = Ui::new(cfg, library, base_url, tx, rx, state::Store::in_memory());
+    let mut ui = Ui::for_preview(cfg, library, base_url);
     ui.preview(3, 5, 144, true)
         .save(path)
         .with_context(|| format!("cannot write {}", path.display()))?;
@@ -360,7 +320,7 @@ fn write_preview(cfg: &Config, library: Library, base_url: BaseUrl, path: &Path)
 }
 
 fn output(cfg: &Config) -> player::Output {
-    let (host, port) = (cfg.speaker_host.clone(), cfg.speaker_port());
+    let (host, port) = (cfg.speaker_host.clone(), cfg.speaker_port);
     match cfg.speaker_type {
         SpeakerType::Cast => player::Output::Cast { host, port },
         SpeakerType::Heos => player::Output::Heos { host, port },
@@ -432,7 +392,7 @@ fn base_url(cfg: &Config) -> BaseUrl {
     }
     match &cfg.advertise_host {
         Some(host) => BaseUrl::fixed(format!("http://{host}:{}/music", cfg.http_port)),
-        None => BaseUrl::towards(&cfg.speaker_host, cfg.speaker_port(), cfg.http_port),
+        None => BaseUrl::towards(&cfg.speaker_host, cfg.speaker_port, cfg.http_port),
     }
 }
 
@@ -501,7 +461,8 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
     let library = scan_sources(&cfg);
     let mut base_url = base_url(&cfg);
     let mut report = Report::default();
-    for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
+    for (id, source) in library.shelf_ids().zip(&cfg.sources) {
+        let shelf = library.shelf(id);
         if let Some(root) = source.served_root() {
             let (name, kind, path) = (&source.name, source.kind(), root.display());
             println!("Source {name} ({kind:?}) in {path}:");
@@ -569,7 +530,7 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
 
     if let Some(url) = &args.simulator {
         println!("\nDeck simulator {url}:");
-        match Deck::simulator_info(url) {
+        match deck::simulator_info(url) {
             Ok(Some(info)) => println!(
                 "  reachable ✓  {}x{} keys of {} px",
                 info.rows, info.cols, info.key_size
@@ -602,9 +563,7 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
 fn print_speaker_header(cfg: &Config) {
     println!(
         "\nSpeaker {}:{} ({:?}):",
-        cfg.speaker_host,
-        cfg.speaker_port(),
-        cfg.speaker_type
+        cfg.speaker_host, cfg.speaker_port, cfg.speaker_type
     );
 }
 
@@ -649,7 +608,7 @@ fn print_audio_outputs(cfg: &Config, report: &mut Report) {
 }
 
 fn print_cast_speaker(cfg: &Config, report: &mut Report) {
-    match player::cast::probe(&cfg.speaker_host, cfg.speaker_port()) {
+    match player::cast::probe(&cfg.speaker_host, cfg.speaker_port) {
         Ok(status) => {
             let volume = status
                 .volume
@@ -665,7 +624,7 @@ fn print_cast_speaker(cfg: &Config, report: &mut Report) {
 }
 
 fn print_heos_players(cfg: &Config, report: &mut Report) {
-    match player::heos::players(&cfg.speaker_host, cfg.speaker_port()) {
+    match player::heos::players(&cfg.speaker_host, cfg.speaker_port) {
         Ok(players) if players.is_empty() => {
             report.problem("  reachable ✓  but it knows no players");
         }
@@ -809,7 +768,7 @@ mod tests {
     #[test]
     fn podcast_starts_select_podcast_sources_with_shelf_and_cache() {
         let cfg = mixed();
-        let got: Vec<_> = podcast_starts(&cfg.sources)
+        let got: Vec<_> = podcast_starts(&Library::scan(&cfg.sources), &cfg.sources)
             .iter()
             .map(|s| {
                 (
@@ -823,8 +782,8 @@ mod tests {
         assert_eq!(
             got,
             [
-                (1, "maus", Path::new("/srv/maus"), "maus"),
-                (3, "news", Path::new("/srv/news"), "news"),
+                (ShelfId(1), "maus", Path::new("/srv/maus"), "maus"),
+                (ShelfId(3), "news", Path::new("/srv/news"), "news"),
             ]
         );
     }

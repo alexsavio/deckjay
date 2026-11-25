@@ -40,7 +40,7 @@ use self::layout::{Action, Control, Layout};
 use crate::config::Config;
 use crate::deck::Deck;
 use crate::icons::{self, Decor};
-use crate::library::{self, ItemId, Kind, Library, Media};
+use crate::library::{self, ItemId, Kind, Library, Media, ShelfId};
 use crate::net::BaseUrl;
 use crate::player::{self, PlayerCmd, PlayerEvent, Start, TrackInfo};
 use crate::state::Store;
@@ -82,10 +82,10 @@ pub enum Face {
         page: usize,
         pages: usize,
     },
-    /// The shelf the key switches to: its index in the library, and its
+    /// The shelf the key switches to, and its
     /// position among the shelves on the deck.
     Shelf {
-        shelf: usize,
+        shelf: ShelfId,
         position: usize,
         count: usize,
     },
@@ -125,7 +125,7 @@ pub struct Ui {
     seek_seconds: Option<u16>,
 
     /// The library shelves the deck shows: those with items.
-    deck_shelves: Vec<usize>,
+    deck_shelves: Vec<ShelfId>,
     /// Index into `deck_shelves` of the shelf on the deck.
     shelf: usize,
     /// The page each deck shelf is on.
@@ -160,6 +160,32 @@ pub struct Ui {
     watchdog: systemd::Watchdog,
 }
 
+/// How the UI reaches the speaker: the URL base its files are served at, the
+/// commands it sends and the events it hears back.
+pub struct SpeakerLink {
+    pub base_url: BaseUrl,
+    pub commands: Sender<PlayerCmd>,
+    pub events: Receiver<PlayerEvent>,
+}
+
+/// What runs beside the deck and the speaker.
+pub struct Background {
+    /// One per podcast source.
+    pub podcasts: Vec<PodcastThread>,
+    /// systemd's heartbeat; off outside systemd.
+    pub watchdog: systemd::Watchdog,
+}
+
+impl Background {
+    /// Nothing runs beside the deck.
+    pub fn none() -> Background {
+        Background {
+            podcasts: Vec::new(),
+            watchdog: systemd::Watchdog::off(),
+        }
+    }
+}
+
 /// A failure the player reported. Its text goes where the deck can show
 /// one (the simulator page); the item pressed last wears a mark for
 /// [`TROUBLE_MARK`].
@@ -174,16 +200,14 @@ impl Ui {
     pub fn new(
         cfg: &Config,
         library: Library,
-        base_url: BaseUrl,
-        player: Sender<PlayerCmd>,
-        events: Receiver<PlayerEvent>,
         store: Store,
+        speaker: SpeakerLink,
+        background: Background,
     ) -> Ui {
-        let shelves = library.shelves();
-        let deck_shelves = non_empty(&library);
+        let deck_shelves = library.stocked();
         let mut pages: Vec<usize> = deck_shelves
             .iter()
-            .map(|&i| store.page(&shelves[i].name))
+            .map(|&id| store.page(&library.shelf(id).name))
             .collect();
         if pages.is_empty() {
             pages.push(0);
@@ -191,7 +215,9 @@ impl Ui {
         let saved = store.shelf().map(|name| {
             (
                 name,
-                deck_shelves.iter().position(|&i| shelves[i].name == name),
+                deck_shelves
+                    .iter()
+                    .position(|&id| library.shelf(id).name == name),
             )
         });
         let shelf = saved.and_then(|(_, position)| position).unwrap_or(0);
@@ -206,9 +232,9 @@ impl Ui {
             shelf,
             store,
             library,
-            base_url,
-            player,
-            events,
+            base_url: speaker.base_url,
+            player: speaker.commands,
+            events: speaker.events,
             gone: None,
             max_volume: cfg.max_volume,
             volume_step: cfg.volume_step,
@@ -223,25 +249,45 @@ impl Ui {
             badges: false,
             restyled: HashSet::new(),
             asleep: false,
-            podcasts: Vec::new(),
-            watchdog: systemd::Watchdog::off(),
+            podcasts: background.podcasts,
+            watchdog: background.watchdog,
         }
+    }
+
+    /// A UI for `--preview`: no player (its commands go nowhere), a store in
+    /// memory, no podcasts and no watchdog.
+    pub fn for_preview(cfg: &Config, library: Library, base_url: BaseUrl) -> Ui {
+        let (commands, _) = std::sync::mpsc::channel();
+        let (_, events) = std::sync::mpsc::channel();
+        let speaker = SpeakerLink {
+            base_url,
+            commands,
+            events,
+        };
+        Ui::new(
+            cfg,
+            library,
+            Store::in_memory(),
+            speaker,
+            Background::none(),
+        )
     }
 
     /// Drives a connected deck until it is unplugged (returns the error
     /// then), until the player thread ended (the deck goes dark and it
     /// returns [`PlayerGone`]), or until `stop` is set: the deck goes dark
     /// and it returns `Ok`.
-    pub fn run(&mut self, deck: &mut Deck, brightness: u8, stop: &AtomicBool) -> Result<()> {
+    pub fn run(&mut self, deck: &mut Deck<Face>, brightness: u8, stop: &AtomicBool) -> Result<()> {
         // The first draw sends every key; on the simulator each is an HTTP
         // request with its own timeout.
         self.watchdog.beat_now();
         let mut dimmed = self.asleep;
         deck.set_brightness(if dimmed { 0 } else { brightness })?;
-        let (rows, cols) = deck.layout();
+        let grid = deck.grid();
+        let (rows, cols) = (grid.rows, grid.cols);
         let mut layout = self.layout(rows, cols);
         self.fit(&layout);
-        self.prepare_tiles(deck.key_size());
+        self.prepare_tiles(grid.key_size);
         self.draw(deck, &layout)?;
 
         loop {
@@ -261,11 +307,11 @@ impl Ui {
                 self.watchdog.beat_now();
                 layout = self.layout(rows, cols);
                 self.fit(&layout);
-                let remade = self.prepare_tiles(deck.key_size());
+                let remade = self.prepare_tiles(grid.key_size);
                 let shown: HashSet<ItemId> = self
                     .deck_shelves
                     .iter()
-                    .flat_map(|&shelf| self.library.shelves()[shelf].items.iter().copied())
+                    .flat_map(|&shelf| self.library.shelf(shelf).items.iter().copied())
                     .collect();
                 // The deck caches images by face, and a remade tile keeps its face.
                 let restyled = std::mem::take(&mut self.restyled);
@@ -303,10 +349,6 @@ impl Ui {
 
     pub fn player_gone(&self) -> bool {
         self.gone.is_some()
-    }
-
-    pub fn set_watchdog(&mut self, watchdog: systemd::Watchdog) {
-        self.watchdog = watchdog;
     }
 
     /// Tells systemd the main thread is alive; `run` does it by itself.
@@ -588,14 +630,13 @@ impl Ui {
     /// shelf on the deck and the pages stay where they were.
     fn reshelve(&mut self) {
         let current = self.deck_shelves.get(self.shelf).copied();
-        let pages: HashMap<usize, usize> = self
+        let pages: HashMap<ShelfId, usize> = self
             .deck_shelves
             .iter()
             .copied()
             .zip(self.pages.iter().copied())
             .collect();
-        self.deck_shelves = non_empty(&self.library);
-        let shelves = self.library.shelves();
+        self.deck_shelves = self.library.stocked();
         self.pages = self
             .deck_shelves
             .iter()
@@ -603,7 +644,7 @@ impl Ui {
                 pages
                     .get(&shelf)
                     .copied()
-                    .unwrap_or_else(|| self.store.page(&shelves[shelf].name))
+                    .unwrap_or_else(|| self.store.page(&self.library.shelf(shelf).name))
             })
             .collect();
         if self.pages.is_empty() {
@@ -612,7 +653,7 @@ impl Ui {
         let waited = self.waiting_for.as_deref().and_then(|name| {
             self.deck_shelves
                 .iter()
-                .position(|&s| shelves[s].name == name)
+                .position(|&s| self.library.shelf(s).name == name)
         });
         if waited.is_some() {
             self.waiting_for = None;
@@ -628,7 +669,7 @@ impl Ui {
     fn remember_place(&mut self) {
         self.waiting_for = None;
         if let Some(&shelf) = self.deck_shelves.get(self.shelf) {
-            let name = &self.library.shelves()[shelf].name;
+            let name = &self.library.shelf(shelf).name;
             self.store.set_shelf(name);
             self.store.set_page(name, self.pages[self.shelf]);
         }
@@ -754,16 +795,10 @@ impl Ui {
         }
     }
 
-    fn draw(&self, deck: &mut Deck, layout: &Layout) -> Result<()> {
+    fn draw(&self, deck: &mut Deck<Face>, layout: &Layout) -> Result<()> {
         let started = Instant::now();
-        let size = deck.key_size();
-        let mut sent = 0;
-        for (key, face) in self.faces(layout).iter().enumerate() {
-            if deck.show(key, face, || self.render(face, size))? {
-                sent += 1;
-            }
-        }
-        deck.flush()?;
+        let size = deck.grid().key_size;
+        let sent = deck.draw(&self.faces(layout), |face| self.render(face, size))?;
         if sent > 0 {
             debug!(sent, elapsed = ?started.elapsed(), "deck drawn");
         }
@@ -771,11 +806,10 @@ impl Ui {
     }
 
     fn layout(&self, rows: usize, cols: usize) -> Layout {
-        let shelves = self.library.shelves();
         let items = self
             .deck_shelves
             .iter()
-            .map(|&i| shelves[i].items.clone())
+            .map(|&id| self.library.shelf(id).items.clone())
             .collect();
         Layout::new(rows, cols, items)
     }
@@ -801,7 +835,7 @@ impl Ui {
         let first = self
             .deck_shelves
             .first()
-            .and_then(|&shelf| self.library.shelves()[shelf].items.first());
+            .and_then(|&shelf| self.library.shelf(shelf).items.first());
         if demo_state && let Some(&first) = first {
             self.current = Some(first);
             self.playing = true;
@@ -828,17 +862,6 @@ impl Ui {
         self.shelf = 0;
         canvas
     }
-}
-
-/// The library shelves with items: the ones the deck shows.
-fn non_empty(library: &Library) -> Vec<usize> {
-    library
-        .shelves()
-        .iter()
-        .enumerate()
-        .filter(|(_, shelf)| !shelf.items.is_empty())
-        .map(|(i, _)| i)
-        .collect()
 }
 
 #[cfg(test)]

@@ -23,8 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use super::MAX_SLUG;
 use super::feed::hash_hex;
-use super::plan::Stored;
-use crate::library::audio_type;
+use crate::audio::audio_type;
 
 pub const MANIFEST: &str = "feed.json";
 
@@ -36,6 +35,22 @@ const DATE_CHARS: usize = 8;
 /// slug of 1 to [`MAX_EPISODE_SLUG_CHARS`] characters, `-` and the hash. See [`episode_name`].
 const EPISODE_STEM_LENGTHS: RangeInclusive<usize> =
     DATE_CHARS + 1 + 1 + 1 + HASH_CHARS..=DATE_CHARS + 1 + MAX_EPISODE_SLUG_CHARS + 1 + HASH_CHARS;
+
+/// An episode file in the cache, as the manifest records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stored {
+    pub id: String,
+    pub title: String,
+    /// Unix seconds.
+    pub published: Option<i64>,
+    /// File name inside the feed's folder.
+    pub file: String,
+    pub content_type: String,
+    pub bytes: u64,
+    /// Picture file name inside the feed's folder.
+    #[serde(default)]
+    pub picture: Option<String>,
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {

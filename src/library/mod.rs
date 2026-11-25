@@ -11,29 +11,6 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
 use crate::config::{Color, Playlist, Source, SourceBody, Station};
 
-/// File extension and content type of the formats the Chromecast default
-/// receiver can play. The library scan and the podcast feed read this one table.
-pub const AUDIO_TYPES: &[(&str, &str)] = &[
-    ("mp3", "audio/mpeg"),
-    ("m4a", "audio/mp4"),
-    ("m4b", "audio/mp4"),
-    ("mp4", "audio/mp4"),
-    ("aac", "audio/aac"),
-    ("flac", "audio/flac"),
-    ("ogg", "audio/ogg"),
-    ("oga", "audio/ogg"),
-    ("opus", "audio/ogg"),
-    ("wav", "audio/wav"),
-];
-
-/// The content type for an extension without the dot, any case.
-pub fn audio_type(ext: &str) -> Option<&'static str> {
-    AUDIO_TYPES
-        .iter()
-        .find(|(known, _)| known.eq_ignore_ascii_case(ext))
-        .map(|&(_, content_type)| content_type)
-}
-
 #[derive(Debug, Clone)]
 pub struct Track {
     /// The file as found in the source folder, for local playback.
@@ -53,6 +30,11 @@ pub use crate::config::SourceKind as Kind;
 /// restarts, [`ItemKey`] does not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ItemId(pub u32);
+
+/// Names a shelf while the program runs: one per `[[source]]`, in config
+/// order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ShelfId(pub u32);
 
 /// `<source name>/<name in the source folder>`, e.g. `music/01 Animal Songs`: the same
 /// item gets the same key after a restart.
@@ -124,6 +106,7 @@ pub struct Refilled {
 pub struct Library {
     /// `ItemId(n)` is `items[n]`; items are only ever added at the end.
     items: Vec<Item>,
+    /// `ShelfId(n)` is `shelves[n]`.
     shelves: Vec<Shelf>,
 }
 
@@ -192,7 +175,7 @@ impl Library {
 
     /// Puts `items` on shelf `shelf` in this order. Items with a known key
     /// keep their id (their data is updated); new ones get new ids.
-    pub fn refill(&mut self, shelf: usize, items: Vec<Item>) -> Refilled {
+    pub fn refill(&mut self, shelf: ShelfId, items: Vec<Item>) -> Refilled {
         let mut restyled = Vec::new();
         let known: HashMap<ItemKey, ItemId> = self
             .items()
@@ -216,8 +199,9 @@ impl Library {
                 }
             })
             .collect();
-        let moved = self.shelves[shelf].items != ids;
-        self.shelves[shelf].items = ids;
+        let shelf = &mut self.shelves[shelf.0 as usize];
+        let moved = shelf.items != ids;
+        shelf.items = ids;
         Refilled { moved, restyled }
     }
 
@@ -242,8 +226,20 @@ impl Library {
             .map(|(i, item)| (ItemId(i as u32), item))
     }
 
-    pub fn shelves(&self) -> &[Shelf] {
-        &self.shelves
+    pub fn shelf(&self, id: ShelfId) -> &Shelf {
+        &self.shelves[id.0 as usize]
+    }
+
+    /// Every shelf, in the order of the sources it was scanned from.
+    pub fn shelf_ids(&self) -> impl ExactSizeIterator<Item = ShelfId> + use<> {
+        (0..self.shelves.len()).map(|i| ShelfId(i as u32))
+    }
+
+    /// The shelves with items: the ones the deck shows.
+    pub fn stocked(&self) -> Vec<ShelfId> {
+        self.shelf_ids()
+            .filter(|&id| !self.shelf(id).items.is_empty())
+            .collect()
     }
 
     /// Paths below `/music/`: the only files the speaker may download.
@@ -390,8 +386,8 @@ mod tests {
         );
         assert_eq!(library.item(ItemId(2)).name, "02 Bedtime");
         let shelves: Vec<(&str, Kind, &[ItemId])> = library
-            .shelves()
-            .iter()
+            .shelf_ids()
+            .map(|id| library.shelf(id))
             .map(|s| (s.name.as_str(), s.kind, s.items.as_slice()))
             .collect();
         assert_eq!(
@@ -414,8 +410,8 @@ mod tests {
         ]);
 
         assert_eq!(library.items().len(), 1);
-        assert_eq!(library.shelves()[0].items, []);
-        assert_eq!(library.shelves()[1].items, [ItemId(0)]);
+        assert_eq!(library.shelf(ShelfId(0)).items, []);
+        assert_eq!(library.shelf(ShelfId(1)).items, [ItemId(0)]);
     }
 
     #[test]

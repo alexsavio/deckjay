@@ -1,5 +1,6 @@
 //! See `config.example.toml` for every key.
 
+mod look;
 mod playlist;
 mod podcast;
 mod radio;
@@ -10,79 +11,98 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+pub use self::look::Color;
+#[cfg(test)]
+pub use self::look::Look;
 pub use self::playlist::Playlist;
 #[cfg(test)]
 pub use self::podcast::Feed as PodcastFeed;
 pub use self::podcast::Order as FeedOrder;
 pub use self::podcast::Podcast;
 pub use self::radio::Station;
-#[cfg(test)]
-pub use self::source::Look;
 use self::source::RawSource;
-pub use self::source::{Color, Folder, Source, SourceBody, SourceKind};
+pub use self::source::{Folder, Source, SourceBody, SourceKind};
 
-/// Unknown keys are an error, so typos are caught.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// The checked settings: a value, every field ready to use.
+#[derive(Debug)]
 pub struct Config {
-    /// Only read to point old config files at `[[source]]`.
-    #[serde(default)]
-    music_dir: Option<toml::Value>,
-    #[serde(default, rename = "source")]
-    raw_sources: Vec<RawSource>,
     /// The `[[source]]` tables, in file order.
-    #[serde(skip)]
     pub sources: Vec<Source>,
 
     /// The `[spotify]` table: needed to sign in and to play Spotify.
-    #[serde(default)]
     pub spotify: Option<Spotify>,
 
-    /// Writable folder for what the deck remembers. Relative paths are
-    /// resolved against the folder the config file lives in.
-    #[serde(default = "default_state_dir")]
+    /// Writable folder for what the deck remembers, an absolute path when
+    /// the config file's folder is.
     pub state_dir: PathBuf,
 
     /// IP address (or host name) of the speaker; not used by `local`.
-    #[serde(default)]
     pub speaker_host: String,
-    #[serde(default)]
     pub speaker_type: SpeakerType,
-    /// `None` means the default port for `speaker_type`.
-    #[serde(default)]
-    speaker_port: Option<u16>,
+    /// The configured port, else the default for `speaker_type`.
+    pub speaker_port: u16,
 
     /// Port of the built-in web server the speaker downloads music from.
-    #[serde(default = "default_http_port")]
     pub http_port: u16,
 
     /// Address the speaker should use to reach this machine. Detected
     /// automatically if not set.
-    #[serde(default)]
     pub advertise_host: Option<String>,
 
     /// Hard volume ceiling (0.0–1.0). The deck's volume keys never go above it.
-    #[serde(default = "default_max_volume")]
     pub max_volume: f32,
     /// Volume used when the program starts.
-    #[serde(default = "default_start_volume")]
     pub start_volume: f32,
     /// How much one press of a volume key changes the volume.
-    #[serde(default = "default_volume_step")]
     pub volume_step: f32,
     /// How far ⏪ and ⏩ jump in an audiobook, a podcast or a story, in
     /// seconds.
-    #[serde(default = "default_seek_seconds")]
     pub seek_seconds: u16,
 
     /// Stream Deck screen brightness in percent.
-    #[serde(default = "default_brightness")]
     pub brightness: u8,
 
     /// For `local`: part of the sound output's name (e.g. "Headphones" or
     /// "HDMI" on a Raspberry Pi). `None` uses the system's default output.
-    #[serde(default)]
     pub audio_device: Option<String>,
+}
+
+/// The shape of the file. Unknown keys are an error, so typos are caught.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct File {
+    /// Only read to point old config files at `[[source]]`.
+    #[serde(default)]
+    music_dir: Option<toml::Value>,
+    #[serde(default, rename = "source")]
+    sources: Vec<RawSource>,
+    #[serde(default)]
+    spotify: Option<Spotify>,
+    #[serde(default = "default_state_dir")]
+    state_dir: PathBuf,
+    #[serde(default)]
+    speaker_host: String,
+    #[serde(default)]
+    speaker_type: SpeakerType,
+    /// `None` means the default port for `speaker_type`.
+    #[serde(default)]
+    speaker_port: Option<u16>,
+    #[serde(default = "default_http_port")]
+    http_port: u16,
+    #[serde(default)]
+    advertise_host: Option<String>,
+    #[serde(default = "default_max_volume")]
+    max_volume: f32,
+    #[serde(default = "default_start_volume")]
+    start_volume: f32,
+    #[serde(default = "default_volume_step")]
+    volume_step: f32,
+    #[serde(default = "default_seek_seconds")]
+    seek_seconds: u16,
+    #[serde(default = "default_brightness")]
+    brightness: u8,
+    #[serde(default)]
+    audio_device: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -164,25 +184,25 @@ impl Config {
 
     /// Relative paths are resolved against `base`.
     fn parse(text: &str, base: &Path) -> Result<Self> {
-        let mut cfg: Config = toml::from_str(text)?;
+        let file: File = toml::from_str(text)?;
 
-        if cfg.music_dir.is_some() {
+        if file.music_dir.is_some() {
             bail!(
                 "music_dir is no longer read: the folders to play are now [[source]] \
                  tables. Replace the music_dir line with this, at the end of the file:\n\n\
                  [[source]]\ntype = \"music\"\npath = \"music\""
             );
         }
-        cfg.state_dir = base.join(&cfg.state_dir);
-        cfg.sources = source::resolve(std::mem::take(&mut cfg.raw_sources), base, &cfg.state_dir)?;
-        let plays_spotify = cfg.sources.iter().any(|s| s.kind() == SourceKind::Spotify);
-        if plays_spotify && cfg.spotify.as_ref().is_none_or(|s| s.device.is_none()) {
+        let state_dir = base.join(&file.state_dir);
+        let sources = source::resolve(file.sources, base, &state_dir)?;
+        let plays_spotify = sources.iter().any(|s| s.kind() == SourceKind::Spotify);
+        if plays_spotify && file.spotify.as_ref().is_none_or(|s| s.device.is_none()) {
             bail!(
                 "a spotify source needs a [spotify] table with client_id and device, \
                  the Connect device that plays"
             );
         }
-        if let Some(spotify) = &cfg.spotify {
+        if let Some(spotify) = &file.spotify {
             let id = &spotify.client_id;
             if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
                 bail!("spotify.client_id {id:?} must be the Client ID of your Spotify app");
@@ -196,38 +216,48 @@ impl Config {
             }
         }
 
-        if cfg.speaker_type != SpeakerType::Local && cfg.speaker_host.trim().is_empty() {
+        if file.speaker_type != SpeakerType::Local && file.speaker_host.trim().is_empty() {
             bail!("speaker_host is empty; it is needed for speaker_type cast and heos");
         }
-        if cfg.http_port == 0 {
+        if file.http_port == 0 {
             bail!("http_port must not be 0: the speaker needs a fixed port in the music URLs");
         }
-        if let Some(host) = &cfg.advertise_host {
+        if let Some(host) = &file.advertise_host {
             check_advertise_host(host).context("invalid advertise_host")?;
         }
-        if !(0.0..=1.0).contains(&cfg.max_volume) {
+        if !(0.0..=1.0).contains(&file.max_volume) {
             bail!("max_volume must be between 0.0 and 1.0");
         }
         // The UI rounds volumes to a 0.001 grid, so a smaller step would never move.
-        if !(0.01..=0.5).contains(&cfg.volume_step) {
+        if !(0.01..=0.5).contains(&file.volume_step) {
             bail!("volume_step must be between 0.01 and 0.5");
         }
         // Past 5 minutes a jump skips whole scenes; the cap also catches a
         // value meant in milliseconds.
-        if !(1..=300).contains(&cfg.seek_seconds) {
+        if !(1..=300).contains(&file.seek_seconds) {
             bail!("seek_seconds must be between 1 and 300");
         }
-        if cfg.start_volume.is_nan() {
+        if file.start_volume.is_nan() {
             bail!("start_volume must be a number");
         }
-        cfg.start_volume = cfg.start_volume.clamp(0.0, cfg.max_volume);
-        cfg.brightness = cfg.brightness.min(100);
-        Ok(cfg)
-    }
-
-    pub fn speaker_port(&self) -> u16 {
-        self.speaker_port
-            .unwrap_or(self.speaker_type.default_port())
+        Ok(Config {
+            sources,
+            spotify: file.spotify,
+            state_dir,
+            speaker_host: file.speaker_host,
+            speaker_type: file.speaker_type,
+            speaker_port: file
+                .speaker_port
+                .unwrap_or(file.speaker_type.default_port()),
+            http_port: file.http_port,
+            advertise_host: file.advertise_host,
+            max_volume: file.max_volume,
+            start_volume: file.start_volume.clamp(0.0, file.max_volume),
+            volume_step: file.volume_step,
+            seek_seconds: file.seek_seconds,
+            brightness: file.brightness.min(100),
+            audio_device: file.audio_device,
+        })
     }
 }
 
@@ -260,7 +290,7 @@ mod tests {
     fn fills_in_defaults() {
         let cfg = parse("").unwrap();
         assert_eq!(cfg.speaker_type, SpeakerType::Cast);
-        assert_eq!(cfg.speaker_port(), 8009);
+        assert_eq!(cfg.speaker_port, 8009);
         assert_eq!(cfg.http_port, 8765);
         assert_eq!(cfg.advertise_host, None);
         assert!((cfg.max_volume - 0.4).abs() < f32::EPSILON);
@@ -272,7 +302,7 @@ mod tests {
     fn a_heos_speaker_defaults_to_the_heos_port() {
         let cfg = parse("speaker_type = \"heos\"\n").unwrap();
         assert_eq!(cfg.speaker_type, SpeakerType::Heos);
-        assert_eq!(cfg.speaker_port(), 1255);
+        assert_eq!(cfg.speaker_port, 1255);
     }
 
     #[test]
@@ -285,7 +315,7 @@ mod tests {
 
     #[test]
     fn an_explicit_speaker_port_wins() {
-        assert_eq!(parse("speaker_port = 9000\n").unwrap().speaker_port(), 9000);
+        assert_eq!(parse("speaker_port = 9000\n").unwrap().speaker_port, 9000);
     }
 
     #[test]

@@ -27,8 +27,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::config::{self, FeedOrder};
 
-use cache::Manifest;
-use plan::Stored;
+use cache::{Manifest, Stored};
 
 /// Retry delay after a refresh in which every feed failed; it doubles up to
 /// the refresh interval.

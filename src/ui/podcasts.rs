@@ -7,12 +7,12 @@ use tracing::warn;
 
 use super::Ui;
 use crate::config::Source;
-use crate::library;
+use crate::library::{self, ShelfId};
 use crate::podcasts::{NowPlaying, Snapshot};
 
 pub struct PodcastThread {
     /// The library shelf of `source`.
-    shelf: usize,
+    shelf: ShelfId,
     source: Source,
     snapshots: Receiver<Snapshot>,
     /// Dropping it ends the thread.
@@ -23,7 +23,7 @@ pub struct PodcastThread {
 
 impl PodcastThread {
     pub fn new(
-        shelf: usize,
+        shelf: ShelfId,
         source: Source,
         snapshots: Receiver<Snapshot>,
         now_playing: Sender<NowPlaying>,
@@ -39,10 +39,6 @@ impl PodcastThread {
 }
 
 impl Ui {
-    pub fn set_podcasts(&mut self, threads: Vec<PodcastThread>) {
-        self.podcasts = threads;
-    }
-
     /// Puts the newest snapshot of each podcast thread on its shelf.
     /// Returns whether a shelf changed.
     pub fn take_snapshots(&mut self) -> bool {

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::{Color, check_named};
+use super::look::{Color, check_named};
 
 /// One `[[source.playlist]]` table, checked, with its URI normalised and its
 /// picture resolved.

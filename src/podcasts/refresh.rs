@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use ureq::Agent;
 
-use super::cache::{self, Manifest};
+use super::cache::{self, Manifest, Stored};
 use super::download::{self, Failure};
 use super::feed::{self, Feed, RemoteEpisode};
-use super::plan::{self, Plan, Stored};
+use super::plan::{self, Plan};
 use super::{FeedSettings, NowPlaying, Publisher, Settings, Snapshot, Timing, feed_state};
 use crate::net::{self, without_query};
 
@@ -137,8 +137,8 @@ impl Worker {
             .is_none_or(|(_, s)| id.as_deref() != Some(s.id.as_str()))
         {
             self.playing = None;
-            self.doomed.spare(HashSet::new());
         }
+        self.doomed.pin(id.as_deref());
         self.pinned = id;
     }
 
@@ -205,7 +205,6 @@ impl Worker {
 
         self.drain_pins();
         self.playing = self.find_playing(&runs);
-        self.doomed.spare(self.playing_files());
         let mut snapshot = Snapshot::default();
         let mut wanted = BTreeSet::new();
         let mut unwanted = Vec::new();
@@ -233,8 +232,12 @@ impl Worker {
             ));
         }
         self.publish(wanted);
-        self.doomed
-            .schedule(unwanted, Instant::now(), self.timing.sweep_grace);
+        self.doomed.schedule(
+            unwanted,
+            Instant::now(),
+            self.timing.sweep_grace,
+            self.playing_files(),
+        );
         log_summary(&runs, &snapshot, dropped);
         self.snapshots.send(snapshot).ok()?;
         Some(!runs.is_empty() && runs.iter().all(|run| run.remote.is_none()))
@@ -249,16 +252,16 @@ impl Worker {
         on_disk.or_else(|| self.playing.take().filter(|(_, s)| s.id == id))
     }
 
-    /// `<feed folder>/<name>` of the playing episode's file and picture.
-    fn playing_files(&self) -> HashSet<PathBuf> {
-        let Some((slug, stored)) = &self.playing else {
-            return HashSet::new();
-        };
-        [Some(&stored.file), stored.picture.as_ref()]
+    /// The playing episode's id and its file and picture as `<feed folder>/<name>`;
+    /// `None` when nothing plays.
+    fn playing_files(&self) -> Option<(String, HashSet<PathBuf>)> {
+        let (slug, stored) = self.playing.as_ref()?;
+        let files = [Some(&stored.file), stored.picture.as_ref()]
             .into_iter()
             .flatten()
             .map(|name| Path::new(slug).join(name))
-            .collect()
+            .collect();
+        Some((stored.id.clone(), files))
     }
 
     fn fetch(&mut self, feed: FeedSettings) -> Option<Run> {
@@ -519,13 +522,21 @@ fn later(now: Instant, delay: Duration) -> Instant {
 #[derive(Debug, Default)]
 struct Doomed {
     due: HashMap<PathBuf, Instant>,
-    spared: HashSet<PathBuf>,
+    /// The id of the playing episode and its files.
+    spared: Option<(String, HashSet<PathBuf>)>,
 }
 
 impl Doomed {
     /// Files already waiting keep their time; files that are wanted again
-    /// leave the list.
-    fn schedule(&mut self, unwanted: Vec<PathBuf>, now: Instant, grace: Duration) {
+    /// leave the list. `playing` is the playing episode's id and file names:
+    /// they wait while it plays.
+    fn schedule(
+        &mut self,
+        unwanted: Vec<PathBuf>,
+        now: Instant,
+        grace: Duration,
+        playing: Option<(String, HashSet<PathBuf>)>,
+    ) {
         let due = later(now, grace);
         self.due = unwanted
             .into_iter()
@@ -534,15 +545,25 @@ impl Doomed {
                 (rel, at)
             })
             .collect();
+        self.spared = playing;
     }
 
-    /// Names that wait while the episode that owns them plays.
-    fn spare(&mut self, names: HashSet<PathBuf>) {
-        self.spared = names;
+    /// The pinned episode changed: another episode's spared names no longer wait.
+    fn pin(&mut self, id: Option<&str>) {
+        if self
+            .spared
+            .as_ref()
+            .is_some_and(|(spared, _)| Some(spared.as_str()) != id)
+        {
+            self.spared = None;
+        }
     }
 
     fn waits(&self, rel: &Path, pinned: Option<&str>) -> bool {
-        self.spared.contains(rel) || is_pinned(rel, pinned)
+        self.spared
+            .as_ref()
+            .is_some_and(|(_, names)| names.contains(rel))
+            || is_pinned(rel, pinned)
     }
 
     /// The next deletion; spared files and files of the pinned episode wait.
@@ -588,7 +609,7 @@ mod tests {
         let grace = Duration::from_secs(60);
         let t0 = Instant::now();
         let mut doomed = Doomed::default();
-        doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace);
+        doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace, None);
 
         assert_eq!(doomed.next(None), Some(t0 + grace));
         assert_eq!(
@@ -605,8 +626,8 @@ mod tests {
         let t0 = Instant::now();
         let t1 = t0 + Duration::from_secs(10);
         let mut doomed = Doomed::default();
-        doomed.schedule(vec![rel("a"), rel("b")], t0, grace);
-        doomed.schedule(vec![rel("a"), rel("c")], t1, grace);
+        doomed.schedule(vec![rel("a"), rel("b")], t0, grace, None);
+        doomed.schedule(vec![rel("a"), rel("c")], t1, grace, None);
 
         assert_eq!(doomed.take_due(t0 + grace, None), [rel("a")]);
         assert_eq!(doomed.take_due(t1 + grace, None), [rel("c")]);
@@ -618,7 +639,7 @@ mod tests {
         let t0 = Instant::now();
         let episode = rel("20250107-elefant-1a2b3c4d.mp3");
         let mut doomed = Doomed::default();
-        doomed.schedule(vec![episode.clone()], t0, grace);
+        doomed.schedule(vec![episode.clone()], t0, grace, None);
 
         assert_eq!(doomed.next(Some(ID)), None);
         assert_eq!(
@@ -634,12 +655,12 @@ mod tests {
         let grace = Duration::from_secs(60);
         let t0 = Instant::now();
         let mut doomed = Doomed::default();
-        doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace);
-        doomed.spare(HashSet::from([rel("p-00000000.jpg")]));
+        let playing = (ID.to_owned(), HashSet::from([rel("p-00000000.jpg")]));
+        doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace, Some(playing));
 
         assert_eq!(doomed.next(None), None);
         assert_eq!(doomed.take_due(t0 + grace * 10, None), [] as [PathBuf; 0]);
-        doomed.spare(HashSet::new());
+        doomed.schedule(vec![rel("p-00000000.jpg")], t0, grace, None);
         assert_eq!(doomed.next(None), Some(t0 + grace));
         assert_eq!(doomed.take_due(t0 + grace, None), [rel("p-00000000.jpg")]);
     }

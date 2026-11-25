@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
-use super::source::check_named;
+use super::look::{Color, check_named};
 
 /// Checked podcast settings of one source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub(super) struct RawPodcast {
     #[serde(default = "default_max_episode_mb")]
     max_episode_mb: u64,
     pub(super) picture: Option<std::path::PathBuf>,
-    pub(super) color: Option<super::source::Color>,
+    pub(super) color: Option<Color>,
     #[serde(default)]
     feed: Vec<Feed>,
 }

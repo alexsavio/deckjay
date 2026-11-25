@@ -140,16 +140,17 @@ crates.io. `just publish-dry` checks the package first.
 | `main.rs` | Startup, the commands (`check`, `check-config`, `preview`, `blank`), reconnecting to the deck |
 | `cli.rs` | The command line (clap): commands, options, exit codes |
 | `systemd.rs` | Tells systemd the service is ready and alive (`sd_notify`) |
-| `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`) |
+| `config/` | `config.toml` loading and validation (`mod.rs`); `[[source]]` tables (`source.rs`); `look.rs` has what every table shares (`Look`, `Color`, name checks) |
+| `audio.rs` | The audio formats the speakers play (extension and content type) |
 | `library/` | Items and shelves, one shelf per source (`mod.rs`); scans source folders and finds covers (`scan.rs`); builds URLs |
 | `ui/` | What each key shows and does (`mod.rs`), key layout with shelves (`layout.rs`) |
 | `icons/` | Draws control icons, kind glyphs and key decorations (no image files needed) |
 | `state.rs` | What the deck remembers in `state.json`: shelf, pages, audiobook progress |
-| `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`) |
+| `deck/` | Image caching and key presses, for a USB deck (`hid.rs`) or the simulator (`remote.rs`); `source.rs` finds a deck and waits for one |
 | `simulator/` | The web Stream Deck simulator (`deckjay simulator`) |
 | `player/` | The player thread: shared command loop (`mod.rs`), when to report progress (`progress.rs`), speaker or Spotify (`router.rs`), Chromecast (`cast.rs`), HEOS (`heos.rs`, protocol in `heos/cli.rs`), local sound output (`local`, radio streams in `local/netread.rs`), Spotify Connect (`spotify.rs`) |
 | `server.rs` | HTTP server the speaker downloads the music from; its allowlist changes as podcasts refresh |
-| `podcasts/` | The podcasts thread: feeds, download plan, cache and refresh |
+| `podcasts/` | The podcasts thread: feeds, download plan (`plan.rs`), cache and its manifest (`cache.rs`), refresh |
 | `spotify/` | Spotify sign-in, saved login, Web API client and playlist covers |
 | `radio.rs` | Turns a station URL (or its `.pls` / `.m3u`) into the stream |
 | `net.rs` | HTTPS agents for feeds, radio and Spotify; the address the speaker downloads from (`BaseUrl`) |
