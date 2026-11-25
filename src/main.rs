@@ -199,8 +199,6 @@ fn drive_decks(
     Ok(())
 }
 
-/// For systemd's `ExecStopPost`, which runs however deckjay ended, a crash
-/// included.
 fn scan_sources(cfg: &Config) -> Library {
     let library = Library::scan(&cfg.sources);
     for (id, source) in library.shelf_ids().zip(&cfg.sources) {

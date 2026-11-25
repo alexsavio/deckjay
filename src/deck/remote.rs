@@ -151,9 +151,10 @@ mod tests {
 
     use super::*;
     use crate::deck::Face;
-    type Deck = crate::deck::Deck<Face>;
     use crate::icons;
     use crate::simulator::{self, Model};
+
+    type Deck = crate::deck::Deck<Face>;
 
     fn start_simulator(info: Info) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

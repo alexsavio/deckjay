@@ -152,7 +152,6 @@ impl<F: Copy + Eq + Hash> Deck<F> {
         self.backend.key_size()
     }
 
-    /// The key grid the deck has.
     pub fn grid(&self) -> Grid {
         let (rows, cols) = self.layout();
         Grid {

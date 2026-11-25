@@ -85,10 +85,11 @@ all three together.
 Three threads joined by `std::sync::mpsc`; async exists only inside the HTTP
 servers:
 
-- **main** (`main.rs` → `ui/`, `deck/`): `deck::Source::open` retries every
-  2 s, so the deck can be unplugged. `Ui::new` takes every part at once (the
-  library, the store, a `SpeakerLink`, and the `Background` of podcast threads
-  and watchdog); `Ui::for_preview` builds one with null parts. `Ui::run` polls
+- **main** (`main.rs` → `ui/`, `deck/`): `drive_decks` calls
+  `deck::Source::open` every 2 s, so the deck can be unplugged. `Ui::new`
+  takes every part at once (the library, the store, a `SpeakerLink`, and the
+  `Background` of podcast threads and watchdog); `Ui::for_preview` builds one
+  with null parts. `Ui::run` polls
   keys every 100 ms, drains `PlayerEvent`s, redraws, and returns `Err` when
   the deck goes away. When
   the player thread ended (its events channel hung up, which only a panic

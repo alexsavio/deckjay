@@ -252,7 +252,8 @@ impl Worker {
         on_disk.or_else(|| self.playing.take().filter(|(_, s)| s.id == id))
     }
 
-    /// `<feed folder>/<name>` of the playing episode's file and picture.
+    /// The playing episode's id and its file and picture as `<feed folder>/<name>`;
+    /// `None` when nothing plays.
     fn playing_files(&self) -> Option<(String, HashSet<PathBuf>)> {
         let (slug, stored) = self.playing.as_ref()?;
         let files = [Some(&stored.file), stored.picture.as_ref()]
