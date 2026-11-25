@@ -311,4 +311,8 @@ fn a_place_with_no_track_to_hold_it_is_used_up() {
     cli.players().unwrap();
     assert_eq!(cli.take_place(None), None);
     assert_eq!(cli.take_place(Some(0)), None);
+
+    fake.script().once = Some(("player/get_players", "pid=7&cur_pos=42000&duration=180000"));
+    cli.players().unwrap();
+    assert!(cli.take_place(Some(0)).is_some());
 }
