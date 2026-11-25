@@ -9,7 +9,7 @@ use super::*;
 use crate::player::{Content, PlayerCmd, Start};
 
 const ONE_PLAYER: &str = r#"[{"name": "Kitchen", "pid": 7, "model": "HEOS 1", "version": "1.583.147", "network": "wifi", "ip": "10.0.0.9"}]"#;
-/// String pids; the second player's ip is the host the tests connect to.
+/// String pids; the second player's ip is 127.0.0.1, where the fake server listens.
 const TWO_PLAYERS: &str = concat!(
     r#"[{"name": "Kitchen", "pid": "12", "model": "HEOS 1", "ip": "10.0.0.9"},"#,
     r#" {"name": "Kids %26 Co", "pid": "-1234", "model": "HEOS 7", "ip": "127.0.0.1"}]"#

@@ -151,7 +151,7 @@ impl Reply {
 mod tests {
     use super::*;
 
-    /// Tested here: an HTTP server and client drop the body of a 204.
+    /// Built in memory: HTTP drops a 204 body, so the fake server cannot send one.
     #[test]
     fn a_204_is_empty_even_with_a_body() {
         let reply = Reply {
