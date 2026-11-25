@@ -98,15 +98,15 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
+/// For a 429 without a readable `Retry-After`.
+const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
+
 /// A status, a `Retry-After` in seconds, and the whole body.
 pub(super) struct Reply {
     pub status: u16,
     pub retry_after: Option<Duration>,
     pub body: String,
 }
-
-/// For a 429 without a readable `Retry-After`.
-const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
 
 impl Reply {
     pub fn read(mut reply: ureq::http::Response<ureq::Body>) -> Result<Reply> {

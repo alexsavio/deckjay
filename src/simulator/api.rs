@@ -91,7 +91,7 @@ impl Sim {
             .ok_or(NOT_A_KEY)
     }
 
-    /// Queues a press, dropping the oldest when `MAX_QUEUED` wait, and wakes
+    /// Queues a press, dropping the oldest once `MAX_QUEUED` are waiting, and wakes
     /// the poller.
     fn press(&self, n: usize) {
         {

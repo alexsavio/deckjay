@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::json;
 use tracing::{debug, warn};
 use ureq::Agent;

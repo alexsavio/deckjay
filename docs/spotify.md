@@ -7,7 +7,7 @@ account. The code:
 
 - [`src/spotify/`](../src/spotify/mod.rs): the sign-in (`auth.rs`,
   `login.rs`), the saved login (`token.rs`) and the Web API client
-  (`api.rs`).
+  (`api.rs`), with how an answer and its error are read in `http.rs`.
 - [`src/config/playlist.rs`](../src/config/playlist.rs): `type = "spotify"`
   sources and their playlists.
 
