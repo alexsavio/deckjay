@@ -86,7 +86,9 @@ Three threads joined by `std::sync::mpsc`; async exists only inside the HTTP
 servers:
 
 - **main** (`main.rs` → `ui/`, `deck/`): `DeckSource::open` retries every
-  2 s, so the deck can be unplugged. `Ui::run` polls keys every 100 ms, drains
+  2 s, so the deck can be unplugged. `Ui::new` takes every part at once (the
+  library, the store, a `SpeakerLink`, and the `Background` of podcast threads
+  and watchdog); `Ui::for_preview` builds one with null parts. `Ui::run` polls keys every 100 ms, drains
   `PlayerEvent`s, redraws, and returns `Err` when the deck goes away. When
   the player thread ended (its events channel hung up, which only a panic
   does), `Ui::run` blanks the deck and returns `ui::PlayerGone`, and `main`
@@ -214,7 +216,9 @@ State:
   later events correct it. Commands, events and `Face`s name items by
   `ItemId`, an index into the `Library` that is never reused while the
   program runs; `ItemKey` (`<source>/<path>`, e.g. `music/01 Animal Songs`)
-  is the name that survives a restart.
+  is the name that survives a restart. Shelves are named the same way, by
+  `ShelfId`; the `Library` answers by id (`shelf`, `stocked`, `shelf_ids`) and
+  never hands out its shelf list.
 - While the loaded item is spoken word (`Kind::seeks`: audiobooks,
   podcasts, stories; `Ui::seeking`), ⏮ / ⏭ send
   `PlayerCmd::Seek(∓seek_seconds)` in place of `Prev` / `Next` and show

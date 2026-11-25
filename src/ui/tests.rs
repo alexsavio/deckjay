@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 
 use super::*;
-use crate::library::{Item, ItemKey, Kind, Media, Track};
+use crate::library::{Item, ItemKey, Kind, Media, ShelfId, Track};
 use crate::net::BaseUrl;
 
 fn items(kind: Kind, names: std::ops::Range<usize>) -> Vec<Item> {
@@ -38,6 +38,15 @@ fn ui_with_store(
     volume: &str,
     store: Store,
 ) -> (Ui, Receiver<PlayerCmd>, Sender<PlayerEvent>) {
+    ui_with_background(library, volume, store, Background::none())
+}
+
+fn ui_with_background(
+    library: Library,
+    volume: &str,
+    store: Store,
+    background: Background,
+) -> (Ui, Receiver<PlayerCmd>, Sender<PlayerEvent>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     let text = format!(
@@ -47,14 +56,12 @@ fn ui_with_store(
     let cfg = Config::load(&path).unwrap();
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
-    let ui = Ui::new(
-        &cfg,
-        library,
-        BaseUrl::fixed("http://host/music"),
-        cmd_tx,
-        event_rx,
-        store,
-    );
+    let speaker = SpeakerLink {
+        base_url: BaseUrl::fixed("http://host/music"),
+        commands: cmd_tx,
+        events: event_rx,
+    };
+    let ui = Ui::new(&cfg, library, store, speaker, background);
     (ui, cmd_rx, event_tx)
 }
 
@@ -168,7 +175,7 @@ fn the_shelf_key_shows_the_next_shelf_and_each_shelf_keeps_its_page() {
     assert_eq!(
         ui.faces(&layout)[9],
         Face::Shelf {
-            shelf: 1,
+            shelf: ShelfId(1),
             position: 1,
             count: 2
         }
@@ -181,7 +188,7 @@ fn the_shelf_key_shows_the_next_shelf_and_each_shelf_keeps_its_page() {
     assert_eq!(
         ui.faces(&layout)[9],
         Face::Shelf {
-            shelf: 0,
+            shelf: ShelfId(0),
             position: 0,
             count: 2
         }
@@ -204,7 +211,13 @@ fn empty_shelves_are_not_on_the_deck() {
     assert_eq!(layout.shelf_count(), 2);
     ui.press(&layout, 9);
     assert_eq!(first_item(&ui, &layout), Some(ItemId(2)));
-    assert!(matches!(ui.faces(&layout)[9], Face::Shelf { shelf: 0, .. }));
+    assert!(matches!(
+        ui.faces(&layout)[9],
+        Face::Shelf {
+            shelf: ShelfId(0),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -550,31 +563,36 @@ mod podcasts {
         Sender<Snapshot>,
         Receiver<NowPlaying>,
     ) {
-        let (mut ui, cmds, events) = ui_with(
+        let (snapshot_tx, snapshots) = mpsc::channel();
+        let (pin_tx, pins) = mpsc::channel();
+        let source = Source::plain("pod", SourceKind::Podcast, Path::new("/cache"));
+        let background = Background {
+            podcasts: vec![PodcastThread::new(ShelfId(1), source, snapshots, pin_tx)],
+            watchdog: systemd::Watchdog::off(),
+        };
+        let (ui, cmds, events) = ui_with_background(
             Library::with_shelves(vec![
                 ("music", Kind::Music, items(Kind::Music, 0..1)),
                 ("pod", Kind::Podcast, Vec::new()),
             ]),
             "",
+            Store::in_memory(),
+            background,
         );
-        let (snapshot_tx, snapshots) = mpsc::channel();
-        let (pin_tx, pins) = mpsc::channel();
-        let source = Source::plain("pod", SourceKind::Podcast, Path::new("/cache"));
-        ui.set_podcasts(vec![PodcastThread::new(1, source, snapshots, pin_tx)]);
         (ui, cmds, events, snapshot_tx, pins)
     }
 
     #[test]
     fn a_snapshot_fills_the_shelf_and_new_episodes_get_a_dot() {
         let (mut ui, _cmds, _events, snapshots, _pins) = podcast_ui();
-        assert_eq!(ui.deck_shelves, [0]);
+        assert_eq!(ui.deck_shelves, [ShelfId(0)]);
         assert!(!ui.take_snapshots(), "nothing sent yet");
 
         snapshots.send(snapshot(&["old"])).unwrap();
         snapshots.send(snapshot(&["new", "old"])).unwrap();
         assert!(ui.take_snapshots());
 
-        assert_eq!(ui.deck_shelves, [0, 1]);
+        assert_eq!(ui.deck_shelves, [ShelfId(0), ShelfId(1)]);
         ui.shelf = 1;
         ui.store.set_progress(
             "pod/maus/old",
@@ -608,7 +626,7 @@ mod podcasts {
         ui.shelf = 1;
         snapshots.send(snapshot(&[])).unwrap();
         assert!(ui.take_snapshots());
-        assert_eq!((ui.deck_shelves.clone(), ui.shelf), (vec![0], 0));
+        assert_eq!((ui.deck_shelves.clone(), ui.shelf), (vec![ShelfId(0)], 0));
         snapshots.send(snapshot(&["b"])).unwrap();
         ui.take_snapshots();
         assert_eq!(ui.shelf, 0, "the music shelf stays on the deck");
@@ -689,7 +707,7 @@ mod podcasts {
         snapshots.send(snapshot(&["a1"])).unwrap();
         ui.take_snapshots();
         ui.prepare_tiles(8);
-        let id = ui.library.shelves()[1].items[0];
+        let id = ui.library.shelf(ShelfId(1)).items[0];
         assert!(ui.tiles.contains_key(&id));
 
         let mut newer = snapshot(&["a1"]);

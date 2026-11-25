@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::config::{FeedOrder, Podcast, PodcastFeed, SourceBody, SourceKind};
-use crate::library::{ItemId, Library, Refilled};
+use crate::library::{ItemId, Library, Refilled, ShelfId};
 use crate::podcasts::{Episode, FeedState};
 
 fn source(feeds: &[(&str, FeedOrder)]) -> Source {
@@ -89,18 +89,18 @@ fn a_refill_keeps_the_ids_of_known_episodes() {
             items(&source, &snapshot(&[("a1", "mp3")])),
         ),
     ]);
-    assert_eq!(library.shelves()[1].items, [ItemId(0)]);
+    assert_eq!(library.shelf(ShelfId(1)).items, [ItemId(0)]);
 
     let refilled = library.refill(
-        1,
+        ShelfId(1),
         items(&source, &snapshot(&[("n9", "mp3"), ("a1", "mp3")])),
     );
 
     assert!(refilled.moved);
-    assert_eq!(library.shelves()[1].items, [ItemId(1), ItemId(0)]);
+    assert_eq!(library.shelf(ShelfId(1)).items, [ItemId(1), ItemId(0)]);
     assert_eq!(library.item(ItemId(1)).key.0, "maus/die-maus/n9");
     let again = library.refill(
-        1,
+        ShelfId(1),
         items(&source, &snapshot(&[("n9", "mp3"), ("a1", "mp3")])),
     );
     assert_eq!(again, Refilled::default());
@@ -108,7 +108,7 @@ fn a_refill_keeps_the_ids_of_known_episodes() {
 
     let mut snapshot = snapshot(&[("n9", "mp3"), ("a1", "mp3")]);
     snapshot.feeds[0].episodes[1].picture = Some("/cache/maus/die-maus/a1.jpg".into());
-    let restyled = library.refill(1, items(&source, &snapshot));
+    let restyled = library.refill(ShelfId(1), items(&source, &snapshot));
     assert_eq!(
         restyled,
         Refilled {

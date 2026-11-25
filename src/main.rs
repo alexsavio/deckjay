@@ -51,7 +51,7 @@ use tracing_subscriber::EnvFilter;
 use crate::cli::{Command, RunArgs};
 use crate::config::{Config, Podcast, Source, SourceBody, SpeakerType};
 use crate::deck::Deck;
-use crate::library::Library;
+use crate::library::{Library, ShelfId};
 use crate::net::BaseUrl;
 use crate::ui::Ui;
 
@@ -115,9 +115,16 @@ fn run_player(args: &RunArgs) -> Result<()> {
     let (event_tx, event_rx) = mpsc::channel();
     let player = player::spawn_with(output(&cfg), spotify_output(&cfg), event_tx);
     let store = state::Store::open(&cfg.state_dir);
-    let mut ui = Ui::new(&cfg, library, base_url, player, event_rx, store);
-    ui.set_podcasts(start_podcasts(&cfg, &served));
-    ui.set_watchdog(systemd::Watchdog::from_env());
+    let background = ui::Background {
+        podcasts: start_podcasts(&cfg, &library, &served),
+        watchdog: systemd::Watchdog::from_env(),
+    };
+    let speaker = ui::SpeakerLink {
+        base_url,
+        commands: player,
+        events: event_rx,
+    };
+    let mut ui = Ui::new(&cfg, library, store, speaker, background);
     fetch_playlist_covers(&cfg);
 
     let stop = stop_on_signals()?;
@@ -223,8 +230,8 @@ fn blank_usb_deck() -> Result<()> {
 
 fn scan_sources(cfg: &Config) -> Library {
     let library = Library::scan(&cfg.sources);
-    for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
-        let count = shelf.items.len();
+    for (id, source) in library.shelf_ids().zip(&cfg.sources) {
+        let count = library.shelf(id).items.len();
         if let Some(root) = source.served_root() {
             info!(
                 "found {count} items in {} ({})",
@@ -240,17 +247,17 @@ fn scan_sources(cfg: &Config) -> Library {
 
 /// A podcast source to start a `podcasts` thread for.
 struct PodcastStart<'a> {
-    shelf: usize,
+    shelf: ShelfId,
     source: &'a Source,
     settings: &'a Podcast,
     cache: &'a Path,
 }
 
-/// The podcast sources, each with its shelf index (its place in `sources`).
-fn podcast_starts(sources: &[Source]) -> Vec<PodcastStart<'_>> {
-    sources
-        .iter()
-        .enumerate()
+/// The podcast sources, each with its shelf.
+fn podcast_starts<'a>(library: &Library, sources: &'a [Source]) -> Vec<PodcastStart<'a>> {
+    library
+        .shelf_ids()
+        .zip(sources)
         .filter_map(|(shelf, source)| {
             let SourceBody::Podcast { settings, cache } = &source.body else {
                 return None;
@@ -267,8 +274,12 @@ fn podcast_starts(sources: &[Source]) -> Vec<PodcastStart<'_>> {
 
 /// One `podcasts` thread per podcast source; a source that cannot start
 /// keeps the episodes already in its cache.
-fn start_podcasts(cfg: &Config, served: &server::Served) -> Vec<ui::PodcastThread> {
-    podcast_starts(&cfg.sources)
+fn start_podcasts(
+    cfg: &Config,
+    library: &Library,
+    served: &server::Served,
+) -> Vec<ui::PodcastThread> {
+    podcast_starts(library, &cfg.sources)
         .into_iter()
         .filter_map(|start| {
             let PodcastStart {
@@ -350,9 +361,7 @@ fn run_spotify_login(config_path: &Path, listen: SocketAddr) -> Result<()> {
 }
 
 fn write_preview(cfg: &Config, library: Library, base_url: BaseUrl, path: &Path) -> Result<()> {
-    let (tx, _) = mpsc::channel();
-    let (_, rx) = mpsc::channel();
-    let mut ui = Ui::new(cfg, library, base_url, tx, rx, state::Store::in_memory());
+    let mut ui = Ui::for_preview(cfg, library, base_url);
     ui.preview(3, 5, 144, true)
         .save(path)
         .with_context(|| format!("cannot write {}", path.display()))?;
@@ -502,7 +511,8 @@ fn run_check(args: &RunArgs) -> Result<ExitCode> {
     let library = scan_sources(&cfg);
     let mut base_url = base_url(&cfg);
     let mut report = Report::default();
-    for (source, shelf) in cfg.sources.iter().zip(library.shelves()) {
+    for (id, source) in library.shelf_ids().zip(&cfg.sources) {
+        let shelf = library.shelf(id);
         if let Some(root) = source.served_root() {
             let (name, kind, path) = (&source.name, source.kind(), root.display());
             println!("Source {name} ({kind:?}) in {path}:");
@@ -808,7 +818,7 @@ mod tests {
     #[test]
     fn podcast_starts_select_podcast_sources_with_shelf_and_cache() {
         let cfg = mixed();
-        let got: Vec<_> = podcast_starts(&cfg.sources)
+        let got: Vec<_> = podcast_starts(&Library::scan(&cfg.sources), &cfg.sources)
             .iter()
             .map(|s| {
                 (
@@ -822,8 +832,8 @@ mod tests {
         assert_eq!(
             got,
             [
-                (1, "maus", Path::new("/srv/maus"), "maus"),
-                (3, "news", Path::new("/srv/news"), "news"),
+                (ShelfId(1), "maus", Path::new("/srv/maus"), "maus"),
+                (ShelfId(3), "news", Path::new("/srv/news"), "news"),
             ]
         );
     }

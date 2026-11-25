@@ -10,13 +10,13 @@ use tracing::{debug, warn};
 use super::Ui;
 use crate::config::Color;
 use crate::icons::{self, Decor};
-use crate::library::{Item, ItemId, Kind};
+use crate::library::{Item, ItemId, Kind, ShelfId};
 
 impl Ui {
     /// The picture of a shelf key: the shelf's picture, else the glyph of
     /// its kind on its colour.
-    pub(super) fn shelf_tile(&self, shelf: usize, size: u32) -> RgbImage {
-        let shelf = &self.library.shelves()[shelf];
+    pub(super) fn shelf_tile(&self, shelf: ShelfId, size: u32) -> RgbImage {
+        let shelf = self.library.shelf(shelf);
         shelf
             .picture
             .as_deref()
@@ -35,7 +35,7 @@ impl Ui {
         let kinds: HashSet<Kind> = self
             .deck_shelves
             .iter()
-            .map(|&shelf| self.library.shelves()[shelf].kind)
+            .map(|&shelf| self.library.shelf(shelf).kind)
             .collect();
         let badges = kinds.len() > 1;
         let remade = self.tile_size != size || self.badges != badges;
@@ -47,7 +47,7 @@ impl Ui {
         let on_deck: HashSet<ItemId> = self
             .deck_shelves
             .iter()
-            .flat_map(|&shelf| self.library.shelves()[shelf].items.iter().copied())
+            .flat_map(|&shelf| self.library.shelf(shelf).items.iter().copied())
             .chain(self.current)
             .collect();
         self.tiles.retain(|id, _| on_deck.contains(id));
