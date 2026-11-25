@@ -11,12 +11,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::json;
 use tracing::{debug, warn};
 use ureq::Agent;
 
 use super::auth;
+use super::http::{ApiError, Reply};
 use super::token::{Secret, TokenFile};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -26,8 +26,6 @@ const REFRESH_MARGIN: Duration = Duration::from_secs(60);
 /// A 429 asking for at most this long is waited out inside the call; a longer
 /// one fails the call at once.
 const MAX_INLINE_WAIT: Duration = Duration::from_secs(5);
-/// For a 429 without a readable `Retry-After`.
-const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
 const SERVER_ERROR_PAUSE: Duration = Duration::from_secs(1);
 
 /// Base URLs, so tests can point the client at a fake server.
@@ -45,126 +43,6 @@ impl Default for Endpoints {
             api: "https://api.spotify.com/v1".into(),
             accounts: "https://accounts.spotify.com".into(),
         }
-    }
-}
-
-/// An error answer from Spotify. Callers find it with
-/// `anyhow::Error::downcast_ref::<ApiError>()`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApiError {
-    pub status: u16,
-    /// Web API: `NO_ACTIVE_DEVICE`, `PREMIUM_REQUIRED`, `VOLUME_CONTROL_DISALLOW`,
-    /// `NO_NEXT_TRACK`, `ALREADY_PAUSED`, … Accounts service: the OAuth error,
-    /// such as `invalid_grant`.
-    pub reason: Option<String>,
-    pub message: String,
-    /// On 429: how long Spotify wants no requests.
-    pub retry_after: Option<Duration>,
-}
-
-impl ApiError {
-    /// Reads both error shapes: the Web API's
-    /// `{"error": {"status": 404, "message": "…", "reason": "…"}}` and the
-    /// accounts service's `{"error": "invalid_grant", "error_description": "…"}`.
-    pub fn parse(status: u16, body: &str, retry_after: Option<Duration>) -> ApiError {
-        #[derive(Deserialize)]
-        struct Body {
-            error: Field,
-            error_description: Option<String>,
-        }
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Field {
-            Api {
-                #[serde(default)]
-                message: String,
-                reason: Option<String>,
-            },
-            OAuth(String),
-        }
-
-        let (reason, message) = match serde_json::from_str::<Body>(body) {
-            Ok(Body {
-                error: Field::Api { message, reason },
-                ..
-            }) => (reason, message),
-            Ok(Body {
-                error: Field::OAuth(error),
-                error_description,
-            }) => (Some(error), error_description.unwrap_or_default()),
-            Err(_) => (None, body.trim().chars().take(200).collect()),
-        };
-        ApiError {
-            status,
-            reason,
-            message,
-            retry_after,
-        }
-    }
-
-    fn rate_limited(wait: Duration) -> ApiError {
-        ApiError {
-            status: 429,
-            reason: None,
-            message: "deckjay is waiting for Spotify's rate limit".into(),
-            retry_after: Some(wait),
-        }
-    }
-}
-
-impl fmt::Display for ApiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Spotify answered {}", self.status)?;
-        if let Some(reason) = &self.reason {
-            write!(f, " {reason}")?;
-        }
-        if !self.message.is_empty() {
-            write!(f, ": {}", self.message)?;
-        }
-        if let Some(wait) = self.retry_after {
-            write!(f, " (try again in {} s)", wait.as_secs_f64().ceil())?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for ApiError {}
-
-/// A status, a `Retry-After` in seconds, and the whole body.
-pub(super) struct Reply {
-    pub status: u16,
-    pub retry_after: Option<Duration>,
-    pub body: String,
-}
-
-impl Reply {
-    pub fn read(mut reply: ureq::http::Response<ureq::Body>) -> Result<Reply> {
-        let retry_after = reply
-            .headers()
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse().ok())
-            .map(Duration::from_secs);
-        Ok(Reply {
-            status: reply.status().as_u16(),
-            retry_after,
-            body: reply
-                .body_mut()
-                .read_to_string()
-                .context("cannot read Spotify's answer")?,
-        })
-    }
-
-    pub fn is_success(&self) -> bool {
-        (200..300).contains(&self.status)
-    }
-
-    pub fn error(&self) -> ApiError {
-        ApiError::parse(self.status, &self.body, self.retry_after)
-    }
-
-    pub fn json<T: DeserializeOwned>(&self) -> Result<T> {
-        serde_json::from_str(&self.body).context("Spotify sent an answer deckjay cannot read")
     }
 }
 
@@ -366,7 +244,7 @@ impl Client {
         }
 
         let reply = self.call(Method::Get, "/me/player", &[], None)?;
-        if reply.status == 204 || reply.body.trim().is_empty() {
+        if reply.is_empty() {
             return Ok(None);
         }
         let raw: Raw = reply.json()?;
@@ -430,11 +308,9 @@ impl Client {
                     self.access = None;
                 }
                 429 => {
-                    let wait = reply.retry_after.unwrap_or(DEFAULT_RETRY_AFTER);
+                    let (wait, error) = reply.limited();
                     if waited || wait > MAX_INLINE_WAIT {
                         self.retry_at = Some(Instant::now() + wait);
-                        let mut error = reply.error();
-                        error.retry_after = Some(wait);
                         return Err(error.into());
                     }
                     waited = true;

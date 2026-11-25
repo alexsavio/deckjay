@@ -91,6 +91,19 @@ impl Sim {
             .ok_or(NOT_A_KEY)
     }
 
+    /// Queues a press, dropping the oldest once `MAX_QUEUED` are waiting, and wakes
+    /// the poller.
+    fn press(&self, n: usize) {
+        {
+            let mut deck = self.deck();
+            if deck.presses.len() == MAX_QUEUED {
+                deck.presses.remove(0);
+            }
+            deck.presses.push(n);
+        }
+        self.pressed.notify_waiters();
+    }
+
     async fn wait_for_presses(&self, wait: Duration) -> Vec<usize> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
@@ -220,14 +233,7 @@ async fn presses(
 
 async fn press(State(sim): State<Arc<Sim>>, Path(n): Path<String>) -> Reply<StatusCode> {
     let n = sim.key(&n)?;
-    {
-        let mut deck = sim.deck();
-        if deck.presses.len() == MAX_QUEUED {
-            deck.presses.remove(0);
-        }
-        deck.presses.push(n);
-    }
-    sim.pressed.notify_waiters();
+    sim.press(n);
     Ok(StatusCode::NO_CONTENT)
 }
 

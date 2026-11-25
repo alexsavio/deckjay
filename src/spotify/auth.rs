@@ -11,7 +11,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_perc
 use serde::Deserialize;
 use ureq::Agent;
 
-use super::api::{ApiError, Reply};
+use super::http::{ApiError, Reply};
 use super::token::Secret;
 
 pub const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
