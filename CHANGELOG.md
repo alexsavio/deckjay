@@ -14,6 +14,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - *(arch)* Break the config, podcasts, library and deck cycles ([#54](https://github.com/alexsavio/deckjay/issues/54))
 - Group src/ by what each module is about ([#55](https://github.com/alexsavio/deckjay/issues/55))
 
+### 🧪 Testing
+
+- Show that Deck::draw flushes and counts the keys it sent ([#57](https://github.com/alexsavio/deckjay/issues/57))
+
 ### ⚙️ Miscellaneous Tasks
 
 - Bump taiki-e/install-action from 2.89.1 to 2.90.3 in the actions-minor-patch group ([#49](https://github.com/alexsavio/deckjay/issues/49))
