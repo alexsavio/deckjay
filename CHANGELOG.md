@@ -17,6 +17,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 ### 🧪 Testing
 
 - Show that Deck::draw flushes and counts the keys it sent ([#57](https://github.com/alexsavio/deckjay/issues/57))
+- Cover HEOS progress, Spotify 429 and 204, upper-case files ([#56](https://github.com/alexsavio/deckjay/issues/56))
 
 ### ⚙️ Miscellaneous Tasks
 
