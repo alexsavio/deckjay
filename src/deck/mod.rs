@@ -377,11 +377,16 @@ mod tests {
     fn draw_flushes_once_after_writing_the_keys() {
         let (mut deck, log) = fake_deck();
         deck.draw(&[Face::Play, Face::Pause], |_| tile()).unwrap();
-        deck.draw(&[Face::Play, Face::Pause], |_| tile()).unwrap();
         assert_eq!(
             log.borrow().flushes,
-            [2, 2],
-            "one flush per draw, after its keys"
+            [2],
+            "one flush after the two keys of the first draw"
+        );
+        deck.draw(&[Face::Play, Face::Blank], |_| tile()).unwrap();
+        assert_eq!(
+            log.borrow().flushes,
+            [2, 3],
+            "one flush after the one changed key of the second draw"
         );
     }
 
