@@ -381,6 +381,21 @@ fn a_second_429_is_not_waited_out() {
 }
 
 #[test]
+fn a_429_without_retry_after_waits_one_second_and_says_so() {
+    let mut rig = Rig::new();
+    rig.fake.can(DEVICES, 429, None, "");
+    rig.fake.can(DEVICES, 429, None, "");
+    let started = Instant::now();
+    let err = rig.client.devices().unwrap_err();
+    assert!(started.elapsed() >= Duration::from_secs(1));
+    assert_eq!(rig.fake.requests_to(DEVICES).len(), 2);
+    assert_eq!(
+        Rig::api_error(&err).retry_after,
+        Some(Duration::from_secs(1))
+    );
+}
+
+#[test]
 fn a_server_error_on_a_read_is_retried_once() {
     let mut rig = Rig::new();
     rig.fake.can(DEVICES, 503, None, "upstream down");

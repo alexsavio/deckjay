@@ -275,3 +275,44 @@ fn a_progress_event_with_a_length_of_zero_reports_no_length() {
     rig.poll_with("play");
     assert_eq!(rig.events(), [at(0, 12, None)]);
 }
+
+#[test]
+fn a_place_read_before_a_stream_started_is_not_the_new_streams() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.emitter.progress.interval = Duration::ZERO;
+    rig.fake.script().once = Some(("browse/play_stream", "pid=7&cur_pos=42000&duration=180000"));
+    rig.send(book(3)).unwrap();
+    rig.events();
+    rig.poll_with("play");
+    assert_eq!(rig.events(), []);
+}
+
+#[test]
+fn a_refused_stream_keeps_the_place_of_the_one_playing() {
+    let mut rig = Rig::new(ONE_PLAYER);
+    rig.emitter.progress.interval = Duration::ZERO;
+    rig.send(book(3)).unwrap();
+    rig.events();
+    {
+        let mut script = rig.fake.script();
+        script.fail = Some("browse/play_stream");
+        script.once = Some(("browse/play_stream", "pid=7&cur_pos=42000&duration=180000"));
+    }
+    assert!(rig.send(PlayerCmd::Next).is_err());
+    rig.poll_with("play");
+    assert_eq!(rig.events(), [at(0, 42, Some(180)), Playing(ITEM)]);
+}
+
+#[test]
+fn a_place_with_no_track_to_hold_it_is_used_up() {
+    let fake = FakeHeos::start(ONE_PLAYER);
+    let (mut cli, _) = Cli::attach("127.0.0.1", fake.port, IO_TIMEOUT).unwrap();
+    fake.script().once = Some(("player/get_players", "pid=7&cur_pos=42000&duration=180000"));
+    cli.players().unwrap();
+    assert_eq!(cli.take_place(None), None);
+    assert_eq!(cli.take_place(Some(0)), None);
+
+    fake.script().once = Some(("player/get_players", "pid=7&cur_pos=42000&duration=180000"));
+    cli.players().unwrap();
+    assert!(cli.take_place(Some(0)).is_some());
+}

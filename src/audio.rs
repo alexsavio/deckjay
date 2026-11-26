@@ -22,3 +22,26 @@ pub fn audio_type(ext: &str) -> Option<&'static str> {
         .find(|(known, _)| known.eq_ignore_ascii_case(ext))
         .map(|&(_, content_type)| content_type)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upper_case_extensions_have_their_content_type() {
+        for (ext, content_type) in [
+            ("MP3", "audio/mpeg"),
+            ("M4A", "audio/mp4"),
+            ("M4B", "audio/mp4"),
+            ("MP4", "audio/mp4"),
+            ("AAC", "audio/aac"),
+            ("FLAC", "audio/flac"),
+            ("OGG", "audio/ogg"),
+            ("OGA", "audio/ogg"),
+            ("OPUS", "audio/ogg"),
+            ("WAV", "audio/wav"),
+        ] {
+            assert_eq!(audio_type(ext), Some(content_type), "{ext}");
+        }
+    }
+}

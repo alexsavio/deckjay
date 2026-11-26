@@ -146,3 +146,19 @@ impl Reply {
         serde_json::from_str(&self.body).context("Spotify sent an answer deckjay cannot read")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Built in memory: HTTP drops a 204 body, so the fake server cannot send one.
+    #[test]
+    fn a_204_is_empty_even_with_a_body() {
+        let reply = Reply {
+            status: 204,
+            retry_after: None,
+            body: "{}".into(),
+        };
+        assert!(reply.is_empty());
+    }
+}

@@ -9,7 +9,7 @@ use super::*;
 use crate::player::{Content, PlayerCmd, Start};
 
 const ONE_PLAYER: &str = r#"[{"name": "Kitchen", "pid": 7, "model": "HEOS 1", "version": "1.583.147", "network": "wifi", "ip": "10.0.0.9"}]"#;
-/// String pids; the second player's ip is the host the tests connect to.
+/// String pids; the second player's ip is 127.0.0.1, where the fake server listens.
 const TWO_PLAYERS: &str = concat!(
     r#"[{"name": "Kitchen", "pid": "12", "model": "HEOS 1", "ip": "10.0.0.9"},"#,
     r#" {"name": "Kids %26 Co", "pid": "-1234", "model": "HEOS 7", "ip": "127.0.0.1"}]"#
@@ -36,6 +36,9 @@ struct Script {
     /// While change events are on, a `player_now_playing_progress` event
     /// with this message comes before each reply.
     progress: Option<&'static str>,
+    /// `(command, message)`: one `player_now_playing_progress` event with
+    /// this message comes before the next reply to this command.
+    once: Option<(&'static str, &'static str)>,
 }
 
 /// A HEOS CLI on 127.0.0.1 that answers with canned JSON.
@@ -119,9 +122,10 @@ fn answer(script: &mut Script, command: &str, players: &str) -> Vec<String> {
         script.events = query == "enable=on";
     }
     if let Some(message) = script.progress.filter(|_| script.events) {
-        lines.push(format!(
-            r#"{{"heos": {{"command": "event/player_now_playing_progress", "message": "{message}"}}}}"#
-        ));
+        lines.push(progress_event(message));
+    }
+    if let Some((_, message)) = script.once.take_if(|(before, _)| *before == name) {
+        lines.push(progress_event(message));
     }
     if script.noisy {
         lines.push(r#"{"heos": {"command": "event/player_state_changed", "message": "pid=7&state=pause"}}"#.to_string());
@@ -171,6 +175,12 @@ fn answer(script: &mut Script, command: &str, players: &str) -> Vec<String> {
     };
     lines.push(reply);
     lines
+}
+
+fn progress_event(message: &str) -> String {
+    format!(
+        r#"{{"heos": {{"command": "event/player_now_playing_progress", "message": "{message}"}}}}"#
+    )
 }
 
 fn track_url(i: usize) -> String {
@@ -571,6 +581,17 @@ fn players_lists_names_pids_and_ips() {
 #[test]
 fn the_player_whose_ip_is_the_host_is_used() {
     let mut rig = Rig::new(TWO_PLAYERS);
+    rig.send(PlayerCmd::SetVolume(0.5)).unwrap();
+    assert_eq!(
+        rig.fake.last_command(),
+        "player/set_volume?pid=-1234&level=50"
+    );
+}
+
+#[test]
+fn a_host_name_picks_the_player_by_the_address_it_connected_to() {
+    let mut rig = Rig::new(TWO_PLAYERS);
+    rig.player = HeosPlayer::new("localhost".into(), rig.fake.port);
     rig.send(PlayerCmd::SetVolume(0.5)).unwrap();
     assert_eq!(
         rig.fake.last_command(),
