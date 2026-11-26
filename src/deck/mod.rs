@@ -270,7 +270,7 @@ mod tests {
     struct Log {
         encodes: usize,
         writes: Vec<usize>,
-        /// The number of writes made before each flush.
+        /// The length of `writes` at each flush: a running total, not the writes since the last flush.
         flushes: Vec<usize>,
         unplugged: bool,
         clears: usize,
