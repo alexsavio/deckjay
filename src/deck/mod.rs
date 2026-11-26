@@ -270,6 +270,8 @@ mod tests {
     struct Log {
         encodes: usize,
         writes: Vec<usize>,
+        /// The length of `writes` at each flush: a running total, not the writes since the last flush.
+        flushes: Vec<usize>,
         unplugged: bool,
         clears: usize,
         brightness: Option<u8>,
@@ -316,6 +318,9 @@ mod tests {
         }
 
         fn flush(&self) -> Result<()> {
+            let mut log = self.0.borrow_mut();
+            let written = log.writes.len();
+            log.flushes.push(written);
             Ok(())
         }
 
@@ -366,6 +371,40 @@ mod tests {
         deck.show(0, &Face::Play, tile).unwrap();
         deck.show(0, &Face::Pause, tile).unwrap();
         assert_eq!(log.borrow().writes, [0, 0]);
+    }
+
+    #[test]
+    fn draw_flushes_once_after_writing_the_keys() {
+        let (mut deck, log) = fake_deck();
+        deck.draw(&[Face::Play, Face::Pause], |_| tile()).unwrap();
+        assert_eq!(
+            log.borrow().flushes,
+            [2],
+            "one flush after the two keys of the first draw"
+        );
+        deck.draw(&[Face::Play, Face::Blank], |_| tile()).unwrap();
+        assert_eq!(
+            log.borrow().flushes,
+            [2, 3],
+            "one flush after the one changed key of the second draw"
+        );
+    }
+
+    #[test]
+    fn draw_counts_only_the_keys_it_sent() {
+        let (mut deck, _log) = fake_deck();
+        assert_eq!(
+            deck.draw(&[Face::Play, Face::Pause], |_| tile()).unwrap(),
+            2
+        );
+        assert_eq!(
+            deck.draw(&[Face::Play, Face::Pause], |_| tile()).unwrap(),
+            0
+        );
+        assert_eq!(
+            deck.draw(&[Face::Play, Face::Blank], |_| tile()).unwrap(),
+            1
+        );
     }
 
     #[test]
